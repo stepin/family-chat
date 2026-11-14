@@ -1,0 +1,16 @@
+/* Styles of the /server/ check page (moved out of index.html for the CSP). */
+label { display: block; margin-bottom: 0.75rem; }
+label input { display: block; width: 100%; margin-top: 0.25rem; padding: 0.5rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+.actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: var(--space); }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; margin: 0; overflow-wrap: anywhere; }
+dt { color: var(--muted); }
+dd { margin: 0; }
+.log { list-style: none; padding: 0; margin: 0; font-size: 0.9rem; }
+.log li { padding: 0.4rem 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.log li:first-child { border-top: 0; }
+.log li.ok::before { content: '✓ '; color: var(--ok); font-weight: 700; }
+.log li.fail::before { content: '✕ '; color: var(--fail); font-weight: 700; }
+.log li.info::before { content: '· '; color: var(--muted); font-weight: 700; }
+.hint { border-left: 4px solid var(--warn); }
+.bad { color: var(--fail); }
+textarea { width: 100%; font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem; background: var(--bg); color: var(--text); }

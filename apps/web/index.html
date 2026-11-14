@@ -2,28 +2,21 @@
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="referrer" content="no-referrer" />
-    <meta name="theme-color" content="#2f5d50" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#2f5d50" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1c211f" media="(prefers-color-scheme: dark)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Family Chat" />
     <title>Family Chat</title>
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
   </head>
   <body>
-    <main>
-      <h1>Family Chat</h1>
-      <p>Семейный чат с домашним сервером. Сам чат появится на этапе M1.</p>
-      <p>Сейчас здесь проверки:</p>
-      <ul>
-        <li><a href="./server/">Проверить сервер fcd</a> (этап M0v2: доступ, длинный запрос, уведомления)</li>
-        <li><a href="./device/">Проверить это устройство</a></li>
-        <li><a href="./probe/">Проверить сервер WebDAV</a> (прежний план, первый M0)</li>
-      </ul>
-      <p class="muted">
-        Эту страницу можно установить как приложение («На экран Домой» в Safari или «Установить приложение» в Chrome):
-        установка и запуск после простоя тоже входят в M0.
-      </p>
-    </main>
-    <script type="module" src="./src/home.ts"></script>
+    <div id="app"></div>
+    <noscript>Для Family Chat нужен JavaScript.</noscript>
+    <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

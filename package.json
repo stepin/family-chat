@@ -11,11 +11,9 @@
     "build": "pnpm -r --if-present run build",
     "typecheck": "pnpm -r --if-present run typecheck",
     "test": "pnpm -r --if-present run test",
-    "test:e2e": "pnpm --filter @family-chat/web run test:e2e",
-    "test:e2e:fcd": "pnpm --filter @family-chat/web run test:e2e:fcd",
     "test:integration": "pnpm --filter @family-chat/core run test:integration",
-    "dav:up": "pnpm --filter @family-chat/dav-dev run up",
-    "dav:down": "pnpm --filter @family-chat/dav-dev run down"
+    "test:e2e": "pnpm --filter @family-chat/web run test:e2e",
+    "test:e2e:fcd": "pnpm --filter @family-chat/web run test:e2e:fcd"
   },
   "devDependencies": {
     "typescript": "^6.0.3"

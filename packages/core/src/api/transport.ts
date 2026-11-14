@@ -1,0 +1,561 @@
+// Typed client of every fcd endpoint (docs/API.md). Stateless: endpoints that
+// need a device token take it as the first argument; re-login lives in Session.
+//
+// No cookies (`credentials: 'omit'`), no caching. `fetch` and the clock are
+// injectable for tests. The optional `onExchange` hook reports method, path
+// template, status and duration for diagnostics: never tokens or bodies.
+
+import { base64urlDecode, type SignedEnvelope } from '@family-chat/protocol';
+import { systemClock, type Clock } from '../util/clock.ts';
+import { ApiError, isServerErrorCode, NetworkError } from './errors.ts';
+import type {
+  AdminUser,
+  Challenge,
+  ChatEntry,
+  EventsPage,
+  EventsQuery,
+  Hello,
+  HistoryQuery,
+  InviteInfo,
+  IssuedToken,
+  JoinRequest,
+  MeEntry,
+  NewInvite,
+  PostEventInput,
+  PostEventResult,
+  PushSubscriptionInput,
+  ServerEvent,
+  ServerStats,
+  UserEntry,
+} from './types.ts';
+
+export type FetchFn = (input: string, init: RequestInit) => Promise<Response>;
+
+export interface ExchangeInfo {
+  readonly method: string;
+  /** Path template, for example `/v1/chats/{chatId}/events` (no ids, no query). */
+  readonly path: string;
+  /** HTTP status, or 0 when there was no answer. */
+  readonly status: number;
+  readonly durationMs: number;
+  /** ApiError code or NetworkError reason. */
+  readonly error?: string;
+  /** Number of events in an events page. */
+  readonly events?: number;
+}
+
+export interface TransportOptions {
+  /** Server address, for example `https://chat.example.org` (see normalizeServerUrl). */
+  readonly baseUrl: string;
+  readonly fetch?: FetchFn;
+  readonly clock?: Clock;
+  /** Timeout of ordinary requests, ms (default 20 s). Long polls get `wait` + this. */
+  readonly timeoutMs?: number;
+  readonly onExchange?: (info: ExchangeInfo) => void;
+}
+
+/** Longest `wait` the server accepts, seconds. */
+export const MAX_WAIT_SECONDS = 30;
+
+/**
+ * Normalises a server address typed by a person: trims, adds `https://` when
+ * no scheme is given, drops the trailing slash, query and fragment.
+ * Throws TypeError for something that is not an http(s) URL.
+ */
+export function normalizeServerUrl(input: string): string {
+  let s = input.trim();
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) s = `https://${s}`;
+  const u = new URL(s);
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new TypeError('server address must be http(s)');
+  if (u.username || u.password) throw new TypeError('server address must not contain credentials');
+  const path = u.pathname.replace(/\/+$/, '');
+  return `${u.protocol}//${u.host}${path}`;
+}
+
+interface RequestSpec {
+  readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  /** Concrete path (with ids). */
+  readonly path: string;
+  /** Path template for diagnostics. */
+  readonly template: string;
+  readonly token?: string;
+  readonly json?: unknown;
+  readonly bytes?: Uint8Array;
+  readonly headers?: Record<string, string>;
+  readonly query?: Record<string, number | undefined>;
+  readonly signal?: AbortSignal | undefined;
+  readonly timeoutMs?: number;
+}
+
+export class Transport {
+  readonly baseUrl: string;
+  readonly #fetch: FetchFn;
+  readonly #clock: Clock;
+  readonly #timeoutMs: number;
+  readonly #onExchange: ((info: ExchangeInfo) => void) | undefined;
+
+  constructor(options: TransportOptions) {
+    this.baseUrl = normalizeServerUrl(options.baseUrl);
+    if (!options.fetch && typeof globalThis.fetch !== 'function') throw new TypeError('fetch is not available');
+    // Late-bound so that a fetch patched after construction (service worker, tests) is used.
+    this.#fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
+    this.#clock = options.clock ?? systemClock;
+    this.#timeoutMs = options.timeoutMs ?? 20_000;
+    this.#onExchange = options.onExchange;
+  }
+
+  // ---- server ----
+
+  async hello(signal?: AbortSignal): Promise<Hello> {
+    const o = obj(await this.#json({ method: 'GET', path: '/v1/hello', template: '/v1/hello', signal }), 'hello');
+    return {
+      protocol: num(o, 'protocol'),
+      server: str(o, 'server'),
+      version: str(o, 'version'),
+      serverId: str(o, 'serverId'),
+      familyName: str(o, 'familyName'),
+      retentionDays: num(o, 'retentionDays'),
+      maxFileMb: num(o, 'maxFileMb'),
+      push: bool(o, 'push'),
+      vapidPublicKey: nullableStr(o, 'vapidPublicKey'),
+      time: num(o, 'time'),
+      maxEventBytes: num(o, 'maxEventBytes'),
+      adminCodeActive: bool(o, 'adminCodeActive'),
+      m0: o.m0 === true,
+    };
+  }
+
+  // ---- joining and devices ----
+
+  async join(req: JoinRequest, signal?: AbortSignal): Promise<IssuedToken> {
+    return issued(await this.#json({ method: 'POST', path: '/v1/join', template: '/v1/join', json: req, signal }));
+  }
+
+  async authChallenge(signal?: AbortSignal): Promise<Challenge> {
+    const o = obj(
+      await this.#json({ method: 'POST', path: '/v1/auth/challenge', template: '/v1/auth/challenge', signal }),
+      'challenge',
+    );
+    return { nonce: str(o, 'nonce'), expiresAt: num(o, 'expiresAt') };
+  }
+
+  async authDevice(auth: SignedEnvelope, signal?: AbortSignal): Promise<IssuedToken> {
+    return issued(
+      await this.#json({
+        method: 'POST',
+        path: '/v1/auth/device',
+        template: '/v1/auth/device',
+        json: { payload: auth.payload, sig: auth.sig },
+        signal,
+      }),
+    );
+  }
+
+  // ---- members and profile ----
+
+  async users(token: string, signal?: AbortSignal): Promise<UserEntry[]> {
+    const o = obj(await this.#json({ method: 'GET', path: '/v1/users', template: '/v1/users', token, signal }), 'users');
+    return arr(o, 'users').map((u) => userEntry(u));
+  }
+
+  async me(token: string, signal?: AbortSignal): Promise<MeEntry> {
+    const o = obj(await this.#json({ method: 'GET', path: '/v1/me', template: '/v1/me', token, signal }), 'me');
+    return { ...userEntry(o), devId: str(o, 'devId'), push: bool(o, 'push') };
+  }
+
+  async putProfile(token: string, profile: SignedEnvelope, signal?: AbortSignal): Promise<SignedEnvelope> {
+    const o = obj(
+      await this.#json({
+        method: 'PUT',
+        path: '/v1/me/profile',
+        template: '/v1/me/profile',
+        token,
+        json: { payload: profile.payload, sig: profile.sig },
+        signal,
+      }),
+      'profile',
+    );
+    return envelope(o.profile, 'profile');
+  }
+
+  async putPush(token: string, sub: PushSubscriptionInput, signal?: AbortSignal): Promise<void> {
+    const body: Record<string, unknown> = { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } };
+    if (sub.expirationTime !== undefined) body.expirationTime = sub.expirationTime;
+    await this.#json({ method: 'PUT', path: '/v1/me/push', template: '/v1/me/push', token, json: body, signal });
+  }
+
+  async deletePush(token: string, signal?: AbortSignal): Promise<void> {
+    await this.#json({ method: 'DELETE', path: '/v1/me/push', template: '/v1/me/push', token, signal });
+  }
+
+  // ---- chats and events ----
+
+  async chats(token: string, signal?: AbortSignal): Promise<ChatEntry[]> {
+    const o = obj(await this.#json({ method: 'GET', path: '/v1/chats', template: '/v1/chats', token, signal }), 'chats');
+    return arr(o, 'chats').map((c) => {
+      const x = obj(c, 'chat');
+      return {
+        chatId: str(x, 'chatId'),
+        kind: 'dm' as const,
+        members: arr(x, 'members').map((m) => {
+          if (typeof m !== 'string') throw unexpected('chat members');
+          return m;
+        }),
+        epoch: num(x, 'epoch'),
+        createdAt: num(x, 'createdAt'),
+        lastGseq: nullableNum(x, 'lastGseq'),
+        lastTime: nullableNum(x, 'lastTime'),
+      };
+    });
+  }
+
+  async postEvent(token: string, input: PostEventInput, signal?: AbortSignal): Promise<PostEventResult> {
+    const o = obj(
+      await this.#json({
+        method: 'POST',
+        path: `/v1/chats/${encodeURIComponent(input.chatId)}/events`,
+        template: '/v1/chats/{chatId}/events',
+        token,
+        bytes: input.body,
+        headers: { 'Idempotency-Key': input.msgId, 'X-FC-Epoch': String(input.epoch) },
+        signal,
+      }),
+      'post event',
+    );
+    return { gseq: num(o, 'gseq'), time: num(o, 'time'), duplicate: bool(o, 'duplicate') };
+  }
+
+  /** `GET /v1/events`: long poll when `wait` > 0. */
+  async events(token: string, q: EventsQuery = {}, signal?: AbortSignal): Promise<EventsPage> {
+    const wait = Math.min(Math.max(0, Math.floor(q.wait ?? 0)), MAX_WAIT_SECONDS);
+    const data = await this.#json({
+      method: 'GET',
+      path: '/v1/events',
+      template: '/v1/events',
+      token,
+      query: { after: q.after, limit: q.limit, wait: wait || undefined },
+      signal,
+      timeoutMs: this.#timeoutMs + wait * 1000,
+    });
+    return page(data);
+  }
+
+  /** `GET /v1/chats/<chatId>/events`: history backwards. */
+  async chatEvents(token: string, chatId: string, q: HistoryQuery = {}, signal?: AbortSignal): Promise<EventsPage> {
+    const data = await this.#json({
+      method: 'GET',
+      path: `/v1/chats/${encodeURIComponent(chatId)}/events`,
+      template: '/v1/chats/{chatId}/events',
+      token,
+      query: { before: q.before, limit: q.limit },
+      signal,
+    });
+    return page(data);
+  }
+
+  // ---- administration ----
+
+  async createInvite(token: string, signal?: AbortSignal): Promise<NewInvite> {
+    const o = obj(
+      await this.#json({ method: 'POST', path: '/v1/admin/invites', template: '/v1/admin/invites', token, signal }),
+      'invite',
+    );
+    return { id: str(o, 'id'), code: str(o, 'code'), createdAt: num(o, 'createdAt'), expiresAt: num(o, 'expiresAt') };
+  }
+
+  async listInvites(token: string, signal?: AbortSignal): Promise<InviteInfo[]> {
+    const o = obj(
+      await this.#json({ method: 'GET', path: '/v1/admin/invites', template: '/v1/admin/invites', token, signal }),
+      'invites',
+    );
+    return arr(o, 'invites').map((i) => {
+      const x = obj(i, 'invite');
+      return {
+        id: str(x, 'id'),
+        createdAt: num(x, 'createdAt'),
+        expiresAt: num(x, 'expiresAt'),
+        createdBy: str(x, 'createdBy'),
+        usedAt: nullableNum(x, 'usedAt'),
+        usedBy: nullableStr(x, 'usedBy'),
+      };
+    });
+  }
+
+  async revokeInvite(token: string, id: string, signal?: AbortSignal): Promise<void> {
+    await this.#json({
+      method: 'DELETE',
+      path: `/v1/admin/invites/${encodeURIComponent(id)}`,
+      template: '/v1/admin/invites/{id}',
+      token,
+      signal,
+    });
+  }
+
+  async adminUsers(token: string, signal?: AbortSignal): Promise<AdminUser[]> {
+    const o = obj(
+      await this.#json({ method: 'GET', path: '/v1/admin/users', template: '/v1/admin/users', token, signal }),
+      'admin users',
+    );
+    return arr(o, 'users').map((u) => {
+      const x = obj(u, 'admin user');
+      return {
+        userId: str(x, 'userId'),
+        name: nullableStr(x, 'name'),
+        admin: bool(x, 'admin'),
+        removed: bool(x, 'removed'),
+        removedAt: nullableNum(x, 'removedAt'),
+        devices: arr(x, 'devices').map((d) => {
+          const y = obj(d, 'device');
+          return { devId: str(y, 'devId'), createdAt: num(y, 'createdAt'), push: bool(y, 'push') };
+        }),
+      };
+    });
+  }
+
+  async removeUser(token: string, userId: string, signal?: AbortSignal): Promise<void> {
+    await this.#json({
+      method: 'DELETE',
+      path: `/v1/admin/users/${encodeURIComponent(userId)}`,
+      template: '/v1/admin/users/{userId}',
+      token,
+      signal,
+    });
+  }
+
+  async stats(token: string, signal?: AbortSignal): Promise<ServerStats> {
+    const o = obj(
+      await this.#json({ method: 'GET', path: '/v1/admin/stats', template: '/v1/admin/stats', token, signal }),
+      'stats',
+    );
+    return {
+      version: str(o, 'version'),
+      dataBytes: num(o, 'dataBytes'),
+      freeBytes: nullableNum(o, 'freeBytes'),
+      totalBytes: nullableNum(o, 'totalBytes'),
+      events: num(o, 'events'),
+      oldestGseq: num(o, 'oldestGseq'),
+      lastGseq: num(o, 'lastGseq'),
+      users: num(o, 'users'),
+      removedUsers: num(o, 'removedUsers'),
+      chats: num(o, 'chats'),
+      retentionDays: num(o, 'retentionDays'),
+      push: bool(o, 'push'),
+    };
+  }
+
+  // ---- plumbing ----
+
+  /** Performs a request; returns parsed JSON (or undefined for an empty 2xx body). */
+  async #json(spec: RequestSpec): Promise<unknown> {
+    const where = `${spec.method} ${spec.template}`;
+    const started = this.#clock.now();
+    const report = (status: number, error?: string, events?: number) => {
+      if (!this.#onExchange) return;
+      const info: { -readonly [K in keyof ExchangeInfo]: ExchangeInfo[K] } = {
+        method: spec.method,
+        path: spec.template,
+        status,
+        durationMs: Math.max(0, this.#clock.now() - started),
+      };
+      if (error !== undefined) info.error = error;
+      if (events !== undefined) info.events = events;
+      try {
+        this.#onExchange(info);
+      } catch {
+        // Diagnostics must never break a request.
+      }
+    };
+
+    let url = this.baseUrl + spec.path;
+    if (spec.query) {
+      const qs = Object.entries(spec.query)
+        .filter((e): e is [string, number] => e[1] !== undefined)
+        .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+        .join('&');
+      if (qs) url += `?${qs}`;
+    }
+    const headers: Record<string, string> = { Accept: 'application/json', ...spec.headers };
+    if (spec.token !== undefined) headers.Authorization = `Bearer ${spec.token}`;
+    let body: BodyInit | undefined;
+    if (spec.json !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      body = JSON.stringify(spec.json);
+    } else if (spec.bytes !== undefined) {
+      headers['Content-Type'] = 'application/octet-stream';
+      body = spec.bytes as Uint8Array<ArrayBuffer>;
+    }
+
+    const ctl = new AbortController();
+    let timedOut = false;
+    const timer = this.#clock.setTimeout(() => {
+      timedOut = true;
+      ctl.abort();
+    }, spec.timeoutMs ?? this.#timeoutMs);
+    const onAbort = () => ctl.abort();
+    if (spec.signal?.aborted) ctl.abort();
+    spec.signal?.addEventListener('abort', onAbort, { once: true });
+
+    try {
+      let res: Response;
+      try {
+        res = await this.#fetch(url, {
+          method: spec.method,
+          headers,
+          body,
+          credentials: 'omit',
+          cache: 'no-store',
+          signal: ctl.signal,
+        });
+      } catch {
+        const reason = timedOut ? 'timeout' : spec.signal?.aborted ? 'aborted' : 'offline';
+        report(0, reason);
+        throw new NetworkError(reason, where);
+      }
+
+      let text: string;
+      try {
+        text = await res.text();
+      } catch {
+        const reason = timedOut ? 'timeout' : spec.signal?.aborted ? 'aborted' : 'offline';
+        report(res.status, reason);
+        throw new NetworkError(reason, where);
+      }
+
+      const isJson = (res.headers.get('content-type') ?? '').toLowerCase().includes('application/json');
+      let data: unknown;
+      if (text.length > 0) {
+        if (!isJson) {
+          report(res.status, 'unexpected_response');
+          throw new ApiError(res.status, 'unexpected_response', where);
+        }
+        try {
+          data = JSON.parse(text);
+        } catch {
+          report(res.status, 'unexpected_response');
+          throw new ApiError(res.status, 'unexpected_response', where);
+        }
+      }
+
+      if (!res.ok) {
+        const o = isObject(data) ? data : {};
+        const code = isServerErrorCode(o.error) ? o.error : 'unexpected_response';
+        const details: Record<string, number> = {};
+        for (const k of ['epoch', 'limit', 'rev']) {
+          const v = o[k];
+          if (typeof v === 'number' && Number.isFinite(v)) details[k] = v;
+        }
+        const ra = Number(res.headers.get('retry-after'));
+        const retryAfterMs = Number.isFinite(ra) && ra > 0 ? ra * 1000 : undefined;
+        report(res.status, code);
+        throw new ApiError(res.status, code, where, { retryAfterMs, details });
+      }
+
+      const events = isObject(data) && Array.isArray(data.events) ? data.events.length : undefined;
+      report(res.status, undefined, events);
+      return data;
+    } finally {
+      this.#clock.clearTimeout(timer);
+      spec.signal?.removeEventListener('abort', onAbort);
+    }
+  }
+}
+
+// ---- response validation (shape only) ----
+
+type Obj = Record<string, unknown>;
+
+function isObject(v: unknown): v is Obj {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function unexpected(what: string): ApiError {
+  return new ApiError(200, 'unexpected_response', what);
+}
+
+function obj(v: unknown, what: string): Obj {
+  if (!isObject(v)) throw unexpected(what);
+  return v;
+}
+
+function num(o: Obj, k: string): number {
+  const v = o[k];
+  if (typeof v !== 'number' || !Number.isFinite(v)) throw unexpected(k);
+  return v;
+}
+
+function nullableNum(o: Obj, k: string): number | null {
+  return o[k] === null || o[k] === undefined ? null : num(o, k);
+}
+
+function str(o: Obj, k: string): string {
+  const v = o[k];
+  if (typeof v !== 'string') throw unexpected(k);
+  return v;
+}
+
+function nullableStr(o: Obj, k: string): string | null {
+  return o[k] === null || o[k] === undefined ? null : str(o, k);
+}
+
+function bool(o: Obj, k: string): boolean {
+  const v = o[k];
+  if (typeof v !== 'boolean') throw unexpected(k);
+  return v;
+}
+
+function arr(o: Obj, k: string): unknown[] {
+  const v = o[k];
+  if (!Array.isArray(v)) throw unexpected(k);
+  return v;
+}
+
+function envelope(v: unknown, what: string): SignedEnvelope {
+  const o = obj(v, what);
+  return { payload: str(o, 'payload'), sig: str(o, 'sig') };
+}
+
+function issued(v: unknown): IssuedToken {
+  const o = obj(v, 'token');
+  return { token: str(o, 'token'), userId: str(o, 'userId'), devId: str(o, 'devId'), admin: bool(o, 'admin') };
+}
+
+function userEntry(v: unknown): UserEntry {
+  const o = obj(v, 'user');
+  return {
+    userId: str(o, 'userId'),
+    identity: envelope(o.identity, 'identity'),
+    profile: o.profile === null || o.profile === undefined ? null : envelope(o.profile, 'profile'),
+    admin: bool(o, 'admin'),
+    removed: bool(o, 'removed'),
+  };
+}
+
+function serverEvent(v: unknown): ServerEvent {
+  const o = obj(v, 'event');
+  let body: Uint8Array;
+  try {
+    body = base64urlDecode(str(o, 'body'));
+  } catch {
+    throw unexpected('event body');
+  }
+  return {
+    gseq: num(o, 'gseq'),
+    time: num(o, 'time'),
+    chatId: str(o, 'chatId'),
+    senderId: str(o, 'senderId'),
+    devId: str(o, 'devId'),
+    epoch: num(o, 'epoch'),
+    msgId: str(o, 'msgId'),
+    body,
+  };
+}
+
+function page(v: unknown): EventsPage {
+  const o = obj(v, 'events page');
+  return {
+    events: arr(o, 'events').map(serverEvent),
+    cursor: num(o, 'cursor'),
+    more: bool(o, 'more'),
+    oldestGseq: num(o, 'oldestGseq'),
+  };
+}

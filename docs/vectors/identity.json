@@ -1,0 +1,64 @@
+{
+  "note": "Test vectors for docs/PROTOCOL.md. Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only.",
+  "derivation": {
+    "hkdf": "HKDF-SHA-256, salt = empty, L = 32",
+    "signSecret": "HKDF(seed, info=\"fc/v1/sign\") is the RFC 8032 Ed25519 secret key (seed form)",
+    "boxSecret": "HKDF(seed, info=\"fc/v1/box\") is the RFC 7748 X25519 secret key (clamped on use)",
+    "selfKey": "HKDF(seed, info=\"fc/v1/self\")",
+    "userId": "base32(SHA-256(signPub)[0..16])",
+    "fingerprint": "SHA-256(\"fc/v1/fingerprint\\n\" || lp(signPub) || lp(boxPub)), bytes 0..30 as 6 big-endian 40-bit numbers mod 100000"
+  },
+  "bip39Wordlist": {
+    "file": "bip39-english.txt",
+    "sha256": "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"
+  },
+  "phrases": [
+    {
+      "seedHex": "0000000000000000000000000000000000000000000000000000000000000000",
+      "phrase": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
+    },
+    {
+      "seedHex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "phrase": "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo vote"
+    },
+    {
+      "seedHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "phrase": "abandon amount liar amount expire adjust cage candy arch gather drum bullet absurd math era live bid rhythm alien crouch range attend journey unaware"
+    }
+  ],
+  "users": {
+    "alice": {
+      "seedHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "phrase": "abandon amount liar amount expire adjust cage candy arch gather drum bullet absurd math era live bid rhythm alien crouch range attend journey unaware",
+      "signSecretHex": "825608e9a18ea4859c17800452662a865e21324855dab5f4616e1cbc9c910ae8",
+      "signPubHex": "a4e01261cadb043303fb11844ca36f9e768c5ee0dc60b349cc0a436a43e39ebb",
+      "boxSecretHex": "633e44599069ba5e2d83546b4c6f79b652883673b56b51b5aab69ca474b895c0",
+      "boxPubHex": "97bfbbede6b4d41ba7ec5f3d954778b84172e7551c38a0ccdef6beac6c0fea54",
+      "selfKeyHex": "873b9dafb309a34751299c93e852d30e67564a75f041139be7a79414935aa28d",
+      "userId": "bv2upztgktzihpyf7mtd6wkqam",
+      "fingerprint": "23149 99127 78659 19956 77458 11399"
+    },
+    "bob": {
+      "seedHex": "f0e1d2c3b4a5968778695a4b3c2d1e0f00112233445566778899aabbccddeeff",
+      "phrase": "valley attend rail harsh floor dry ticket clip enroll thumb elegant bulk absurd much snack melt grid rough chapter fever rubber humble room wide",
+      "signSecretHex": "6b124cb61e030570a59f150be7e4f90776d87fc704b53eb9b6137bf5a863fca5",
+      "signPubHex": "f5f55318bd8b6f933388c5cd6b8a81e8c98d0087e79162c444996180d63294f9",
+      "boxSecretHex": "c640d0c3f32f7591cc6c8b1f29da82109984f96983c0e447744cc1086aa7f5e4",
+      "boxPubHex": "368d67b61c93a7462284f449c335885eea106cf40b5fb7875e09ec1b4830a501",
+      "selfKeyHex": "aa63ef10550028630c4e5ba9df66517ebcd119d635ebd7d27726a0eed199ed0d",
+      "userId": "7q73gm43b6kfv7myx7qgupatdi",
+      "fingerprint": "19048 32441 19333 36342 37755 07834"
+    },
+    "carol": {
+      "seedHex": "7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c",
+      "phrase": "ladder token business wedding sick dilemma vehicle moon ladder token business wedding sick dilemma vehicle moon ladder token business wedding sick dilemma vehicle only",
+      "signSecretHex": "6ffa0803af9f7cca90d604cc3a125b288426ffd6b91289e81a67361335c2bc38",
+      "signPubHex": "9dd758efa593f339c333a75840fcf3737dabda7cd033bc4a7a382f36de600e21",
+      "boxSecretHex": "a1917a83b2c6e17507ad788b45d2f8296b5ccee59f0b9dbdda1fef97d8a04cdc",
+      "boxPubHex": "3d5c9f6380db1a12811681dc85927e38d64979a06c66ffea71afe88c7d225711",
+      "selfKeyHex": "7dbf93397ee5eba423764c8e69229af0d120547d9d147ebfe15e8fd2ddaef83e",
+      "userId": "com2skyqgxeai734binz4lx3tm",
+      "fingerprint": "98360 50333 31276 04780 03666 53594"
+    }
+  }
+}

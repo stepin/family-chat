@@ -1,0 +1,112 @@
+//! Cross-check with the protocol package's test vectors in docs/vectors:
+//! the server accepts the envelopes the client signs, rejects the negative
+//! ones, and derives the same direct chat ids.
+
+use std::path::PathBuf;
+
+use ed25519_dalek::VerifyingKey;
+use fcd::envelope::{self, Envelope};
+use fcd::ids::{ChatId, UserId};
+use serde_json::Value;
+
+fn load(name: &str) -> Value {
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs/vectors")
+        .join(name);
+    serde_json::from_slice(&std::fs::read(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))).unwrap()
+}
+
+fn users() -> Value {
+    load("identity.json")["users"].clone()
+}
+
+fn user_id(users: &Value, name: &str) -> UserId {
+    UserId::parse(users[name]["userId"].as_str().unwrap()).unwrap()
+}
+
+fn key(users: &Value, name: &str) -> VerifyingKey {
+    let hex = users[name]["signPubHex"].as_str().unwrap();
+    let bytes: Vec<u8> = (0..32)
+        .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap())
+        .collect();
+    VerifyingKey::from_bytes(&bytes.try_into().unwrap()).unwrap()
+}
+
+fn env(v: &Value) -> Envelope {
+    match v {
+        Value::String(s) => serde_json::from_str(s).unwrap(),
+        other => serde_json::from_value(other.clone()).unwrap(),
+    }
+}
+
+#[test]
+fn envelopes_verify() {
+    let users = users();
+    let v = load("envelopes.json");
+    let list = v["envelopes"].as_array().unwrap();
+    assert!(!list.is_empty());
+    for e in list {
+        let signer = e["signer"].as_str().unwrap();
+        let uid = user_id(&users, signer);
+        let envelope = env(&e["envelope"]);
+        match e["kind"].as_str().unwrap() {
+            "identity" => {
+                let id = envelope::verify_identity(&envelope).unwrap();
+                assert_eq!(id.user_id, uid);
+            }
+            "profile" => {
+                envelope::verify_profile(&envelope, &uid, &key(&users, signer)).unwrap();
+            }
+            "auth" => {
+                let req = envelope::parse_auth(&envelope).unwrap();
+                assert_eq!(req.user_id, uid);
+                envelope::verify_auth(&envelope, &req, &key(&users, signer)).unwrap();
+            }
+            k => panic!("unknown kind {k}"),
+        }
+    }
+}
+
+#[test]
+fn negative_envelopes_fail() {
+    let users = users();
+    let v = load("negative.json");
+    for e in v["envelopes"].as_array().unwrap() {
+        let name = e["name"].as_str().unwrap();
+        let envelope = env(&e["envelope"]);
+        let signer = e["signer"].as_str();
+        let failed = match e["kind"].as_str().unwrap() {
+            "identity" => envelope::verify_identity(&envelope).is_err(),
+            "profile" => {
+                let s = signer.unwrap();
+                envelope::verify_profile(&envelope, &user_id(&users, s), &key(&users, s)).is_err()
+            }
+            "auth" => {
+                let s = signer.unwrap();
+                match envelope::parse_auth(&envelope) {
+                    Err(_) => true,
+                    Ok(req) => {
+                        req.user_id != user_id(&users, s)
+                            || envelope::verify_auth(&envelope, &req, &key(&users, s)).is_err()
+                    }
+                }
+            }
+            k => panic!("unknown kind {k}"),
+        };
+        assert!(failed, "server accepted negative vector: {name}");
+    }
+}
+
+#[test]
+fn direct_chat_ids_match() {
+    let users = users();
+    let v = load("dm.json");
+    let chats = v["chats"].as_array().unwrap();
+    assert!(!chats.is_empty());
+    for c in chats {
+        let me = user_id(&users, c["me"].as_str().unwrap());
+        let peer = user_id(&users, c["peer"].as_str().unwrap());
+        let id = ChatId::direct(c["serverId"].as_str().unwrap(), &me, &peer);
+        assert_eq!(id.to_string(), c["chatId"].as_str().unwrap(), "{c}");
+    }
+}

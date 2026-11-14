@@ -1,4 +1,5 @@
 import '../styles/base.css';
+import './page.css';
 import { formatDeviceReport, runDeviceChecks, type DeviceCheck } from './checks.ts';
 import { registerServiceWorker } from '../pwa.ts';
 

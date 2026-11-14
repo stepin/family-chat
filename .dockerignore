@@ -1,0 +1,12 @@
+.git
+.gstack
+.claude
+**/node_modules
+**/dist
+**/target
+**/test-results
+**/playwright-report*
+**/coverage
+**/.vite
+**/*.log
+.DS_Store

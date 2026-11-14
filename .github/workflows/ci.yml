@@ -24,35 +24,11 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-  integration-e2e:
+  # The server, then everything that runs against a built fcd: the core
+  # integration tests, the chat end-to-end tests and the server check page.
+  server-e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Start WebDAV servers (tools/dav-dev)
-        run: pnpm dav:up
-      - run: pnpm test:integration
-      - run: pnpm --filter @family-chat/web exec playwright install --with-deps chromium firefox webkit
-      - run: pnpm test:e2e
-      - name: Server logs
-        if: failure()
-        run: pnpm --filter @family-chat/dav-dev run logs
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-report
-          path: apps/web/playwright-report
-          retention-days: 7
-
-  server:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -77,14 +53,24 @@ jobs:
         working-directory: server
       - run: cargo build --locked
         working-directory: server
+      - name: Core integration tests against fcd
+        run: pnpm test:integration
+        env:
+          FCD_BIN: ${{ github.workspace }}/server/target/debug/fcd
       - run: pnpm --filter @family-chat/web exec playwright install --with-deps chromium
-      - name: End-to-end test against fcd
+      - name: Chat end-to-end tests against fcd
+        run: pnpm test:e2e
+        env:
+          FCD_BIN: ${{ github.workspace }}/server/target/debug/fcd
+      - name: Server check page against fcd
         run: pnpm test:e2e:fcd
         env:
           FCD_BIN: ${{ github.workspace }}/server/target/debug/fcd
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report-fcd
-          path: apps/web/playwright-report-fcd
+          name: playwright-reports
+          path: |
+            apps/web/playwright-report
+            apps/web/playwright-report-fcd
           retention-days: 7

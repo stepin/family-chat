@@ -5,19 +5,20 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./testing": "./src/testing/fake-dav.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "node scripts/build-fcd.mjs && vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
-    "@family-chat/protocol": "workspace:*"
+    "@family-chat/protocol": "workspace:*",
+    "dexie": "^4.4.7"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
+    "fake-indexeddb": "^6.2.8",
     "typescript": "^6.0.3",
     "vitest": "^5.1.0"
   }

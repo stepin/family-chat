@@ -1,4 +1,5 @@
 import '../styles/base.css';
+import './page.css';
 import { registerServiceWorker } from '../pwa.ts';
 import {
   base64UrlToBytes,

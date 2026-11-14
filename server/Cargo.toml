@@ -8,12 +8,14 @@ aes-gcm = "0.11.1"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "json", "query"] }
 base64 = "0.23.1"
 clap = { version = "4.6.7", features = ["derive"] }
+ed25519-dalek = "3"
 getrandom = "0.4.3"
 hkdf = "0.13.0"
 http-body-util = "0.1.5"
 hyper = { version = "1.12.0", features = ["client", "http1"] }
 hyper-rustls = { version = "0.27.10", default-features = false, features = ["http1", "tls12", "ring", "webpki-roots"] }
 hyper-util = { version = "0.1.21", features = ["client-legacy", "http1", "tokio"] }
+libc = "0.2.191"
 mime_guess = "2.0.5"
 p256 = { version = "0.14.0", features = ["ecdh", "ecdsa"] }
 rust-embed = { version = "8.14.0", features = ["mime-guess"] }

@@ -34,9 +34,10 @@ pub struct ServerFile {
     pub server_id: String,
     /// Milliseconds since the Unix epoch.
     pub created_at: u64,
-    /// SHA-256 (hex) of the normalised one-time administrator code.
+    /// SHA-256 (hex) of the normalised one-time administrator code; empty
+    /// once the first administrator joined with it.
     pub admin_code_hash: String,
-    /// `userId`s of administrators (empty until M1).
+    /// `userId`s of administrators.
     #[serde(default)]
     pub admins: Vec<String>,
 }
@@ -88,10 +89,14 @@ impl DataDir {
     /// Opens (creating on first start) the data folder and resolves the
     /// settings: `flags` override `config.toml`, which overrides defaults.
     pub fn open(path: &Path, flags: Overrides) -> Result<(DataDir, Settings), OpenError> {
-        fs::create_dir_all(path).map_err(|e| io_err("не удалось создать папку данных", path, e))?;
+        let created = !path.exists();
+        create_private_dir(path).map_err(|e| io_err("не удалось создать папку данных", path, e))?;
         let path = path
             .canonicalize()
             .map_err(|e| io_err("не удалось открыть папку данных", path, e))?;
+        if created {
+            restrict(&path, true);
+        }
         let lock = acquire_lock(&path)?;
 
         let server_path = path.join(SERVER_FILE);
@@ -103,7 +108,16 @@ impl DataDir {
 
         for d in DIRS {
             let p = path.join(d);
-            fs::create_dir_all(&p).map_err(|e| io_err("не удалось создать", &p, e))?;
+            create_private_dir(&p).map_err(|e| io_err("не удалось создать", &p, e))?;
+            // Folders made by the M0 build used the default umask.
+            restrict(&p, true);
+        }
+        clean_tmp(&path.join("tmp"));
+        for f in [LOCK_FILE, CONFIG_FILE, SERVER_FILE, VAPID_FILE] {
+            let p = path.join(f);
+            if p.exists() {
+                restrict(&p, false);
+            }
         }
 
         let config_path = path.join(CONFIG_FILE);
@@ -111,12 +125,7 @@ impl DataDir {
         let config_exists = config_path.exists();
         let settings = Settings::resolve(flags.or(file_cfg)).map_err(OpenError::Config)?;
         if !config_exists {
-            write_atomic(
-                &path,
-                &config_path,
-                config::config_template(&settings).as_bytes(),
-                false,
-            )?;
+            write_atomic(&path, &config_path, config::config_template(&settings).as_bytes())?;
         }
 
         let vapid_path = path.join(VAPID_FILE);
@@ -133,7 +142,7 @@ impl DataDir {
                 }
                 let k = VapidKey::generate();
                 let json = serde_json::to_vec_pretty(&k.to_file()).expect("serialisable");
-                write_atomic(&path, &vapid_path, &json, true)?;
+                write_atomic(&path, &vapid_path, &json)?;
                 k
             }
             Err(e) => return Err(io_err("не удалось прочитать", &vapid_path, e)),
@@ -177,6 +186,24 @@ impl DataDir {
         Ok(code)
     }
 
+    /// Adds an administrator (`fcd admin add`, server stopped).
+    pub fn add_admin(&mut self, user: &str) -> Result<bool, OpenError> {
+        if crate::ids::UserId::parse(user).is_none() {
+            return Err(OpenError::Config(format!(
+                "{user} не похож на userId (26 символов base32)"
+            )));
+        }
+        if !self.path.join("users").join(user).join("identity.json").is_file() {
+            return Err(OpenError::Config(format!("участник {user} не найден")));
+        }
+        if self.server.admins.iter().any(|a| a == user) {
+            return Ok(false);
+        }
+        self.server.admins.push(user.to_string());
+        write_server_file(&self.path, &self.server)?;
+        Ok(true)
+    }
+
     pub fn check_admin_code(&self, candidate: &str) -> bool {
         check_admin_code(&self.server.admin_code_hash, candidate)
     }
@@ -184,7 +211,7 @@ impl DataDir {
 
 fn acquire_lock(dir: &Path) -> Result<File, OpenError> {
     let p = dir.join(LOCK_FILE);
-    let f = OpenOptions::new()
+    let f = private_file_options()
         .create(true)
         .truncate(false)
         .write(true)
@@ -216,38 +243,105 @@ fn parse_server_file(path: &Path, bytes: &[u8]) -> Result<ServerFile, OpenError>
     serde_json::from_slice(bytes).map_err(|e| OpenError::Io(format!("повреждён {}: {e}", path.display())))
 }
 
-fn write_server_file(dir: &Path, s: &ServerFile) -> Result<(), OpenError> {
+pub fn write_server_file(dir: &Path, s: &ServerFile) -> Result<(), OpenError> {
     let json = serde_json::to_vec_pretty(s).expect("serialisable");
-    write_atomic(dir, &dir.join(SERVER_FILE), &json, true)
+    write_atomic(dir, &dir.join(SERVER_FILE), &json)
 }
 
 /// Writes through `tmp/` and renames, so a crash never leaves half a file.
-/// `private`: permissions 0600 on Unix.
-pub fn write_atomic(dir: &Path, target: &Path, bytes: &[u8], private: bool) -> Result<(), OpenError> {
+/// Files are private (0600 on Unix).
+pub fn write_atomic(dir: &Path, target: &Path, bytes: &[u8]) -> Result<(), OpenError> {
+    write_atomic_io(dir, target, bytes).map_err(|e| io_err("не удалось записать", target, e))
+}
+
+/// [`write_atomic`] with a plain I/O error. `dir` is the data folder.
+pub fn write_atomic_io(dir: &Path, target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp_dir = dir.join("tmp");
-    fs::create_dir_all(&tmp_dir).map_err(|e| io_err("не удалось создать", &tmp_dir, e))?;
+    create_private_dir(&tmp_dir)?;
     let name = target.file_name().and_then(|n| n.to_str()).unwrap_or("file");
     let tmp = tmp_dir.join(format!("{name}.{}", hex(&random_bytes::<6>())));
+    let result = (|| {
+        let mut f = private_file_options().write(true).create_new(true).open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        fs::rename(&tmp, target)?;
+        sync_dir(target.parent().unwrap_or(dir));
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// Options for creating a file readable only by the owner.
+pub fn private_file_options() -> OpenOptions {
+    #[allow(unused_mut)]
     let mut opts = OpenOptions::new();
-    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(if private { 0o600 } else { 0o644 });
+        opts.mode(0o600);
+    }
+    opts
+}
+
+/// Creates a folder (and missing parents) accessible only by the owner.
+pub fn create_private_dir(p: &Path) -> std::io::Result<()> {
+    #[allow(unused_mut)]
+    let mut b = fs::DirBuilder::new();
+    b.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        b.mode(0o700);
+    }
+    b.create(p)
+}
+
+/// Makes the rename of a file in `dir` durable (Unix; no-op elsewhere).
+pub fn sync_dir(dir: &Path) {
+    #[cfg(unix)]
+    if let Ok(d) = File::open(dir) {
+        let _ = d.sync_all();
     }
     #[cfg(not(unix))]
-    let _ = private;
-    let result = (|| {
-        let mut f = opts.open(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        fs::rename(&tmp, target)
-    })();
-    if let Err(e) = result {
-        let _ = fs::remove_file(&tmp);
-        return Err(io_err("не удалось записать", target, e));
+    let _ = dir;
+}
+
+/// Sets 0700 (folders) or 0600 (files); a failure is only a warning
+/// (for example a mounted volume owned by someone else).
+fn restrict(p: &Path, is_dir: bool) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if is_dir { 0o700 } else { 0o600 };
+        match fs::metadata(p) {
+            Ok(m) if m.permissions().mode() & 0o777 == mode => {}
+            Ok(_) => {
+                if let Err(e) = fs::set_permissions(p, fs::Permissions::from_mode(mode)) {
+                    tracing::warn!("не удалось ограничить права на {}: {e}", p.display());
+                }
+            }
+            Err(_) => {}
+        }
     }
-    Ok(())
+    #[cfg(not(unix))]
+    let _ = (p, is_dir);
+}
+
+/// Removes leftovers of interrupted writes.
+fn clean_tmp(tmp: &Path) {
+    if let Ok(rd) = fs::read_dir(tmp) {
+        for e in rd.flatten() {
+            let p = e.path();
+            let _ = if p.is_dir() {
+                fs::remove_dir_all(&p)
+            } else {
+                fs::remove_file(&p)
+            };
+        }
+    }
 }
 
 pub fn now_ms() -> u64 {
@@ -298,7 +392,11 @@ pub fn hash_admin_code(code: &str) -> String {
     hex(&Sha256::digest(normalize_admin_code(code).as_bytes()))
 }
 
+/// An empty stored hash means the code was used and no longer works.
 pub fn check_admin_code(stored_hash: &str, candidate: &str) -> bool {
+    if stored_hash.is_empty() {
+        return false;
+    }
     let h = hash_admin_code(candidate);
     h.as_bytes().ct_eq(stored_hash.as_bytes()).into()
 }

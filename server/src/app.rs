@@ -9,24 +9,29 @@ use axum::extract::{Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post, put};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::watch;
 
+use crate::api;
 use crate::assets::Assets;
 use crate::config::Settings;
-use crate::datadir::{check_admin_code, now_ms};
+use crate::datadir::{DataDir, check_admin_code, now_ms};
+pub use crate::error::ApiError;
+use crate::ratelimit::RateLimiter;
+use crate::store::{Store, StoreConfig};
 use crate::webpush::{PushClient, Subscription, VapidKey};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_WAIT_SECONDS: u64 = 60;
 pub const MAX_PUSH_DELAY_SECONDS: u64 = 300;
+/// How often old log days, blob folders and expired invitations are removed.
+pub const MAINTENANCE_PERIOD: Duration = Duration::from_secs(3600);
 
 pub struct AppState {
     pub settings: Settings,
     pub server_id: String,
-    pub admin_code_hash: String,
     pub vapid: VapidKey,
     /// `None` when push is disabled in the settings.
     pub push: Option<PushClient>,
@@ -35,48 +40,89 @@ pub struct AppState {
     pub assets: Assets,
     /// Becomes `true` when the server starts shutting down.
     pub shutdown: watch::Receiver<bool>,
+    pub store: Store,
+    pub limiter: RateLimiter,
+}
+
+impl AppState {
+    /// Loads the state of an opened data folder.
+    pub fn new(
+        dir: &DataDir,
+        settings: Settings,
+        assets: Assets,
+        m0: bool,
+        shutdown: watch::Receiver<bool>,
+    ) -> Result<Arc<AppState>, String> {
+        let store = Store::open(
+            &dir.path,
+            dir.server.clone(),
+            StoreConfig {
+                retention_days: settings.retention_days,
+                min_free_mb: settings.min_free_mb,
+            },
+        )?;
+        Ok(Arc::new(AppState {
+            push: settings.push.then(|| PushClient::new(settings.push_subject.clone())),
+            settings,
+            server_id: dir.server.server_id.clone(),
+            vapid: dir.vapid.clone(),
+            m0,
+            assets,
+            shutdown,
+            store,
+            limiter: RateLimiter::default(),
+        }))
+    }
+}
+
+/// Retention cleanup now and then every hour, until shutdown.
+pub fn spawn_maintenance(st: Arc<AppState>) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(MAINTENANCE_PERIOD);
+        let mut shutdown = st.shutdown.clone();
+        loop {
+            tokio::select! {
+                _ = tick.tick() => {}
+                _ = shutdown.wait_for(|v| *v) => return,
+            }
+            st.store.write(|w| w.retention(now_ms())).await;
+        }
+    });
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/v1/hello", get(hello))
+        .route("/v1/join", post(api::join))
+        .route("/v1/auth/challenge", post(api::auth_challenge))
+        .route("/v1/auth/device", post(api::auth_device))
+        .route("/v1/users", get(api::users))
+        .route("/v1/me", get(api::me))
+        .route("/v1/me/profile", put(api::put_profile))
+        .route("/v1/me/push", put(api::put_push).delete(api::delete_push))
+        .route("/v1/chats", get(api::chats))
+        .route("/v1/chats/{id}/events", post(api::post_event).get(api::chat_events))
+        .route("/v1/events", get(api::events))
+        .route("/v1/admin/invites", post(api::create_invite).get(api::list_invites))
+        .route("/v1/admin/invites/{id}", delete(api::delete_invite))
+        .route("/v1/admin/users", get(api::admin_users))
+        .route("/v1/admin/users/{id}", delete(api::remove_user))
+        .route("/v1/admin/stats", get(api::stats))
         .route("/v1/m0/wait", get(m0_wait))
         .route("/v1/m0/push", post(m0_push))
+        .method_not_allowed_fallback(method_not_allowed)
         .fallback(fallback)
         .layer(middleware::from_fn(cors))
         .with_state(state)
 }
 
-/// Error body: `{"error": "<code>", "message": "<text>"}`.
-pub struct ApiError {
-    status: StatusCode,
-    code: &'static str,
-    message: String,
-}
-
-impl ApiError {
-    fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            code,
-            message: message.into(),
-        }
-    }
-}
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        let mut res = (
-            self.status,
-            Json(json!({ "error": self.code, "message": self.message })),
-        )
-            .into_response();
-        if self.status == StatusCode::UNAUTHORIZED {
-            res.headers_mut()
-                .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
-        }
-        res
-    }
+async fn method_not_allowed() -> Response {
+    ApiError::new(
+        StatusCode::METHOD_NOT_ALLOWED,
+        "method_not_allowed",
+        "method not allowed for this endpoint",
+    )
+    .into_response()
 }
 
 /// CORS for every API response (docs/PLAN-v2.md, section 5): any origin,
@@ -99,7 +145,11 @@ async fn cors(req: Request, next: Next) -> Response {
     );
     h.insert(
         header::ACCESS_CONTROL_ALLOW_HEADERS,
-        HeaderValue::from_static("Authorization, Content-Type, Idempotency-Key"),
+        HeaderValue::from_static("Authorization, Content-Type, Idempotency-Key, X-FC-Epoch"),
+    );
+    h.insert(
+        header::ACCESS_CONTROL_EXPOSE_HEADERS,
+        HeaderValue::from_static("Retry-After"),
     );
     h.insert(header::ACCESS_CONTROL_MAX_AGE, HeaderValue::from_static("86400"));
     if !h.contains_key(header::CACHE_CONTROL) {
@@ -133,6 +183,8 @@ async fn hello(State(st): State<Arc<AppState>>) -> Response {
         "push": s.push,
         "vapidPublicKey": if s.push { Some(st.vapid.public_key_b64()) } else { None },
         "time": now_ms(),
+        "maxEventBytes": crate::eventlog::MAX_BODY,
+        "adminCodeActive": st.store.read(|m| !m.server.admin_code_hash.is_empty()),
         "m0": st.m0,
     }))
     .into_response()
@@ -154,7 +206,8 @@ fn require_m0_admin(st: &AppState, headers: &HeaderMap) -> Result<(), ApiError> 
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(str::trim)
         .unwrap_or("");
-    if code.is_empty() || !check_admin_code(&st.admin_code_hash, code) {
+    let hash = st.store.read(|m| m.server.admin_code_hash.clone());
+    if code.is_empty() || !check_admin_code(&hash, code) {
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -205,7 +258,7 @@ struct PushRequest {
 }
 
 /// Push endpoints must be HTTPS; plain HTTP only to loopback (tests).
-fn endpoint_allowed(endpoint: &str) -> bool {
+pub fn endpoint_allowed(endpoint: &str) -> bool {
     if endpoint.starts_with("https://") {
         return crate::webpush::origin_of(endpoint).is_some();
     }

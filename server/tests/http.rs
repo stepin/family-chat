@@ -3,17 +3,13 @@ mod common;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use aes_gcm::aead::{Aead, KeyInit};
-use aes_gcm::{Aes128Gcm, Nonce};
 use axum::body::Bytes;
 use axum::http::HeaderMap;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
-use common::{get, request, start};
+use common::{decrypt, get, request, start};
 use fcd::config::Overrides;
-use hkdf::Hkdf;
-use p256::{PublicKey, SecretKey};
-use sha2::Sha256;
+use p256::SecretKey;
 
 #[tokio::test]
 async fn hello_reports_server_info() {
@@ -263,38 +259,7 @@ async fn fake_push_service() -> (String, Captured) {
     (format!("http://{addr}"), captured)
 }
 
-/// Browser side of RFC 8291: decrypts an `aes128gcm` body.
-fn decrypt(ua_secret: &SecretKey, auth: &[u8], body: &[u8]) -> Vec<u8> {
-    let salt = &body[..16];
-    let rs = u32::from_be_bytes(body[16..20].try_into().unwrap());
-    assert_eq!(rs, 4096);
-    let idlen = body[20] as usize;
-    assert_eq!(idlen, 65);
-    let as_public = PublicKey::from_sec1_bytes(&body[21..21 + idlen]).unwrap();
-    let ciphertext = &body[21 + idlen..];
-    let ua_public = ua_secret.public_key().to_sec1_bytes();
-    let shared = p256::ecdh::diffie_hellman(ua_secret.to_nonzero_scalar(), as_public.as_affine());
-    let mut info = b"WebPush: info\0".to_vec();
-    info.extend_from_slice(&ua_public);
-    info.extend_from_slice(&as_public.to_sec1_bytes());
-    let mut ikm = [0u8; 32];
-    Hkdf::<Sha256>::new(Some(auth), shared.raw_secret_bytes())
-        .expand(&info, &mut ikm)
-        .unwrap();
-    let prk = Hkdf::<Sha256>::new(Some(salt), &ikm);
-    let mut cek = [0u8; 16];
-    prk.expand(b"Content-Encoding: aes128gcm\0", &mut cek).unwrap();
-    let mut nonce = [0u8; 12];
-    prk.expand(b"Content-Encoding: nonce\0", &mut nonce).unwrap();
-    let mut plain = Aes128Gcm::new_from_slice(&cek)
-        .unwrap()
-        .decrypt(&Nonce::try_from(&nonce[..]).unwrap(), ciphertext)
-        .unwrap();
-    assert_eq!(plain.pop(), Some(2), "last-record delimiter");
-    plain
-}
-
-fn browser_subscription(endpoint: &str) -> (SecretKey, [u8; 16], String) {
+pub fn browser_subscription(endpoint: &str) -> (SecretKey, [u8; 16], String) {
     let ua_secret = loop {
         if let Ok(k) = SecretKey::from_slice(&fcd::webpush::random_bytes::<32>()) {
             break k;

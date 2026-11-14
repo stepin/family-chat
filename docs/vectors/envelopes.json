@@ -1,0 +1,45 @@
+{
+  "note": "Test vectors for docs/PROTOCOL.md. Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only.",
+  "rule": "sig = Ed25519(signSecret, utf8(\"fc/v1/\" + kind + \"\\n\") || payloadBytes); envelope = {\"payload\": base64url(payloadBytes), \"sig\": base64url(sig)}",
+  "envelopes": [
+    {
+      "kind": "identity",
+      "signer": "alice",
+      "payloadJson": {
+        "created": 1794787200000
+      },
+      "payloadText": "{\"v\":1,\"userId\":\"bv2upztgktzihpyf7mtd6wkqam\",\"signPub\":\"pOASYcrbBDMD-xGETKNvnnaMXuDcYLNJzApDakPjnrs\",\"boxPub\":\"l7-77ea01Bun7F89lUd4uEFy51UcOKDM3va-rGwP6lQ\",\"created\":1794787200000}",
+      "signingInputHex": "66632f76312f6964656e746974790a7b2276223a312c22757365724964223a2262763275707a74676b747a6968707966376d746436776b71616d222c227369676e507562223a22704f41535963726242444d442d784745544b4e766e6e614d58754463594c4e4a7a417044616b506a6e7273222c22626f78507562223a226c372d37376561303142756e374638396c55643475454679353155634f4b444d3376612d72477750366c51222c2263726561746564223a313739343738373230303030307d",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsInNpZ25QdWIiOiJwT0FTWWNyYkJETUQteEdFVEtOdm5uYU1YdURjWUxOSnpBcERha1BqbnJzIiwiYm94UHViIjoibDctNzdlYTAxQnVuN0Y4OWxVZDR1RUZ5NTFVY09LRE0zdmEtckd3UDZsUSIsImNyZWF0ZWQiOjE3OTQ3ODcyMDAwMDB9\",\"sig\":\"dWUGr8fKqrfrzkE7X9ZJaekx4PltudgnKnFF4romIjRUNbZyGN-JhSCXDfWZa3B8BZwGNRRpxugO3m5MYzbhCQ\"}"
+    },
+    {
+      "kind": "profile",
+      "signer": "alice",
+      "payloadJson": {
+        "name": "Алиса",
+        "rev": 1,
+        "updated": 1794787201000
+      },
+      "payloadText": "{\"v\":1,\"userId\":\"bv2upztgktzihpyf7mtd6wkqam\",\"name\":\"Алиса\",\"avatar\":null,\"rev\":1,\"updated\":1794787201000}",
+      "signingInputHex": "66632f76312f70726f66696c650a7b2276223a312c22757365724964223a2262763275707a74676b747a6968707966376d746436776b71616d222c226e616d65223a22d090d0bbd0b8d181d0b0222c22617661746172223a6e756c6c2c22726576223a312c2275706461746564223a313739343738373230313030307d",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQkNC70LjRgdCwIiwiYXZhdGFyIjpudWxsLCJyZXYiOjEsInVwZGF0ZWQiOjE3OTQ3ODcyMDEwMDB9\",\"sig\":\"OG0mQ8W6AfjRtAUCYtS3KFwS_pUlvrhwDZVjmYVTRXui1QL922qllxAbh5wBcslx9fLqSrC5lhbq3QtLivwTBg\"}"
+    },
+    {
+      "kind": "auth",
+      "signer": "alice",
+      "payloadJson": {
+        "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+        "nonce": "n0nce-Challenge_123",
+        "devId": "mfrggzdfmztwq2lk"
+      },
+      "payloadText": "{\"v\":1,\"userId\":\"bv2upztgktzihpyf7mtd6wkqam\",\"serverId\":\"q8Jb3kVf0w2Xy7HnT1sZ9A\",\"nonce\":\"n0nce-Challenge_123\",\"devId\":\"mfrggzdfmztwq2lk\"}",
+      "signingInputHex": "66632f76312f617574680a7b2276223a312c22757365724964223a2262763275707a74676b747a6968707966376d746436776b71616d222c227365727665724964223a2271384a62336b5666307732587937486e5431735a3941222c226e6f6e6365223a226e306e63652d4368616c6c656e67655f313233222c226465764964223a226d667267677a64666d7a747771326c6b227d",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsInNlcnZlcklkIjoicThKYjNrVmYwdzJYeTdIblQxc1o5QSIsIm5vbmNlIjoibjBuY2UtQ2hhbGxlbmdlXzEyMyIsImRldklkIjoibWZyZ2d6ZGZtenR3cTJsayJ9\",\"sig\":\"GLph7v4pO0hRap6r2Li5wp7TTaLh36H46ssre55ZU_lpSNz6WtA6y0xSQP2_PdtB23UyFTIpwGuki1Xh4dBGCQ\"}"
+    }
+  ],
+  "identities": {
+    "alice": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsInNpZ25QdWIiOiJwT0FTWWNyYkJETUQteEdFVEtOdm5uYU1YdURjWUxOSnpBcERha1BqbnJzIiwiYm94UHViIjoibDctNzdlYTAxQnVuN0Y4OWxVZDR1RUZ5NTFVY09LRE0zdmEtckd3UDZsUSIsImNyZWF0ZWQiOjE3OTQ3ODcyMDAwMDB9\",\"sig\":\"dWUGr8fKqrfrzkE7X9ZJaekx4PltudgnKnFF4romIjRUNbZyGN-JhSCXDfWZa3B8BZwGNRRpxugO3m5MYzbhCQ\"}",
+    "bob": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiI3cTczZ200M2I2a2Z2N215eDdxZ3VwYXRkaSIsInNpZ25QdWIiOiI5ZlZUR0wyTGI1TXppTVhOYTRxQjZNbU5BSWZua1dMRVJKbGhnTll5bFBrIiwiYm94UHViIjoiTm8xbnRoeVRwMFlpaFBSSnd6V0lYdW9RYlBRTFg3ZUhYZ25zRzBnd3BRRSIsImNyZWF0ZWQiOjE3OTQ3ODcyMDAwMDB9\",\"sig\":\"qUH3N7Mv_AXvacy52EtjVnYlzqT7RHeRWkTsNm_425mp_74QIVfgBcEYQvHVtZ2o3NkRBJtR9c3Ozlc0fpg9AA\"}",
+    "carol": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJjb20yc2t5cWd4ZWFpNzM0YmluejRseDN0bSIsInNpZ25QdWIiOiJuZGRZNzZXVDh6bkRNNmRZUVB6emMzMnIybnpRTTd4S2VqZ3ZOdDVnRGlFIiwiYm94UHViIjoiUFZ5Zlk0RGJHaEtCRm9IY2haSi1PTlpKZWFCc1p2X3FjYV9vakgwaVZ4RSIsImNyZWF0ZWQiOjE3OTQ3ODcyMDAwMDB9\",\"sig\":\"LORBanqZRzdSE-NNzLx_a0etqlziC201se_tavf7RqDTXspludgLMP6p79IeF1ZBf8gL8PPJMry_i8gQGvZ8AQ\"}"
+  }
+}

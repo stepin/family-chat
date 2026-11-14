@@ -1,14 +1,20 @@
 //! `fcd`: Family Chat server.
 
+pub mod api;
 pub mod app;
 pub mod assets;
 pub mod config;
 pub mod datadir;
+pub mod envelope;
+pub mod error;
+pub mod eventlog;
+pub mod ids;
+pub mod ratelimit;
+pub mod store;
 pub mod webpush;
 
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
@@ -18,7 +24,6 @@ use crate::app::AppState;
 use crate::assets::Assets;
 use crate::config::Overrides;
 use crate::datadir::DataDir;
-use crate::webpush::PushClient;
 
 #[derive(Debug, Parser)]
 #[command(name = "fcd", version, about = "Family Chat server")]
@@ -44,6 +49,9 @@ pub struct Cli {
     /// Web Push on or off [default: true].
     #[arg(long, value_name = "BOOL")]
     pub push: Option<bool>,
+    /// Trust `X-Forwarded-For` from a reverse proxy [default: false].
+    #[arg(long, value_name = "BOOL")]
+    pub trust_forwarded_for: Option<bool>,
     /// Enable the M0 check endpoints (long request, test push).
     #[arg(long)]
     pub m0: bool,
@@ -58,6 +66,18 @@ pub struct Cli {
 pub enum Command {
     /// Replace the administrator code and print the new one (server must be stopped).
     ResetAdminCode,
+    /// Administrators (server must be stopped).
+    #[command(subcommand)]
+    Admin(AdminCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AdminCommand {
+    /// Make a member an administrator.
+    Add {
+        /// The member's userId.
+        user_id: String,
+    },
 }
 
 impl Cli {
@@ -70,6 +90,8 @@ impl Cli {
             max_file_mb: self.max_file_mb,
             push: self.push,
             push_subject: None,
+            min_free_mb: None,
+            trust_forwarded_for: self.trust_forwarded_for,
         }
     }
 }
@@ -97,6 +119,23 @@ pub async fn main_with(cli: Cli) -> i32 {
         eprintln!("ошибка: укажите папку данных: fcd --data <DIR>");
         return 2;
     };
+
+    if let Some(Command::Admin(AdminCommand::Add { user_id })) = &cli.command {
+        return match DataDir::open(&data, Overrides::default()).and_then(|(mut dir, _)| dir.add_admin(user_id)) {
+            Ok(true) => {
+                println!("{user_id} теперь администратор");
+                0
+            }
+            Ok(false) => {
+                println!("{user_id} уже администратор");
+                0
+            }
+            Err(e) => {
+                eprintln!("ошибка: {e}");
+                1
+            }
+        };
+    }
 
     if let Some(Command::ResetAdminCode) = cli.command {
         return match DataDir::open(&data, Overrides::default()) {
@@ -144,16 +183,14 @@ pub async fn main_with(cli: Cli) -> i32 {
     let local = listener.local_addr().unwrap_or(settings.listen);
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let state = Arc::new(AppState {
-        push: settings.push.then(|| PushClient::new(settings.push_subject.clone())),
-        settings: settings.clone(),
-        server_id: dir.server.server_id.clone(),
-        admin_code_hash: dir.server.admin_code_hash.clone(),
-        vapid: dir.vapid.clone(),
-        m0: cli.m0,
-        assets,
-        shutdown: shutdown_rx,
-    });
+    let state = match AppState::new(&dir, settings.clone(), assets, cli.m0, shutdown_rx) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("{e}");
+            return 1;
+        }
+    };
+    app::spawn_maintenance(state.clone());
 
     tracing::info!("fcd {}, папка данных {}", env!("CARGO_PKG_VERSION"), dir.path.display());
     tracing::info!(
@@ -173,6 +210,10 @@ pub async fn main_with(cli: Cli) -> i32 {
     if cli.m0 {
         tracing::info!("включены проверочные точки M0 (--m0)");
     }
+    let (members, events) = state
+        .store
+        .read(|m| (m.users.values().filter(|u| u.removed_at.is_none()).count(), m.log.len()));
+    tracing::info!("участников {members}, событий в журнале {events}");
     tracing::info!("слушаю {local}");
     for url in browse_urls(local) {
         tracing::info!("откройте {url}");
@@ -184,7 +225,7 @@ pub async fn main_with(cli: Cli) -> i32 {
         tracing::info!("код показывается один раз; новый: fcd reset-admin-code --data <DIR> при остановленном сервере");
     }
 
-    let app = app::router(state);
+    let app = app::router(state).into_make_service_with_connect_info::<SocketAddr>();
     let mut stopping = shutdown_tx.subscribe();
     let server = axum::serve(listener, app).with_graceful_shutdown(async move {
         shutdown_signal().await;

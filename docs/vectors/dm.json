@@ -1,0 +1,51 @@
+{
+  "note": "Test vectors for docs/PROTOCOL.md. Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only.",
+  "rule": "dmKey = HKDF(X25519(mySecret, peerBoxPub), info = \"fc/v1/dm\" || lp(serverId) || lp(minId) || lp(maxId)); encKey = HKDF(dmKey, \"fc/v1/enc\"); chatId = base32(SHA-256(utf8(\"fc/v1/dm\\n\" + serverId + \"\\n\" + minId + \"\\n\" + maxId))[0..16])",
+  "chats": [
+    {
+      "me": "alice",
+      "peer": "bob",
+      "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+      "sharedSecretHex": "fd7c11b1d60fc441af7ce12423a725332899d42a9f5db7a8138d18fda1570f3c",
+      "infoHex": "66632f76312f646d0000001671384a62336b5666307732587937486e5431735a39410000001a37713733676d343362366b6676376d79783771677570617464690000001a62763275707a74676b747a6968707966376d746436776b71616d",
+      "dmKeyHex": "bc84e86323a8c9f3402767a0ff0541a80a8e30e85dd8808ee4c824f516a6d3ef",
+      "encKeyHex": "16e2dc59aa6f206bec5c59b6d176b3c9d42cfb3788700067e3819258400034ff",
+      "chatId": "jnlxv27bkatwnt7rc6kukxpmi4"
+    },
+    {
+      "me": "alice",
+      "peer": "alice",
+      "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+      "sharedSecretHex": "de41bb26129bf1c10164bf1f7fd556b5cd9f232c8daed0c65f4c5a678b51c925",
+      "infoHex": "66632f76312f646d0000001671384a62336b5666307732587937486e5431735a39410000001a62763275707a74676b747a6968707966376d746436776b71616d0000001a62763275707a74676b747a6968707966376d746436776b71616d",
+      "dmKeyHex": "2186050aed9f771e3bc1fb73a0efa7e0a3d588f805df3f8fcbda37092cbd939c",
+      "encKeyHex": "34e4c28d413bd8aefa020d810a5dfbe15e9efb153265c7977d921f80513521d7",
+      "chatId": "7qcc2liggqsvc5hzf6k642wu5i"
+    },
+    {
+      "me": "alice",
+      "peer": "bob",
+      "serverId": "Zp4Lm9Qr2Ts6Uv8Wx0Yz1A",
+      "sharedSecretHex": "fd7c11b1d60fc441af7ce12423a725332899d42a9f5db7a8138d18fda1570f3c",
+      "infoHex": "66632f76312f646d000000165a70344c6d39517232547336557638577830597a31410000001a37713733676d343362366b6676376d79783771677570617464690000001a62763275707a74676b747a6968707966376d746436776b71616d",
+      "dmKeyHex": "534f461ea7115243418977d7bbb2791d7de39c7a9847a62c3a65b0b881472485",
+      "encKeyHex": "f587b0861b503bb997f69902261574bac26ef49add70a4bed186c022079b58ca",
+      "chatId": "6ruf45bxyhwvremo5k6ezava74"
+    },
+    {
+      "me": "bob",
+      "peer": "carol",
+      "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+      "sharedSecretHex": "c0451a2ba8e186401f667cc7ae0cd6e6f66b46a1f8c202918180b0ac4302e210",
+      "infoHex": "66632f76312f646d0000001671384a62336b5666307732587937486e5431735a39410000001a37713733676d343362366b6676376d79783771677570617464690000001a636f6d32736b7971677865616937333462696e7a346c7833746d",
+      "dmKeyHex": "f309d396f8297050aa5fb6b094823f7f6750a1ce3225ffdcf841b35d9986e0ef",
+      "encKeyHex": "f5cfe5644bc7b05f9f0f63bbcc61c1e765bb622e7feaeff4308b983c4064b023",
+      "chatId": "3d7t7z44vz2ce3jljzc5c4d4lm"
+    }
+  ],
+  "zeroPeer": {
+    "me": "alice",
+    "peerBoxPubHex": "0000000000000000000000000000000000000000000000000000000000000000",
+    "expectedError": "invalid-key"
+  }
+}

@@ -1,0 +1,378 @@
+//! Signed envelopes: `{"payload":"<base64url>","sig":"<base64url>"}`.
+//! `payload` is the exact UTF-8 bytes of a JSON document; `sig` is Ed25519
+//! over `utf8("fc/v1/" + kind + "\n") || payload`.
+
+use ed25519_dalek::{Signature, VerifyingKey};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::ids::{DevId, UserId, b64_decode};
+
+/// Longest accepted payload (decoded), bytes. Profiles carry no avatar
+/// bytes (the avatar is a separate file), so this is generous.
+pub const MAX_PAYLOAD: usize = 8 * 1024;
+pub const MAX_NAME_CHARS: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Envelope {
+    pub payload: String,
+    pub sig: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Identity,
+    Profile,
+    Auth,
+}
+
+impl Kind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Kind::Identity => "identity",
+            Kind::Profile => "profile",
+            Kind::Auth => "auth",
+        }
+    }
+}
+
+/// Why an envelope was rejected. `BadSignature` is counted by the rate limiter.
+#[derive(Debug, PartialEq, Eq)]
+pub enum EnvError {
+    Malformed(String),
+    BadSignature,
+}
+
+fn malformed(m: impl Into<String>) -> EnvError {
+    EnvError::Malformed(m.into())
+}
+
+/// Bytes covered by the signature.
+pub fn signed_bytes(kind: Kind, payload: &[u8]) -> Vec<u8> {
+    let mut msg = format!("fc/v1/{}\n", kind.as_str()).into_bytes();
+    msg.extend_from_slice(payload);
+    msg
+}
+
+impl Envelope {
+    /// Decodes the payload into JSON (no signature check).
+    fn decode(&self) -> Result<(Vec<u8>, serde_json::Map<String, Value>), EnvError> {
+        let bytes = b64_decode(&self.payload).ok_or_else(|| malformed("payload is not base64url"))?;
+        if bytes.len() > MAX_PAYLOAD {
+            return Err(malformed("payload too large"));
+        }
+        let v: Value = serde_json::from_slice(&bytes).map_err(|_| malformed("payload is not JSON"))?;
+        match v {
+            Value::Object(m) => Ok((bytes, m)),
+            _ => Err(malformed("payload is not a JSON object")),
+        }
+    }
+
+    fn verify(&self, kind: Kind, payload: &[u8], key: &VerifyingKey) -> Result<(), EnvError> {
+        let sig = b64_decode(&self.sig).ok_or_else(|| malformed("sig is not base64url"))?;
+        let sig: [u8; 64] = sig.try_into().map_err(|_| malformed("sig must be 64 bytes"))?;
+        key.verify_strict(&signed_bytes(kind, payload), &Signature::from_bytes(&sig))
+            .map_err(|_| EnvError::BadSignature)
+    }
+}
+
+fn str_field<'a>(m: &'a serde_json::Map<String, Value>, k: &str) -> Result<&'a str, EnvError> {
+    m.get(k)
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed(format!("{k} must be a string")))
+}
+
+fn int_field(m: &serde_json::Map<String, Value>, k: &str) -> Result<i64, EnvError> {
+    m.get(k)
+        .and_then(Value::as_i64)
+        .ok_or_else(|| malformed(format!("{k} must be an integer")))
+}
+
+fn check_version(m: &serde_json::Map<String, Value>) -> Result<(), EnvError> {
+    if m.get("v").and_then(Value::as_i64) != Some(1) {
+        return Err(malformed("v must be 1"));
+    }
+    Ok(())
+}
+
+fn key32(m: &serde_json::Map<String, Value>, k: &str) -> Result<[u8; 32], EnvError> {
+    b64_decode(str_field(m, k)?)
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| malformed(format!("{k} must be 32 bytes in base64url")))
+}
+
+fn user_field(m: &serde_json::Map<String, Value>) -> Result<UserId, EnvError> {
+    UserId::parse(str_field(m, "userId")?).ok_or_else(|| malformed("bad userId"))
+}
+
+#[derive(Debug, Clone)]
+pub struct Identity {
+    pub user_id: UserId,
+    pub sign_pub: [u8; 32],
+    pub key: VerifyingKey,
+    pub envelope: Envelope,
+}
+
+/// identity payload: `{"v":1,"userId","signPub","boxPub","created"}`, signed
+/// by `signPub` itself; `userId` must match `signPub`.
+pub fn verify_identity(env: &Envelope) -> Result<Identity, EnvError> {
+    let (bytes, m) = env.decode()?;
+    check_version(&m)?;
+    let user_id = user_field(&m)?;
+    let sign_pub = key32(&m, "signPub")?;
+    key32(&m, "boxPub")?;
+    int_field(&m, "created")?;
+    if UserId::from_sign_pub(&sign_pub) != user_id {
+        return Err(malformed("userId does not match signPub"));
+    }
+    let key = VerifyingKey::from_bytes(&sign_pub).map_err(|_| malformed("signPub is not an Ed25519 key"))?;
+    env.verify(Kind::Identity, &bytes, &key)?;
+    Ok(Identity {
+        user_id,
+        sign_pub,
+        key,
+        envelope: env.clone(),
+    })
+}
+
+/// Characters a profile name must not contain (the same set as
+/// `packages/protocol`, docs/PROTOCOL.md 4.3): C0 controls, DEL, C1 controls
+/// and bidirectional formatting characters.
+fn forbidden_in_name(c: char) -> bool {
+    matches!(
+        c,
+        '\u{0}'..='\u{1f}'
+            | '\u{7f}'..='\u{9f}'
+            | '\u{61c}'
+            | '\u{200e}'
+            | '\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2066}'..='\u{2069}'
+    )
+}
+
+/// Why a display name is unacceptable, or `None`. Unpaired surrogates cannot
+/// reach this point: `serde_json` rejects them while parsing the payload.
+pub fn name_problem(name: &str) -> Option<String> {
+    // JavaScript's `trim()` also strips U+FEFF, Rust's does not; strip it too
+    // so both sides agree on "empty".
+    if name
+        .trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
+        .is_empty()
+    {
+        return Some("name must not be empty".into());
+    }
+    if name.chars().count() > MAX_NAME_CHARS {
+        return Some(format!("name must be at most {MAX_NAME_CHARS} characters"));
+    }
+    if name.chars().any(forbidden_in_name) {
+        return Some("name contains control or bidirectional characters".into());
+    }
+    None
+}
+
+#[derive(Debug, Clone)]
+pub struct Profile {
+    pub rev: i64,
+    pub name: String,
+    pub envelope: Envelope,
+}
+
+/// profile payload: `{"v":1,"userId","name","avatar","rev","updated"}`,
+/// signed by the user's identity key.
+pub fn verify_profile(env: &Envelope, user: &UserId, key: &VerifyingKey) -> Result<Profile, EnvError> {
+    let (bytes, m) = env.decode()?;
+    check_version(&m)?;
+    if user_field(&m)? != *user {
+        return Err(malformed("profile userId is not the identity's userId"));
+    }
+    let name = str_field(&m, "name")?;
+    if let Some(problem) = name_problem(name) {
+        return Err(malformed(problem));
+    }
+    match m.get("avatar") {
+        Some(Value::Null) => {}
+        Some(Value::String(s)) if s.len() <= 128 => {}
+        _ => return Err(malformed("avatar must be null or a short string")),
+    }
+    let rev = int_field(&m, "rev")?;
+    if rev < 0 {
+        return Err(malformed("rev must not be negative"));
+    }
+    int_field(&m, "updated")?;
+    env.verify(Kind::Profile, &bytes, key)?;
+    Ok(Profile {
+        rev,
+        name: name.to_string(),
+        envelope: env.clone(),
+    })
+}
+
+#[derive(Debug, Clone)]
+pub struct AuthRequest {
+    pub user_id: UserId,
+    pub server_id: String,
+    pub nonce: String,
+    pub dev_id: DevId,
+    bytes: Vec<u8>,
+}
+
+/// auth payload: `{"v":1,"userId","serverId","nonce","devId"}`. Parsed first
+/// (to find the user's key), then verified with [`verify_auth`].
+pub fn parse_auth(env: &Envelope) -> Result<AuthRequest, EnvError> {
+    let (bytes, m) = env.decode()?;
+    check_version(&m)?;
+    Ok(AuthRequest {
+        user_id: user_field(&m)?,
+        server_id: str_field(&m, "serverId")?.to_string(),
+        nonce: str_field(&m, "nonce")?.to_string(),
+        dev_id: DevId::parse(str_field(&m, "devId")?).ok_or_else(|| malformed("bad devId"))?,
+        bytes,
+    })
+}
+
+pub fn verify_auth(env: &Envelope, req: &AuthRequest, key: &VerifyingKey) -> Result<(), EnvError> {
+    env.verify(Kind::Auth, &req.bytes, key)
+}
+
+#[doc(hidden)]
+pub mod testkit {
+    //! Signing side, for tests (unit and integration).
+    use ed25519_dalek::{Signer, SigningKey};
+    use serde_json::json;
+
+    use super::*;
+    use crate::ids::b64_encode;
+
+    pub fn seal(key: &SigningKey, kind: Kind, payload: &str) -> Envelope {
+        let sig = key.sign(&signed_bytes(kind, payload.as_bytes()));
+        Envelope {
+            payload: b64_encode(payload.as_bytes()),
+            sig: b64_encode(&sig.to_bytes()),
+        }
+    }
+
+    pub fn identity(key: &SigningKey) -> (UserId, Envelope) {
+        let pk = key.verifying_key().to_bytes();
+        let uid = UserId::from_sign_pub(&pk);
+        let p = json!({"v":1,"userId":uid.to_string(),"signPub":b64_encode(&pk),"boxPub":b64_encode(&[9u8;32]),"created":1});
+        (uid, seal(key, Kind::Identity, &p.to_string()))
+    }
+
+    pub fn profile(key: &SigningKey, uid: &UserId, name: &str, rev: i64) -> Envelope {
+        let p = json!({"v":1,"userId":uid.to_string(),"name":name,"avatar":null,"rev":rev,"updated":2});
+        seal(key, Kind::Profile, &p.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ed25519_dalek::SigningKey;
+
+    use super::testkit::*;
+    use super::*;
+    use crate::ids::b64_encode;
+
+    #[test]
+    fn identity_and_profile() {
+        let k = SigningKey::from_bytes(&[3; 32]);
+        let (uid, env) = identity(&k);
+        let id = verify_identity(&env).unwrap();
+        assert_eq!(id.user_id, uid);
+
+        // Signature over another kind does not verify.
+        let wrong = seal(
+            &k,
+            Kind::Profile,
+            &String::from_utf8(b64_decode(&env.payload).unwrap()).unwrap(),
+        );
+        assert_eq!(verify_identity(&wrong).unwrap_err(), EnvError::BadSignature);
+
+        // userId of another key.
+        let other = SigningKey::from_bytes(&[4; 32]);
+        let pk = k.verifying_key().to_bytes();
+        let p = format!(
+            r#"{{"v":1,"userId":"{}","signPub":"{}","boxPub":"{}","created":1}}"#,
+            UserId::from_sign_pub(&other.verifying_key().to_bytes()),
+            b64_encode(&pk),
+            b64_encode(&[0; 32])
+        );
+        assert!(matches!(
+            verify_identity(&seal(&k, Kind::Identity, &p)),
+            Err(EnvError::Malformed(_))
+        ));
+
+        let prof = verify_profile(&profile(&k, &uid, "Мама", 1), &uid, &id.key).unwrap();
+        assert_eq!(prof.name, "Мама");
+        assert_eq!(prof.rev, 1);
+        assert!(verify_profile(&profile(&k, &uid, &"я".repeat(64), 1), &uid, &id.key).is_ok());
+        assert!(verify_profile(&profile(&k, &uid, &"я".repeat(65), 1), &uid, &id.key).is_err());
+        assert!(verify_profile(&profile(&k, &uid, "  ", 1), &uid, &id.key).is_err());
+        assert_eq!(
+            verify_profile(&profile(&other, &uid, "x", 1), &uid, &id.key).unwrap_err(),
+            EnvError::BadSignature
+        );
+    }
+
+    #[test]
+    fn profile_name_rules_match_the_protocol_package() {
+        let k = SigningKey::from_bytes(&[6; 32]);
+        let (uid, env) = identity(&k);
+        let id = verify_identity(&env).unwrap();
+        let check = |name: &str| verify_profile(&profile(&k, &uid, name, 1), &uid, &id.key);
+        for ok in ["Мама", "Папа 👨‍👩‍👧", "a b", "O'Brien", "\u{200d}x"] {
+            assert!(check(ok).is_ok(), "{ok:?} must be accepted");
+        }
+        for bad in [
+            "a\u{0}b",
+            "tab\there",
+            "line\nbreak",
+            "del\u{7f}",
+            "c1\u{85}",
+            "c1\u{9f}",
+            "\u{61c}arabic mark",
+            "lrm\u{200e}",
+            "rlm\u{200f}",
+            "embed\u{202a}",
+            "override\u{202e}evil",
+            "isolate\u{2066}",
+            "pop\u{2069}",
+            "\u{feff}",
+            " \u{feff} ",
+        ] {
+            assert!(
+                matches!(check(bad), Err(EnvError::Malformed(_))),
+                "{bad:?} must be rejected"
+            );
+        }
+        // An unpaired surrogate escape is rejected while parsing the JSON.
+        let p = format!(r#"{{"v":1,"userId":"{uid}","name":"a\ud800b","avatar":null,"rev":1,"updated":2}}"#);
+        assert!(matches!(
+            verify_profile(&seal(&k, Kind::Profile, &p), &uid, &id.key),
+            Err(EnvError::Malformed(_))
+        ));
+    }
+
+    #[test]
+    fn auth_payload() {
+        let k = SigningKey::from_bytes(&[5; 32]);
+        let (uid, _) = identity(&k);
+        let p = format!(
+            r#"{{"v":1,"userId":"{uid}","serverId":"S","nonce":"N","devId":"{}"}}"#,
+            DevId([1; 10])
+        );
+        let env = seal(&k, Kind::Auth, &p);
+        let req = parse_auth(&env).unwrap();
+        assert_eq!(req.server_id, "S");
+        verify_auth(&env, &req, &k.verifying_key()).unwrap();
+        let tampered = Envelope {
+            payload: b64_encode(p.replace("\"S\"", "\"T\"").as_bytes()),
+            sig: env.sig.clone(),
+        };
+        let req2 = parse_auth(&tampered).unwrap();
+        assert_eq!(
+            verify_auth(&tampered, &req2, &k.verifying_key()).unwrap_err(),
+            EnvError::BadSignature
+        );
+    }
+}

@@ -1,40 +1,47 @@
 # Family Chat
 
-Семейный чат, где сервером служит папка WebDAV на домашнем роутере, а клиент это PWA. Сообщения шифруются на
-клиенте. План: [`docs/PLAN.md`](docs/PLAN.md), отложенное: [`TODOS.md`](TODOS.md).
+Семейный чат со сквозным шифрованием. Сервер `fcd` (Rust) запускается дома, хранит только шифртекст не дольше 90
+дней и сам отдаёт веб-клиент (PWA) со своего адреса. План: [`docs/PLAN-v2.md`](docs/PLAN-v2.md) (поверх
+[`docs/PLAN.md`](docs/PLAN.md)), отложенное: [`TODOS.md`](TODOS.md).
 
-План сменился: сервером становится собственная программа `fcd` на Rust ([`docs/PLAN-v2.md`](docs/PLAN-v2.md)).
-Этап M0v2 (сервер, HTTPS, уведомления): [`docs/M0v2.md`](docs/M0v2.md), код сервера в `server/`.
+Этап M1: администратор настраивает семью и приглашает родственников ссылкой, родственники переписываются в личных
+чатах с телефонов. Документы: API сервера [`docs/API.md`](docs/API.md), криптография
+[`docs/PROTOCOL.md`](docs/PROTOCOL.md), проверка сервера и HTTPS [`docs/M0v2.md`](docs/M0v2.md).
 
-Прежний этап M0: зонд совместимости сервера и проверка устройства. Как провести M0 на своём роутере:
-[`docs/M0.md`](docs/M0.md). Рецепты прокси с CORS: [`docs/recipes`](docs/recipes/README.md).
+## Запуск
+
+```bash
+fcd --data /path/to/family-chat-data
+```
+
+При первом запуске сервер печатает адрес и код администратора. Откройте адрес по HTTPS (обратный прокси, см.
+`docs/M0v2.md`), нажмите «Настроить для своей семьи» и введите код. Образ Docker собирается из корня: `Dockerfile`.
 
 ## Структура
 
 ```
-server              сервер fcd на Rust (M0v2: /v1/hello, проверки, Web Push, встроенный клиент)
-packages/protocol   форматы и криптография (с M1)
-packages/core       интерфейс Storage и его реализация для WebDAV
-apps/web            клиент (PWA); сейчас /server/, /device/ и /probe/
+server              сервер fcd на Rust: API, хранение, очистка, Web Push, встроенный клиент
+packages/protocol   идентичность, шифрование, форматы событий
+packages/core       ядро клиента без DOM: API, локальная база, синхронизация, очередь отправки
+apps/web            веб-клиент (Svelte 5, PWA); страницы проверки /device/ и /server/
 apps/site           статичный сайт (заглушка до M6)
-tools/dav-dev       WebDAV-серверы и прокси в Docker для тестов
-docs/recipes        Caddy и nginx: CORS перед WebDAV роутера
 ```
 
 ## Разработка
 
-Нужны Node 22+, pnpm 11, Docker.
+Нужны Node 22+, pnpm 11, Rust (stable).
 
 ```bash
 pnpm install
 pnpm typecheck
-pnpm test               # юнит-тесты
+pnpm test                 # модульные тесты всех пакетов
 pnpm build
-pnpm dav:up             # WebDAV-серверы в Docker
-pnpm test:integration   # Storage против серверов
-pnpm test:e2e           # зонд в браузерах против серверов
-cargo test --manifest-path server/Cargo.toml   # сервер (после pnpm build)
-pnpm test:e2e:fcd       # страница /server/ против настоящего fcd
+pnpm test:integration     # ядро против настоящего fcd
+pnpm test:e2e             # клиент в Chromium против настоящего fcd (Playwright)
+pnpm test:e2e:fcd         # страница /server/ против fcd --m0
+cd server && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
 ```
+
+`pnpm test:e2e` сам собирает клиент и `fcd`; готовый бинарник можно передать через `FCD_BIN=/путь/к/fcd`.
 
 Лицензия: MIT.

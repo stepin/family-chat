@@ -1,0 +1,239 @@
+{
+  "note": "Test vectors for docs/PROTOCOL.md. Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only. Each event case is decoded with the given context; members known to the decoder are listed in \"members\".",
+  "events": [
+    {
+      "name": "wrong-aad: message id in the header altered (AAD differs, tags still match)",
+      "bodyHex": "4643310100000000555e7bb29aa4c9c31b6140aaf8caddf50002030405060708090a0b0c0d0e0f10a0a1a2a3a4a5a6a7a8a9aaab79b7c6e7d90dfbd7b843b41dca93ea2fd2c8942a497b9c1e02359e93a53e4f9bcb832704e050fd5d422fb66f3cf1cd08b1807ef837a86f3c804ef6407cb4335e7757d808ce9d7eb85efe0956f05e2b6311f73b14d81294754bf633d403d9418a18b4698676cc19615a62d11d00354ab9c08455db63468611c87846dc8914a48d9a1695b95442cae88100882db74e69b6a6ea681968b5a444c17acd65704ffe7924e20f07b661f04cc8ceb2f48fd7d0f3d358477d89d0c5e98dd72ac46eb7f3a44e817e02a9e39374ade959a2d00fee2b59ebffbc6a35116ff744768b36df92d94d7a4609446bdc8b566d1ee39b35f1a53136736f704ca231d62c0de1d6d751c2e3d9220308a43f3e5db19f2418562517dc36b987e632e6bca95336712fab23b9457ae12645b2f8c453e60cd15ed7e2b83faa3af3c64bb1008a793de57c3c1aa961d84324c4aadf705faab52d5abee856384e0b979ba6b6c18371c5455e5055d0b021d1b1ba2e632c52df1d2ba1b1602183109bff0bba283d4e51f9c2a43a27c202239f88fd2c172e613690a4561b28455847a04172fd0c2a518846296bf1bf24ba51b269510bb12d3891c26628a79f34c3831e1f8287da109c97fab38335bad37de4c116a5dac0821218f726c1052113c3c91fab3ce773f4de78abadd64e379fa4da16fbeb7e5f723b52f3cfc28267ee197b111def06b910f1399cf7bcb52f8365272412ac54667dc4374f0e022520a4",
+      "context": {
+        "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+        "chatId": "jnlxv27bkatwnt7rc6kukxpmi4",
+        "epoch": 0,
+        "encKeyHex": "16e2dc59aa6f206bec5c59b6d176b3c9d42cfb3788700067e3819258400034ff"
+      },
+      "members": [
+        "alice",
+        "bob"
+      ],
+      "expectedError": "wrong-key"
+    },
+    {
+      "name": "wrong-aad: epoch altered in the header and in the context",
+      "bodyHex": "4643310100000001555e7bb29aa4c9c31b6140aaf8caddf50102030405060708090a0b0c0d0e0f10a0a1a2a3a4a5a6a7a8a9aaab79b7c6e7d90dfbd7b843b41dca93ea2fd2c8942a497b9c1e02359e93a53e4f9bcb832704e050fd5d422fb66f3cf1cd08b1807ef837a86f3c804ef6407cb4335e7757d808ce9d7eb85efe0956f05e2b6311f73b14d81294754bf633d403d9418a18b4698676cc19615a62d11d00354ab9c08455db63468611c87846dc8914a48d9a1695b95442cae88100882db74e69b6a6ea681968b5a444c17acd65704ffe7924e20f07b661f04cc8ceb2f48fd7d0f3d358477d89d0c5e98dd72ac46eb7f3a44e817e02a9e39374ade959a2d00fee2b59ebffbc6a35116ff744768b36df92d94d7a4609446bdc8b566d1ee39b35f1a53136736f704ca231d62c0de1d6d751c2e3d9220308a43f3e5db19f2418562517dc36b987e632e6bca95336712fab23b9457ae12645b2f8c453e60cd15ed7e2b83faa3af3c64bb1008a793de57c3c1aa961d84324c4aadf705faab52d5abee856384e0b979ba6b6c18371c5455e5055d0b021d1b1ba2e632c52df1d2ba1b1602183109bff0bba283d4e51f9c2a43a27c202239f88fd2c172e613690a4561b28455847a04172fd0c2a518846296bf1bf24ba51b269510bb12d3891c26628a79f34c3831e1f8287da109c97fab38335bad37de4c116a5dac0821218f726c1052113c3c91fab3ce773f4de78abadd64e379fa4da16fbeb7e5f723b52f3cfc28267ee197b111def06b910f1399cf7bcb52f8365272412ac54667dc4374f0e022520a4",
+      "context": {
+        "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+        "chatId": "jnlxv27bkatwnt7rc6kukxpmi4",
+        "epoch": 1,
+        "encKeyHex": "16e2dc59aa6f206bec5c59b6d176b3c9d42cfb3788700067e3819258400034ff"
+      },
+      "members": [
+        "alice",
+        "bob"
+      ],
+      "expectedError": "wrong-key"
+    },
+    {
+      "name": "moved to another chat: same bytes delivered in the Alice-Carol chat",
+      "bodyHex": "4643310100000000555e7bb29aa4c9c31b6140aaf8caddf50102030405060708090a0b0c0d0e0f10a0a1a2a3a4a5a6a7a8a9aaab79b7c6e7d90dfbd7b843b41dca93ea2fd2c8942a497b9c1e02359e93a53e4f9bcb832704e050fd5d422fb66f3cf1cd08b1807ef837a86f3c804ef6407cb4335e7757d808ce9d7eb85efe0956f05e2b6311f73b14d81294754bf633d403d9418a18b4698676cc19615a62d11d00354ab9c08455db63468611c87846dc8914a48d9a1695b95442cae88100882db74e69b6a6ea681968b5a444c17acd65704ffe7924e20f07b661f04cc8ceb2f48fd7d0f3d358477d89d0c5e98dd72ac46eb7f3a44e817e02a9e39374ade959a2d00fee2b59ebffbc6a35116ff744768b36df92d94d7a4609446bdc8b566d1ee39b35f1a53136736f704ca231d62c0de1d6d751c2e3d9220308a43f3e5db19f2418562517dc36b987e632e6bca95336712fab23b9457ae12645b2f8c453e60cd15ed7e2b83faa3af3c64bb1008a793de57c3c1aa961d84324c4aadf705faab52d5abee856384e0b979ba6b6c18371c5455e5055d0b021d1b1ba2e632c52df1d2ba1b1602183109bff0bba283d4e51f9c2a43a27c202239f88fd2c172e613690a4561b28455847a04172fd0c2a518846296bf1bf24ba51b269510bb12d3891c26628a79f34c3831e1f8287da109c97fab38335bad37de4c116a5dac0821218f726c1052113c3c91fab3ce773f4de78abadd64e379fa4da16fbeb7e5f723b52f3cfc28267ee197b111def06b910f1399cf7bcb52f8365272412ac54667dc4374f0e022520a4",
+      "context": {
+        "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+        "chatId": "ddhyy7cj4itltqkdhhgyqnfdci",
+        "epoch": 0,
+        "encKeyHex": "16e2dc59aa6f206bec5c59b6d176b3c9d42cfb3788700067e3819258400034ff"
+      },
+      "members": [
+        "alice",
+        "bob"
+      ],
+      "expectedError": "wrong-chat"
+    },
+    {
+      "name": "moved to another chat by a member who re-encrypted the signed plaintext",
+      "bodyHex": "4643310100000000555e7bb29aa4c9c3e225244d132433ca0102030405060708090a0b0c0d0e0f10a0a1a2a3a4a5a6a7a8a9aaab79b7c6e7d90dfbd7b843b41dca93ea2fd2c8942a497b9c1e02359e93a53e4f9bcb832704e050fd5d422fb66f3cf1cd08b1807ef837a86f3c804ef6407cb4335e7757d808ce9d7eb85efe0956f05e2b6311f73b14d81294754bf633d403d9418a18b4698676cc19615a62d11d00354ab9c08455db63468611c87846dc8914a48d9a1695b95442cae88100882db74e69b6a6ea681968b5a444c17acd65704ffe7924e20f07b661f04cc8ceb2f48fd7d0f3d358477d89d0c5e98dd72ac46eb7f3a44e817e02a9e39374ade959a2d00fee2b59ebffbc6a35116ff744768b36df92d94d7a4609446bdc8b566d1ee39b35f1a53136736f704ca231d62c0de1d6d751c2e3d9220308a43f3e5db19f2418562517dc36b987e632e6bca95336712fab23b9457ae12645b2f8c453e60cd15ed7e2b83faa3af3c64bb1008a793de57c3c1aa961d84324c4aadf705faab52d5abee856384e0b979ba6b6c18371c5455e5055d0b021d1b1ba2e632c52df1d2ba1b1602183109bff0bba283d4e51f9c2a43a27c202239f88fd2c172e613690a4561b28455847a04172fd0c2a518846296bf1bf24ba51b269510bb12d3891c26628a79f34c3831e1f8287da109c97fab38335bad37de4c116a5dac0821218f726c1052113c3c91fab3ce773f4de78abadd64e379fa4da16fbeb7e5f723b52f3cfc28267ee197b111def06b910f1399cf7bcb52f83a2ffdb49f5e5c0c063d007b597c3961b",
+      "context": {
+        "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+        "chatId": "ddhyy7cj4itltqkdhhgyqnfdci",
+        "epoch": 0,
+        "encKeyHex": "16e2dc59aa6f206bec5c59b6d176b3c9d42cfb3788700067e3819258400034ff"
+      },
+      "members": [
+        "alice",
+        "bob"
+      ],
+      "expectedError": "bad-signature"
+    },
+    {
+      "name": "moved to another server: same bytes, other serverId, same key",
+      "bodyHex": "4643310100000000555e7bb29aa4c9c31b6140aaf8caddf50102030405060708090a0b0c0d0e0f10a0a1a2a3a4a5a6a7a8a9aaab79b7c6e7d90dfbd7b843b41dca93ea2fd2c8942a497b9c1e02359e93a53e4f9bcb832704e050fd5d422fb66f3cf1cd08b1807ef837a86f3c804ef6407cb4335e7757d808ce9d7eb85efe0956f05e2b6311f73b14d81294754bf633d403d9418a18b4698676cc19615a62d11d00354ab9c08455db63468611c87846dc8914a48d9a1695b95442cae88100882db74e69b6a6ea681968b5a444c17acd65704ffe7924e20f07b661f04cc8ceb2f48fd7d0f3d358477d89d0c5e98dd72ac46eb7f3a44e817e02a9e39374ade959a2d00fee2b59ebffbc6a35116ff744768b36df92d94d7a4609446bdc8b566d1ee39b35f1a53136736f704ca231d62c0de1d6d751c2e3d9220308a43f3e5db19f2418562517dc36b987e632e6bca95336712fab23b9457ae12645b2f8c453e60cd15ed7e2b83faa3af3c64bb1008a793de57c3c1aa961d84324c4aadf705faab52d5abee856384e0b979ba6b6c18371c5455e5055d0b021d1b1ba2e632c52df1d2ba1b1602183109bff0bba283d4e51f9c2a43a27c202239f88fd2c172e613690a4561b28455847a04172fd0c2a518846296bf1bf24ba51b269510bb12d3891c26628a79f34c3831e1f8287da109c97fab38335bad37de4c116a5dac0821218f726c1052113c3c91fab3ce773f4de78abadd64e379fa4da16fbeb7e5f723b52f3cfc28267ee197b111def06b910f1399cf7bcb52f8365272412ac54667dc4374f0e022520a4",
+      "context": {
+        "serverId": "Zp4Lm9Qr2Ts6Uv8Wx0Yz1A",
+        "chatId": "jnlxv27bkatwnt7rc6kukxpmi4",
+        "epoch": 0,
+        "encKeyHex": "16e2dc59aa6f206bec5c59b6d176b3c9d42cfb3788700067e3819258400034ff"
+      },
+      "members": [
+        "alice",
+        "bob"
+      ],
+      "expectedError": "wrong-server"
+    },
+    {
+      "name": "wrong epoch in the context",
+      "bodyHex": "4643310100000000555e7bb29aa4c9c31b6140aaf8caddf50102030405060708090a0b0c0d0e0f10a0a1a2a3a4a5a6a7a8a9aaab79b7c6e7d90dfbd7b843b41dca93ea2fd2c8942a497b9c1e02359e93a53e4f9bcb832704e050fd5d422fb66f3cf1cd08b1807ef837a86f3c804ef6407cb4335e7757d808ce9d7eb85efe0956f05e2b6311f73b14d81294754bf633d403d9418a18b4698676cc19615a62d11d00354ab9c08455db63468611c87846dc8914a48d9a1695b95442cae88100882db74e69b6a6ea681968b5a444c17acd65704ffe7924e20f07b661f04cc8ceb2f48fd7d0f3d358477d89d0c5e98dd72ac46eb7f3a44e817e02a9e39374ade959a2d00fee2b59ebffbc6a35116ff744768b36df92d94d7a4609446bdc8b566d1ee39b35f1a53136736f704ca231d62c0de1d6d751c2e3d9220308a43f3e5db19f2418562517dc36b987e632e6bca95336712fab23b9457ae12645b2f8c453e60cd15ed7e2b83faa3af3c64bb1008a793de57c3c1aa961d84324c4aadf705faab52d5abee856384e0b979ba6b6c18371c5455e5055d0b021d1b1ba2e632c52df1d2ba1b1602183109bff0bba283d4e51f9c2a43a27c202239f88fd2c172e613690a4561b28455847a04172fd0c2a518846296bf1bf24ba51b269510bb12d3891c26628a79f34c3831e1f8287da109c97fab38335bad37de4c116a5dac0821218f726c1052113c3c91fab3ce773f4de78abadd64e379fa4da16fbeb7e5f723b52f3cfc28267ee197b111def06b910f1399cf7bcb52f8365272412ac54667dc4374f0e022520a4",
+      "context": {
+        "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+        "chatId": "jnlxv27bkatwnt7rc6kukxpmi4",
+        "epoch": 1,
+        "encKeyHex": "16e2dc59aa6f206bec5c59b6d176b3c9d42cfb3788700067e3819258400034ff"
+      },
+      "members": [
+        "alice",
+        "bob"
+      ],
+      "expectedError": "wrong-epoch"
+    },
+    {
+      "name": "wrong key: Bob-Carol key",
+      "bodyHex": "4643310100000000555e7bb29aa4c9c31b6140aaf8caddf50102030405060708090a0b0c0d0e0f10a0a1a2a3a4a5a6a7a8a9aaab79b7c6e7d90dfbd7b843b41dca93ea2fd2c8942a497b9c1e02359e93a53e4f9bcb832704e050fd5d422fb66f3cf1cd08b1807ef837a86f3c804ef6407cb4335e7757d808ce9d7eb85efe0956f05e2b6311f73b14d81294754bf633d403d9418a18b4698676cc19615a62d11d00354ab9c08455db63468611c87846dc8914a48d9a1695b95442cae88100882db74e69b6a6ea681968b5a444c17acd65704ffe7924e20f07b661f04cc8ceb2f48fd7d0f3d358477d89d0c5e98dd72ac46eb7f3a44e817e02a9e39374ade959a2d00fee2b59ebffbc6a35116ff744768b36df92d94d7a4609446bdc8b566d1ee39b35f1a53136736f704ca231d62c0de1d6d751c2e3d9220308a43f3e5db19f2418562517dc36b987e632e6bca95336712fab23b9457ae12645b2f8c453e60cd15ed7e2b83faa3af3c64bb1008a793de57c3c1aa961d84324c4aadf705faab52d5abee856384e0b979ba6b6c18371c5455e5055d0b021d1b1ba2e632c52df1d2ba1b1602183109bff0bba283d4e51f9c2a43a27c202239f88fd2c172e613690a4561b28455847a04172fd0c2a518846296bf1bf24ba51b269510bb12d3891c26628a79f34c3831e1f8287da109c97fab38335bad37de4c116a5dac0821218f726c1052113c3c91fab3ce773f4de78abadd64e379fa4da16fbeb7e5f723b52f3cfc28267ee197b111def06b910f1399cf7bcb52f8365272412ac54667dc4374f0e022520a4",
+      "context": {
+        "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+        "chatId": "jnlxv27bkatwnt7rc6kukxpmi4",
+        "epoch": 0,
+        "encKeyHex": "f5cfe5644bc7b05f9f0f63bbcc61c1e765bb622e7feaeff4308b983c4064b023"
+      },
+      "members": [
+        "alice",
+        "bob"
+      ],
+      "expectedError": "wrong-key"
+    },
+    {
+      "name": "ciphertext altered (last tag byte)",
+      "bodyHex": "4643310100000000555e7bb29aa4c9c31b6140aaf8caddf50102030405060708090a0b0c0d0e0f10a0a1a2a3a4a5a6a7a8a9aaab79b7c6e7d90dfbd7b843b41dca93ea2fd2c8942a497b9c1e02359e93a53e4f9bcb832704e050fd5d422fb66f3cf1cd08b1807ef837a86f3c804ef6407cb4335e7757d808ce9d7eb85efe0956f05e2b6311f73b14d81294754bf633d403d9418a18b4698676cc19615a62d11d00354ab9c08455db63468611c87846dc8914a48d9a1695b95442cae88100882db74e69b6a6ea681968b5a444c17acd65704ffe7924e20f07b661f04cc8ceb2f48fd7d0f3d358477d89d0c5e98dd72ac46eb7f3a44e817e02a9e39374ade959a2d00fee2b59ebffbc6a35116ff744768b36df92d94d7a4609446bdc8b566d1ee39b35f1a53136736f704ca231d62c0de1d6d751c2e3d9220308a43f3e5db19f2418562517dc36b987e632e6bca95336712fab23b9457ae12645b2f8c453e60cd15ed7e2b83faa3af3c64bb1008a793de57c3c1aa961d84324c4aadf705faab52d5abee856384e0b979ba6b6c18371c5455e5055d0b021d1b1ba2e632c52df1d2ba1b1602183109bff0bba283d4e51f9c2a43a27c202239f88fd2c172e613690a4561b28455847a04172fd0c2a518846296bf1bf24ba51b269510bb12d3891c26628a79f34c3831e1f8287da109c97fab38335bad37de4c116a5dac0821218f726c1052113c3c91fab3ce773f4de78abadd64e379fa4da16fbeb7e5f723b52f3cfc28267ee197b111def06b910f1399cf7bcb52f8365272412ac54667dc4374f0e022520a5",
+      "context": {
+        "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+        "chatId": "jnlxv27bkatwnt7rc6kukxpmi4",
+        "epoch": 0,
+        "encKeyHex": "16e2dc59aa6f206bec5c59b6d176b3c9d42cfb3788700067e3819258400034ff"
+      },
+      "members": [
+        "alice",
+        "bob"
+      ],
+      "expectedError": "wrong-key"
+    },
+    {
+      "name": "tampered signature, re-encrypted with the right key",
+      "bodyHex": "4643310100000000555e7bb29aa4c9c31b6140aaf8caddf50102030405060708090a0b0c0d0e0f10a0a1a2a3a4a5a6a7a8a9aaab79b7c6e7d90dfbd7b843b41dca93ea2fd2c8942a497a9c1e02359e93a53e4f9bcb832704e050fd5d422fb66f3cf1cd08b1807ef837a86f3c804ef6407cb4335e7757d808ce9d7eb85efe0956f05e2b6311f73b14d81294754bf633d403d9418a18b4698676cc19615a62d11d00354ab9c08455db63468611c87846dc8914a48d9a1695b95442cae88100882db74e69b6a6ea681968b5a444c17acd65704ffe7924e20f07b661f04cc8ceb2f48fd7d0f3d358477d89d0c5e98dd72ac46eb7f3a44e817e02a9e39374ade959a2d00fee2b59ebffbc6a35116ff744768b36df92d94d7a4609446bdc8b566d1ee39b35f1a53136736f704ca231d62c0de1d6d751c2e3d9220308a43f3e5db19f2418562517dc36b987e632e6bca95336712fab23b9457ae12645b2f8c453e60cd15ed7e2b83faa3af3c64bb1008a793de57c3c1aa961d84324c4aadf705faab52d5abee856384e0b979ba6b6c18371c5455e5055d0b021d1b1ba2e632c52df1d2ba1b1602183109bff0bba283d4e51f9c2a43a27c202239f88fd2c172e613690a4561b28455847a04172fd0c2a518846296bf1bf24ba51b269510bb12d3891c26628a79f34c3831e1f8287da109c97fab38335bad37de4c116a5dac0821218f726c1052113c3c91fab3ce773f4de78abadd64e379fa4da16fbeb7e5f723b52f3cfc28267ee197b111def06b910f1399cf7bcb52f836aadaa3c833f909217c58f2542be0f10",
+      "context": {
+        "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+        "chatId": "jnlxv27bkatwnt7rc6kukxpmi4",
+        "epoch": 0,
+        "encKeyHex": "16e2dc59aa6f206bec5c59b6d176b3c9d42cfb3788700067e3819258400034ff"
+      },
+      "members": [
+        "alice",
+        "bob"
+      ],
+      "expectedError": "bad-signature"
+    },
+    {
+      "name": "unknown author: Alice is not a member known to the decoder",
+      "bodyHex": "4643310100000000555e7bb29aa4c9c31b6140aaf8caddf50102030405060708090a0b0c0d0e0f10a0a1a2a3a4a5a6a7a8a9aaab79b7c6e7d90dfbd7b843b41dca93ea2fd2c8942a497b9c1e02359e93a53e4f9bcb832704e050fd5d422fb66f3cf1cd08b1807ef837a86f3c804ef6407cb4335e7757d808ce9d7eb85efe0956f05e2b6311f73b14d81294754bf633d403d9418a18b4698676cc19615a62d11d00354ab9c08455db63468611c87846dc8914a48d9a1695b95442cae88100882db74e69b6a6ea681968b5a444c17acd65704ffe7924e20f07b661f04cc8ceb2f48fd7d0f3d358477d89d0c5e98dd72ac46eb7f3a44e817e02a9e39374ade959a2d00fee2b59ebffbc6a35116ff744768b36df92d94d7a4609446bdc8b566d1ee39b35f1a53136736f704ca231d62c0de1d6d751c2e3d9220308a43f3e5db19f2418562517dc36b987e632e6bca95336712fab23b9457ae12645b2f8c453e60cd15ed7e2b83faa3af3c64bb1008a793de57c3c1aa961d84324c4aadf705faab52d5abee856384e0b979ba6b6c18371c5455e5055d0b021d1b1ba2e632c52df1d2ba1b1602183109bff0bba283d4e51f9c2a43a27c202239f88fd2c172e613690a4561b28455847a04172fd0c2a518846296bf1bf24ba51b269510bb12d3891c26628a79f34c3831e1f8287da109c97fab38335bad37de4c116a5dac0821218f726c1052113c3c91fab3ce773f4de78abadd64e379fa4da16fbeb7e5f723b52f3cfc28267ee197b111def06b910f1399cf7bcb52f8365272412ac54667dc4374f0e022520a4",
+      "context": {
+        "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+        "chatId": "jnlxv27bkatwnt7rc6kukxpmi4",
+        "epoch": 0,
+        "encKeyHex": "16e2dc59aa6f206bec5c59b6d176b3c9d42cfb3788700067e3819258400034ff"
+      },
+      "members": [
+        "bob",
+        "carol"
+      ],
+      "expectedError": "unknown-author"
+    },
+    {
+      "name": "non-zero padding",
+      "bodyHex": "4643310100000000555e7bb29aa4c9c31b6140aaf8caddf50102030405060708090a0b0c0d0e0f10a0a1a2a3a4a5a6a7a8a9aaab79b7c6e7d90dfbd7b843b41dca93ea2fd2c8942a497b9c1e02359e93a53e4f9bcb832704e050fd5d422fb66f3cf1cd08b1807ef837a86f3c804ef6407cb4335e7757d808ce9d7eb85efe0956f05e2b6311f73b14d81294754bf633d403d9418a18b4698676cc19615a62d11d00354ab9c08455db63468611c87846dc8914a48d9a1695b95442cae88100882db74e69b6a6ea681968b5a444c17acd65704ffe7924e20f07b661f04cc8ceb2f48fd7d0f3d358477d89d0c5e98dd72ac46eb7f3a44e817e02a9e39374ade959a2d00fee2b59ebffbc6a35116ff744768b36df92d94d7a4609446bdc8b566d1ee39b35f1a53136736f704ca231d62c0de1d6d751c2e3d9220308a43f3e5db19f2418562517dc36b987e632e6bca95336712fab23b9457ae12645b2f8c453e60cd15ed7e2b83faa3af3c64bb1008a793de57c3c1aa961d84324c4aadf705faab52d5abee856384e0b979ba6b6c18371c5455e5055d0b021d1b1ba2e632c52df1d2ba1b1602183109bff0bba283d4e51f9c2a43a27c202239f88fd2c172e613690a4561b28455847a04172fd0c2a518846296bf1bf24ba51b269510bb12d3891c26628a79f34c3831e1f8287da109c97fab38335bad37de4c116a5dac0821218f726c1052113c3c91fab3ce773f4de78abadd64e379fa4da16fbeb7e5f723b52f3cfc28267ee197b111def06b910f1399cf7bcb52f823b0593b599fc9b3ab13bc0db3b9cba85",
+      "context": {
+        "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+        "chatId": "jnlxv27bkatwnt7rc6kukxpmi4",
+        "epoch": 0,
+        "encKeyHex": "16e2dc59aa6f206bec5c59b6d176b3c9d42cfb3788700067e3819258400034ff"
+      },
+      "members": [
+        "alice",
+        "bob"
+      ],
+      "expectedError": "malformed"
+    },
+    {
+      "name": "truncated body",
+      "bodyHex": "4643310100000000555e7bb29aa4c9c31b6140aaf8caddf50102030405060708090a0b0c0d0e0f10a0a1a2a3a4a5a6a7a8a9aaab79b7c6e7d90dfbd7b843b41dca93ea2fd2c8942a497b9c1e02359e93a53e4f9bcb832704e050fd5d422fb66f3cf1cd08b1807ef837a86f3c804ef6407cb4335e7757d808ce9d7eb85efe0956f05e2b6311f73b14d81294754bf633d403d9418a18b4698676cc19615a62d11d00354ab9c08455db63468611c87846dc8914a48d9a1695b95442cae88100882db74e69b6a6ea681968b5a444c17acd65704ffe7924e20f07b661f04cc8ceb2f48fd7d0f3d358477d89d0c5e98dd72ac46eb7f3a44e817e02a9e39374ade959a2d00fee2b59ebffbc6a35116ff744768b36df92d94d7a4609446bdc8b566d1ee39b35f1a53136736f704ca231d62c0de1d6d751c2e3d9220308a43f3e5db19f2418562517dc36b987e632e6bca95336712fab23b9457ae12645b2f8c453e60cd15ed7e2b83faa3af3c64bb1008a793de57c3c1aa961d84324c4aadf705faab52d5abee856384e0b979ba6b6c18371c5455e5055d0b021d1b1ba2e632c52df1d2ba1b1602183109bff0bba283d4e51f9c2a43a27c202239f88fd2c172e613690a4561b28455847a04172fd0c2a518846296bf1bf24ba51b269510bb12d3891c26628a79f34c3831e1f8287da109c97fab38335bad37de4c116a5dac0821218f726c1052113c3c91fab3ce773f4de78abadd64e379fa4da16fbeb7e5f723b52f3cfc28267ee197b111def06b910f1399cf7bcb52f8365272412ac54667dc4374f0e022520",
+      "context": {
+        "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
+        "chatId": "jnlxv27bkatwnt7rc6kukxpmi4",
+        "epoch": 0,
+        "encKeyHex": "16e2dc59aa6f206bec5c59b6d176b3c9d42cfb3788700067e3819258400034ff"
+      },
+      "members": [
+        "alice",
+        "bob"
+      ],
+      "expectedError": "malformed"
+    }
+  ],
+  "envelopes": [
+    {
+      "name": "identity with tampered signature",
+      "kind": "identity",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsInNpZ25QdWIiOiJwT0FTWWNyYkJETUQteEdFVEtOdm5uYU1YdURjWUxOSnpBcERha1BqbnJzIiwiYm94UHViIjoibDctNzdlYTAxQnVuN0Y4OWxVZDR1RUZ5NTFVY09LRE0zdmEtckd3UDZsUSIsImNyZWF0ZWQiOjE3OTQ3ODcyMDAwMDB9\",\"sig\":\"dWUGr8fKqrfrzkA7X9ZJaekx4PltudgnKnFF4romIjRUNbZyGN-JhSCXDfWZa3B8BZwGNRRpxugO3m5MYzbhCQ\"}",
+      "expectedError": "bad-signature"
+    },
+    {
+      "name": "identity with tampered payload (created + 1), original signature",
+      "kind": "identity",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsInNpZ25QdWIiOiJwT0FTWWNyYkJETUQteEdFVEtOdm5uYU1YdURjWUxOSnpBcERha1BqbnJzIiwiYm94UHViIjoibDctNzdlYTAxQnVuN0Y4OWxVZDR1RUZ5NTFVY09LRE0zdmEtckd3UDZsUSIsImNyZWF0ZWQiOjE3OTQ3ODcyMDAwMDF9\",\"sig\":\"dWUGr8fKqrfrzkE7X9ZJaekx4PltudgnKnFF4romIjRUNbZyGN-JhSCXDfWZa3B8BZwGNRRpxugO3m5MYzbhCQ\"}",
+      "expectedError": "bad-signature"
+    },
+    {
+      "name": "identity whose userId is not the hash of signPub",
+      "kind": "identity",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiI3cTczZ200M2I2a2Z2N215eDdxZ3VwYXRkaSIsInNpZ25QdWIiOiJwT0FTWWNyYkJETUQteEdFVEtOdm5uYU1YdURjWUxOSnpBcERha1BqbnJzIiwiYm94UHViIjoibDctNzdlYTAxQnVuN0Y4OWxVZDR1RUZ5NTFVY09LRE0zdmEtckd3UDZsUSIsImNyZWF0ZWQiOjE3OTQ3ODcyMDAwMDB9\",\"sig\":\"qKMHSXED78DYkg2vCFTnBcNuxn2TPUwQ6zQ_zr7NOwSNsrBA9rfd8etJSSOjT-BpQSCOxeOOrj9dYXr46yjoBg\"}",
+      "expectedError": "user-id-mismatch"
+    },
+    {
+      "name": "profile signed by Alice checked against Bob identity",
+      "kind": "profile",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQkNC70LjRgdCwIiwiYXZhdGFyIjpudWxsLCJyZXYiOjEsInVwZGF0ZWQiOjE3OTQ3ODcyMDEwMDB9\",\"sig\":\"OG0mQ8W6AfjRtAUCYtS3KFwS_pUlvrhwDZVjmYVTRXui1QL922qllxAbh5wBcslx9fLqSrC5lhbq3QtLivwTBg\"}",
+      "signer": "bob",
+      "expectedError": "user-id-mismatch"
+    },
+    {
+      "name": "auth envelope signature replaced by the identity signature",
+      "kind": "auth",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsInNlcnZlcklkIjoicThKYjNrVmYwdzJYeTdIblQxc1o5QSIsIm5vbmNlIjoibjBuY2UtQ2hhbGxlbmdlXzEyMyIsImRldklkIjoibWZyZ2d6ZGZtenR3cTJsayJ9\",\"sig\":\"dWUGr8fKqrfrzkE7X9ZJaekx4PltudgnKnFF4romIjRUNbZyGN-JhSCXDfWZa3B8BZwGNRRpxugO3m5MYzbhCQ\"}",
+      "signer": "alice",
+      "expectedError": "bad-signature"
+    }
+  ],
+  "phrases": [
+    {
+      "name": "bad checksum: last word replaced",
+      "phrase": "abandon amount liar amount expire adjust cage candy arch gather drum bullet absurd math era live bid rhythm alien crouch range attend journey abandon",
+      "expectedError": "phrase-checksum"
+    },
+    {
+      "name": "unknown word at position 3",
+      "phrase": "abandon amount notaword amount expire adjust cage candy arch gather drum bullet absurd math era live bid rhythm alien crouch range attend journey unaware",
+      "expectedError": "phrase-unknown-word",
+      "positions": [
+        3
+      ]
+    },
+    {
+      "name": "23 words",
+      "phrase": "abandon amount liar amount expire adjust cage candy arch gather drum bullet absurd math era live bid rhythm alien crouch range attend journey",
+      "expectedError": "phrase-word-count"
+    }
+  ]
+}
