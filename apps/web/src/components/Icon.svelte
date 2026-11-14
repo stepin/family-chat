@@ -21,7 +21,13 @@
     | 'zoom-in'
     | 'zoom-out'
     | 'shield'
-    | 'forward';
+    | 'forward'
+    | 'mic'
+    | 'trash'
+    | 'lock'
+    | 'play'
+    | 'pause'
+    | 'pin';
 
   // 24x24 outline paths (stroke = currentColor).
   const PATHS: Record<IconName, string> = {
@@ -49,6 +55,12 @@
     'zoom-out': 'M10.5 17.5a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20.5 20.5l-5-5M7.5 10.5h6',
     shield: 'M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z',
     forward: 'M9 5l7 7-7 7',
+    mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3',
+    trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+    lock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3',
+    play: 'M8 5v14l11-7z',
+    pause: 'M9 5v14M15 5v14',
+    pin: 'M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
   };
 </script>
 

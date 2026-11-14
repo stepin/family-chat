@@ -68,6 +68,7 @@ export type {
   IdentityRow,
   UserRow,
   ChatRow,
+  LastMedia,
   LastMessage,
   EventRow,
   MessageRow,

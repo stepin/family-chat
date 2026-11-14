@@ -5,8 +5,11 @@
   import { takeInviteFromLocation } from './lib/invite.ts';
   import { refreshSubscription } from './lib/push.ts';
   import { t } from './lib/strings.ts';
-  import Onboarding from './screens/onboarding/Onboarding.svelte';
+  import { lazy } from './lib/lazy.ts';
   import Main from './screens/Main.svelte';
+
+  // Onboarding is seen once per device: it loads only when needed.
+  const Onboarding = lazy(() => import('./screens/onboarding/Onboarding.svelte'));
 
   /** Opens the chat a notification pointed to (by chat id; one account in the interface). */
   function openChatById(chatId: string | null): void {
@@ -75,7 +78,17 @@
 {:else if nav.root.name === 'list' && app.account}
   <Main />
 {:else}
-  <Onboarding />
+  {#await Onboarding()}
+    <div class="splash" role="status">{t.boot.loading}</div>
+  {:then { default: OnboardingScreen }}
+    <OnboardingScreen />
+  {:catch}
+    <main class="fatal">
+      <h1>{t.boot.startFailedTitle}</h1>
+      <p>{t.boot.startFailedText}</p>
+      <button class="btn" type="button" onclick={() => location.reload()}>{t.boot.reload}</button>
+    </main>
+  {/await}
 {/if}
 
 {#if app.toast}

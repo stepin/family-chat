@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { isCoreError, type GroupView, type MessageView } from '@family-chat/core';
-  import AttachPreview from '../components/AttachPreview.svelte';
   import Avatar from '../components/Avatar.svelte';
   import Composer from '../components/Composer.svelte';
   import Icon from '../components/Icon.svelte';
-  import ImageViewer, { type ViewerImage } from '../components/ImageViewer.svelte';
+  import type { ViewerImage } from '../components/ImageViewer.svelte';
+  import type { Place } from '../lib/location.ts';
+  import type { VoiceRecording } from '../lib/recorder.ts';
+  import { voiceFileName } from '../lib/voice.ts';
   import MessageBubble from '../components/MessageBubble.svelte';
   import { app, follow } from '../lib/app.svelte.ts';
   import { isDisplayableImage } from '../lib/attachment-state.ts';
@@ -48,6 +50,12 @@
   let dragging = $state(false);
   // Image viewer.
   let viewerIndex = $state<number | null>(null);
+  // "Место" sheet.
+  let locating = $state(false);
+  // Rarely used parts load on first use (code splitting): the preview, the viewer, the place sheet.
+  const loadPreview = () => import('../components/AttachPreview.svelte');
+  const loadViewer = () => import('../components/ImageViewer.svelte');
+  const loadLocation = () => import('../components/LocationSheet.svelte');
 
   const account = $derived(app.accounts.find((a) => a.id === accountId) ?? null);
   const summary = $derived(app.chatList.find((c) => c.accountId === accountId && c.chatId === chatId) ?? null);
@@ -130,7 +138,10 @@
         if (newest.kind === 'service' && newest.service) announce = serviceText(newest.service, { me: account?.userId ?? '', nameOf });
         else {
           const who = kind === 'group' ? nameOf(newest.senderId) : title;
-          const text = newest.body.slice(0, 200) || t.list.attachment((newest.attachments ?? []).length);
+          const first = newest.attachments?.[0];
+          const text =
+            newest.body.slice(0, 200) ||
+            (newest.location ? t.list.location : first?.kind === 'voice' ? t.list.voice : t.list.attachment((newest.attachments ?? []).length));
           announce = `${t.chat.incoming(who)}: ${text}`;
         }
       }
@@ -249,10 +260,44 @@
       afterFirstSend();
     } catch (e) {
       if (isCoreError(e, 'too-large')) app.notify(t.attach.tooLargeAny(app.hello ? `${app.hello.maxFileMb} МБ` : formatBytes(0)));
+      else if (isCoreError(e, 'no-space')) app.notify(t.attach.noSpace);
       else app.notify(isCoreError(e, 'invalid-input') ? t.attach.failed : errorText(e));
       app.log('warn', 'chat', 'sending attachments failed', e);
     } finally {
       sendingFiles = false;
+    }
+  }
+
+  async function sendVoice(rec: VoiceRecording): Promise<boolean> {
+    if (blocked) return false;
+    try {
+      stickToBottom = true;
+      await app.core.sendMessage(accountId, chatId, {
+        attachments: [
+          { data: rec.blob, name: voiceFileName(rec.mime, Date.now()), mime: rec.mime, kind: 'voice', durationMs: rec.durationMs, peaks: rec.peaks },
+        ],
+      });
+      afterFirstSend();
+      return true;
+    } catch (e) {
+      if (isCoreError(e, 'no-space')) app.notify(t.attach.noSpace);
+      else if (isCoreError(e, 'too-large')) app.notify(t.attach.tooLargeAny(app.hello ? `${app.hello.maxFileMb} МБ` : ''));
+      else app.notify(errorText(e));
+      app.log('warn', 'chat', 'sending a voice message failed', e);
+      return true; // the reason was already shown
+    }
+  }
+
+  async function sendPlace(place: Place): Promise<boolean> {
+    try {
+      stickToBottom = true;
+      await app.core.sendMessage(accountId, chatId, { location: place });
+      afterFirstSend();
+      return true;
+    } catch (e) {
+      app.notify(errorText(e));
+      app.log('warn', 'chat', 'sending a place failed', e);
+      return false;
     }
   }
 
@@ -300,7 +345,7 @@
   }
 
   function onKeydown(e: KeyboardEvent): void {
-    if (e.key === 'Escape' && !app.wide && viewerIndex === null && pending.length === 0) nav.back();
+    if (e.key === 'Escape' && !e.defaultPrevented && !app.wide && viewerIndex === null && pending.length === 0 && !locating) nav.back();
   }
 
   // Drag and drop of files onto the chat (desktop).
@@ -468,7 +513,16 @@
   {#if blocked}
     <p class="blocked" role="status" data-testid="composer-blocked">{blocked}</p>
   {:else if showComposer}
-    <Composer bind:this={composer} {accountId} {chatId} autofocus={focus} onsend={send} onfiles={onFiles} />
+    <Composer
+      bind:this={composer}
+      {accountId}
+      {chatId}
+      autofocus={focus}
+      onsend={send}
+      onfiles={onFiles}
+      onvoice={sendVoice}
+      onlocation={() => (locating = true)}
+    />
   {/if}
 
   {#if dragging}
@@ -477,19 +531,29 @@
 </section>
 
 {#if pending.length > 0}
-  <AttachPreview
-    bind:files={pending}
-    bind:caption
-    maxBytes={app.hello?.maxBlobBytes ?? null}
-    limitText={app.hello ? `${app.hello.maxFileMb} МБ` : ''}
-    busy={sendingFiles}
-    onsend={sendFiles}
-    oncancel={closePreview}
-  />
+  {#await loadPreview() then { default: AttachPreview }}
+    <AttachPreview
+      bind:files={pending}
+      bind:caption
+      maxBytes={app.hello?.maxBlobBytes ?? null}
+      limitText={app.hello ? `${app.hello.maxFileMb} МБ` : ''}
+      busy={sendingFiles}
+      onsend={sendFiles}
+      oncancel={closePreview}
+    />
+  {/await}
 {/if}
 
 {#if viewerIndex !== null && images.length > 0}
-  <ImageViewer {accountId} {images} bind:index={viewerIndex} onclose={closeViewer} />
+  {#await loadViewer() then { default: ImageViewer }}
+    <ImageViewer {accountId} {images} bind:index={viewerIndex} onclose={closeViewer} />
+  {/await}
+{/if}
+
+{#if locating}
+  {#await loadLocation() then { default: LocationSheet }}
+    <LocationSheet onsend={sendPlace} oncancel={() => (locating = false)} />
+  {/await}
 {/if}
 
 <style>

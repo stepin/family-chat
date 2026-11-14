@@ -1,6 +1,6 @@
 # @family-chat/core
 
-Клиентское ядро без интерфейса и без DOM (этап M2): клиент API сервера `fcd`, локальная база (IndexedDB через Dexie), вход и идентичность, синхронизация длинным запросом, очередь отправки, участники, группы с эпохами, чат с самим собой, вложения, аватары, отметка «проверен», отзыв идентичности, архив `.fcarchive`, администрирование, push и фасад для интерфейса. Работает в странице, воркере и service worker (нужны `fetch`, IndexedDB, WebCrypto и таймеры; для файлов по возможности OPFS).
+Клиентское ядро без интерфейса и без DOM (этапы M2 и M3): клиент API сервера `fcd`, локальная база (IndexedDB через Dexie), вход и идентичность, синхронизация длинным запросом, очередь отправки, участники, группы с эпохами, чат с самим собой, вложения, аватары, отметка «проверен», отзыв идентичности, архив `.fcarchive`, администрирование, push и фасад для интерфейса. Работает в странице, воркере и service worker (нужны `fetch`, IndexedDB, WebCrypto и таймеры; для файлов по возможности OPFS).
 
 Контракт с сервером: `docs/API.md`; криптография: `docs/PROTOCOL.md` и пакет `@family-chat/protocol`.
 
@@ -60,7 +60,8 @@ await core.sendMessage(acc.id, chatId, { text: 'Фото', attachments: [{ data:
 - `kind`: `msg`, `update-required` («обновите приложение»), `service` (служебная строка группы, см. `service`).
 - `attachments`: `AttachmentView[]` (пустой список, если вложений нет).
 - `upload`: `{done, total}` в байтах, пока сообщение с вложениями ждёт загрузки частей («Загружается N%»); `null` у остальных.
-- `location`, `fwd`: передаются как есть (запись места и пересылка появятся позже).
+- `location` (M3): `{lat, lon, accuracy}` или `null`; `fwd` передаётся как есть (пересылка появится позже).
+- `error: 'storage_full'` у сообщения `on-device`: на диске сервера не хватает места (507); загрузка и отправка повторяются сами, текст и файлы остаются в очереди.
 - `service` (у `kind: 'service'`, `senderId` пустой):
 
 | `service.type` | Поля | Строка в ленте |
@@ -130,14 +131,26 @@ await core.sendMessage(acc.id, chatId, {
 
 - Картинку готовит интерфейс (уменьшение, удаление EXIF, миниатюра JPEG до 4096 байт: это API браузера): в ядро приходят готовые байты, размеры и миниатюра. Голосовые: `durationMs` и ровно 64 `peaks`. Для своих проверок интерфейс берёт из ядра `IMAGE_TYPES`, `MAX_ATTACHMENTS`, `MAX_THUMB_BYTES` (константы протокола).
 - Размер проверяется по `maxBlobBytes` из `/v1/hello` до начала (`CoreError` `too-large`), описатель по правилам протокола (`invalid-input`), не больше 10 вложений.
-- Файл один раз копируется в хранилище приложения (OPFS, где он есть с потоками записи, иначе IndexedDB; выбор при запуске, опция `fileStore: 'auto' | 'opfs' | 'idb'`), затем шифруется по частям на лету и загружается частями по 4 МиБ. После перезапуска загрузка продолжается: ядро спрашивает сервер, какие части уже есть, и досылает недостающие. Сообщение уходит после загрузки всех частей. В памяти не больше одной части.
+- Файл один раз копируется в хранилище приложения (OPFS, где он есть с потоками записи, иначе IndexedDB; выбор при запуске, опция `fileStore: 'auto' | 'opfs' | 'idb'`), затем шифруется по частям на лету и загружается частями по 4 МиБ. В OPFS каждая часть лежит отдельным файлом (`<ключ>.parts/<n>`, с M3): запись одной части не переписывает остальные. Файлы M2 (один файл на вложение) читаются и удаляются как раньше. После перезапуска загрузка продолжается: ядро спрашивает сервер, какие части уже есть, и досылает недостающие. Сообщение уходит после загрузки всех частей. В памяти не больше одной части.
+- Нехватка места на устройстве: `CoreError` `no-space` до отправки (копия не создаётся, сообщение не ставится в очередь); у скачивания статус `failed` с `error: 'no-space'`, повтор после освобождения места. Ответ сервера 507 (`storage_full`) считается временным: загрузка ждёт и повторяется, `AttachmentView.error` и `MessageView.error` равны `storage_full`.
+- Отмена в любой момент (в этой или другой вкладке) не даёт загрузке «ожить»: смена статуса передачи идёт как сравнение-и-запись в одной транзакции; часть, успевшая уйти на сервер после отмены, удаляется.
 - Прогресс: `MessageView.upload` и `core.transfers`. Отмена сообщения `core.cancel(acc, msgId)` отменяет и загрузки (части удаляются с сервера); `core.cancelTransfer(acc, blobId)` отменяет одну загрузку (сообщение станет `failed`). `core.retry` перезапускает упавшие загрузки.
 
 Получение:
 
 - `AttachmentView.status`: `not-downloaded`, `downloading` (с `progress` 0..1), `ready`, `failed`, `gone` (удалено с сервера отправителем или по сроку), у своих: `uploading`, `cancelled`.
 - Картинки и голосовые до 10 МБ скачиваются сами (настройка `SETTING_AUTO_DOWNLOAD`, по умолчанию включено), остальное по `core.downloadAttachment(acc, blobId)`. `core.cancelTransfer` возвращает в «не скачано».
+- Голосовые (M3): `AttachmentView.durationMs`, `peaks` (64 значения 0-255) и `heard` (прослушано на этом устройстве; у своих всегда `true`). `core.markHeard(acc, blobId)` снимает отметку «не прослушано» (локально, на сервер не уходит).
+- Скачивание продолжается после перезапуска с первой недостающей части.
 - Содержимое: `core.attachmentBlob(acc, blobId)` даёт `Blob` из хранилища (OPFS-файл или Blob из IndexedDB, без чтения целиком в память ядром); `core.attachmentUrl(acc, blobId)` даёт `blob:`-адрес, отзывать его `URL.revokeObjectURL` должен интерфейс.
+
+## Место (M3)
+
+```ts
+await core.sendMessage(acc.id, chatId, { location: { lat: 55.7558, lon: 37.6173, accuracy: 25 } });   // без текста можно
+```
+
+Широта, долгота и точность проверяются до постановки в очередь (`invalid-input`). В `ChatSummary.lastMessage.media` для списка чатов: `image`, `voice`, `file`, `location` или `null`.
 
 ## Профиль, аватары, контакты
 
@@ -172,7 +185,7 @@ Service worker на push вызывает `handlePushPayload(event.data.json())`
 
 ## Ошибки
 
-- `CoreError` с `code`: прежние (`no-account`, `no-identity`, `account-exists`, `login-invalid`, `removed`, `unknown-user`, `unknown-chat`, `invalid-input`, `unsupported-server`, `closed`) и новые: `too-large`, `not-member`, `not-owner`, `owner-cannot-leave`, `busy`, `need-key`, `peer-revoked`, `revoked`, `wrong-identity`, `bad-archive`, `gone`. `self-chat` больше не возникает.
+- `CoreError` с `code`: прежние (`no-account`, `no-identity`, `account-exists`, `login-invalid`, `removed`, `unknown-user`, `unknown-chat`, `invalid-input`, `unsupported-server`, `closed`) и новые: `too-large`, `not-member`, `not-owner`, `owner-cannot-leave`, `busy`, `need-key`, `peer-revoked`, `revoked`, `wrong-identity`, `bad-archive`, `gone`. `self-chat` больше не возникает. M3: `no-space` (на устройстве не хватает места).
 - `ApiError` (`code` как в `docs/API.md`, `details.epoch|limit|rev|version`) и `NetworkError` из транспорта; `isTransient(e)` говорит, поможет ли повтор.
 - В текстах ошибок и в диагностике нет токенов, ключей, фраз и текста сообщений.
 

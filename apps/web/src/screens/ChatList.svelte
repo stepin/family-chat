@@ -118,7 +118,9 @@
     if (!last) return c.kind === 'self' ? t.list.selfChatEmpty : t.list.emptyChat;
     if (last.kind === 'update-required') return t.list.updateRequired;
     if (last.kind === 'service') return t.list.groupChanged;
-    const body = last.body.replace(/\s+/g, ' ').trim() || t.list.attachment(1);
+    const media =
+      last.media === 'voice' ? t.list.voice : last.media === 'location' ? t.list.location : last.media === 'image' ? t.list.photo : last.media === 'file' ? t.list.file : null;
+    const body = last.body.replace(/\s+/g, ' ').trim() || media || t.list.attachment(1);
     if (last.outgoing && c.kind !== 'self') return `${t.list.youPrefix} ${body}`;
     if (c.kind === 'group' && last.senderId) {
       const who = names.get(last.senderId);

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { AttachmentView } from '@family-chat/core';
   import Icon from './Icon.svelte';
+  import VoicePlayer from './VoicePlayer.svelte';
   import { app } from '../lib/app.svelte.ts';
   import { attachmentUi, isDisplayableImage, thumbDataUrl } from '../lib/attachment-state.ts';
   import { formatBytes } from '../lib/format.ts';
@@ -18,9 +19,11 @@
     sentAt,
     now,
     onopen,
+    outgoing = false,
   }: {
     accountId: string;
     attachment: AttachmentView;
+    outgoing?: boolean;
     sentAt: number | null;
     now: number;
     onopen?: ((blobId: string) => void) | undefined;
@@ -34,13 +37,18 @@
   let url = $state<string | null>(null);
   let busy = $state(false);
 
-  // The picture itself once it is in app storage.
+  // The picture itself once it is in app storage. Only primitives are read
+  // here: the attachment object is new on every database change, which must
+  // not reload the picture.
+  const showReady = $derived(image && attachment.status === 'ready');
+  const blobId = $derived(attachment.blobId);
+  const acc = $derived(accountId);
   $effect(() => {
-    if (!image || attachment.status !== 'ready') return;
+    if (!showReady) return;
     let current: string | null = null;
     let cancelled = false;
     void app.core
-      .attachmentUrl(accountId, attachment.blobId)
+      .attachmentUrl(acc, blobId)
       .then((u) => {
         if (cancelled) URL.revokeObjectURL(u);
         else url = current = u;
@@ -92,7 +100,9 @@
   );
 </script>
 
-{#if image}
+{#if attachment.kind === 'voice'}
+  <VoicePlayer {accountId} {attachment} {outgoing} {sentAt} {now} />
+{:else if image}
   <div class="image" data-testid="attachment-image" data-status={attachment.status}>
     <button
       class="frame"
@@ -125,7 +135,7 @@
     <span class="file-text">
       <span class="file-name">{attachment.name}</span>
       <span class="file-meta tabular">
-        {formatBytes(attachment.size)}{#if ui.label && attachment.status !== 'uploading'}<span class:error-text={ui.tone === 'error'}> · {ui.label}</span>{/if}
+        {formatBytes(attachment.size)}{#if ui.label && (attachment.status !== 'uploading' || ui.tone === 'error')}<span class:error-text={ui.tone === 'error'}> · {ui.label}</span>{/if}
       </span>
       {#if ui.percent !== null && attachment.status === 'downloading'}
         <progress max="100" value={ui.percent} aria-label={ui.label ?? ''}></progress>

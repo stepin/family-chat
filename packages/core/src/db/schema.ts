@@ -125,7 +125,11 @@ export interface LastMessage {
   body: string;
   gseq: number;
   time: number;
+  /** What the message carries besides text (M3, for the chat list preview): first attachment kind or a place. */
+  media?: LastMedia;
 }
+
+export type LastMedia = 'image' | 'voice' | 'file' | 'location';
 
 export type ChatKind = 'dm' | 'self' | 'group';
 
@@ -383,6 +387,8 @@ export interface BlobRow {
   /** Where the plaintext copy lives. */
   storage: 'opfs' | 'idb' | null;
   createdAt: number;
+  /** Received voice message: played at least once on this device (M3; absent: not yet). */
+  heard?: boolean;
 }
 
 /** One 4 MiB chunk of a file kept in IndexedDB (the fallback file store). */

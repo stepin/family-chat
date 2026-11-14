@@ -45,7 +45,9 @@ export type CoreErrorCode =
   /** The archive is damaged, truncated or not an archive. */
   | 'bad-archive'
   /** An attachment is not on the server any more (deleted or expired). */
-  | 'gone';
+  | 'gone'
+  /** Not enough storage space on this device (copying or downloading a file). */
+  | 'no-space';
 
 export class CoreError extends Error {
   override readonly name = 'CoreError';

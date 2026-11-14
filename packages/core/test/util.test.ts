@@ -119,13 +119,17 @@ describe('locks', () => {
     const factory = new IDBFactory();
     const db1 = new CoreDb('lease', { indexedDB: factory, IDBKeyRange });
     const db2 = new CoreDb('lease', { indexedDB: factory, IDBKeyRange });
-    const l1 = new LeaseLocks(db1, systemClock, { ttlMs: 60, pollMs: 5, owner: 'one' });
-    const l2 = new LeaseLocks(db2, systemClock, { ttlMs: 60, pollMs: 5, owner: 'two' });
+    // A lease is time-based by design: a holder stalled for longer than the
+    // ttl loses it. With a 60 ms ttl a loaded machine (event loop pauses over
+    // 40 ms) broke the exclusion in this test, not in the lock; 600 ms keeps
+    // the same check without that assumption.
+    const l1 = new LeaseLocks(db1, systemClock, { ttlMs: 600, pollMs: 5, owner: 'one' });
+    const l2 = new LeaseLocks(db2, systemClock, { ttlMs: 600, pollMs: 5, owner: 'two' });
     const order: string[] = [];
     await Promise.all([
       l1.request('q', async () => {
         order.push('1-in');
-        await sleep(systemClock, 80); // longer than the ttl: renewal keeps it
+        await sleep(systemClock, 800); // longer than the ttl: renewal keeps it
         order.push('1-out');
       }),
       (async () => {

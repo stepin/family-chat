@@ -260,7 +260,7 @@ export interface OutgoingMessage {
   readonly text?: string;
   readonly reply?: MsgRef;
   readonly attachments?: readonly AttachmentInput[];
-  /** Passed through as is (capture is a later stage). */
+  /** A place (the UI takes it from the Geolocation API); the message may have no text then. */
   readonly location?: Location;
   readonly fwd?: boolean;
 }
@@ -752,6 +752,11 @@ export class FamilyChatCore {
     const rt = await this.#runtime(accountId);
     await rt.transfers.cancel(blobId);
     rt.outbox.kick();
+  }
+
+  /** Marks a received voice message as listened to on this device (`AttachmentView.heard`). */
+  async markHeard(accountId: string, blobId: string): Promise<void> {
+    await (await this.#runtime(accountId)).transfers.markHeard(blobId);
   }
 
   /** The attachment's contents as a Blob backed by app storage (never read whole into memory by the core). */

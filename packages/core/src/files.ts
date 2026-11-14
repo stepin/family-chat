@@ -10,6 +10,7 @@
 
 import { BLOB_PART_SIZE } from '@family-chat/protocol';
 import type { CoreDb } from './db/schema.ts';
+import { CoreError } from './errors.ts';
 
 /** Chunk size of stored files: one attachment part. */
 export const FILE_CHUNK = BLOB_PART_SIZE;
@@ -25,6 +26,42 @@ export interface FileStore {
   /** The whole file as a Blob of `size` bytes. */
   blob(key: string, size: number, type: string): Promise<Blob>;
   delete(key: string): Promise<void>;
+}
+
+/**
+ * The device ran out of room: QuotaExceededError from IndexedDB or OPFS
+ * (Dexie wraps the IndexedDB one, sometimes inside an AbortError).
+ */
+export function isQuotaError(e: unknown): boolean {
+  for (let x: unknown = e, i = 0; x && typeof x === 'object' && i < 4; i++) {
+    const name = (x as { name?: unknown }).name;
+    if (name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED') return true;
+    x = (x as { inner?: unknown; cause?: unknown }).inner ?? (x as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/** Rethrows a quota error as CoreError `no-space` (the UI says "not enough space on this device"). */
+function noSpace(e: unknown): never {
+  if (isQuotaError(e)) throw new CoreError('no-space', 'not enough space on this device');
+  throw e;
+}
+
+/**
+ * Whether the browser's storage estimate leaves room for `bytes` more. True
+ * when the estimate is not available (the write itself then reports a quota
+ * error). Only a clear shortage answers false.
+ */
+export async function roomFor(bytes: number): Promise<boolean> {
+  try {
+    const storage = (globalThis.navigator as { storage?: { estimate?: () => Promise<{ usage?: number; quota?: number }> } } | undefined)
+      ?.storage;
+    const e = await storage?.estimate?.();
+    if (!e || typeof e.quota !== 'number' || typeof e.usage !== 'number') return true;
+    return e.quota - e.usage >= bytes;
+  } catch {
+    return true;
+  }
 }
 
 // ---- IndexedDB ----
@@ -54,7 +91,7 @@ export class IdbFileStore implements FileStore {
 
   async write(key: string, index: number, data: Uint8Array): Promise<void> {
     const value = (await this.#canStoreBlobs()) ? new Blob([data as Uint8Array<ArrayBuffer>]) : data.slice();
-    await this.db.fileChunks.put({ key, index, data: value });
+    await this.db.fileChunks.put({ key, index, data: value }).catch(noSpace);
   }
 
   async read(key: string, index: number, length: number): Promise<Uint8Array> {
@@ -85,7 +122,7 @@ export class IdbFileStore implements FileStore {
 export interface OpfsDirectory {
   getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<OpfsDirectory>;
   getFileHandle(name: string, options?: { create?: boolean }): Promise<OpfsFile>;
-  removeEntry(name: string): Promise<void>;
+  removeEntry(name: string, options?: { recursive?: boolean }): Promise<void>;
 }
 
 export interface OpfsFile {
@@ -103,25 +140,61 @@ function fileName(key: string): string {
   return key.replace(/[^A-Za-z0-9_-]/g, '_');
 }
 
+function isNotFound(e: unknown): boolean {
+  return (e as { name?: unknown } | null)?.name === 'NotFoundError' || (e as { name?: unknown } | null)?.name === 'TypeMismatchError';
+}
+
+/**
+ * Every chunk is its own file in a folder per stored file (`<key>.parts/<n>`).
+ * Writing one chunk therefore never touches the others: a writable stream
+ * with `keepExistingData` on one big file makes Chromium copy the whole file
+ * into a swap file first, which for a 200 MB attachment written in 50 chunks
+ * means about 5 GB of disk traffic. The whole file is a Blob concatenated from
+ * the chunk files (still backed by the disk, never read into memory).
+ *
+ * Files written by M2 (one file per attachment, chunks at offsets) are still
+ * read and removed.
+ */
 export class OpfsFileStore implements FileStore {
   readonly kind = 'opfs' as const;
 
   constructor(private readonly dir: OpfsDirectory) {}
 
+  #parts(key: string, create: boolean): Promise<OpfsDirectory> {
+    return this.dir.getDirectoryHandle(`${fileName(key)}.parts`, { create });
+  }
+
   async write(key: string, index: number, data: Uint8Array): Promise<void> {
-    const h = await this.dir.getFileHandle(fileName(key), { create: true });
-    const w = await h.createWritable({ keepExistingData: true });
     try {
-      await w.write({ type: 'write', position: index * FILE_CHUNK, data });
-      await w.close();
+      const parts = await this.#parts(key, true);
+      const h = await parts.getFileHandle(String(index), { create: true });
+      const w = await h.createWritable({ keepExistingData: false });
+      try {
+        await w.write({ type: 'write', position: 0, data });
+        await w.close();
+      } catch (e) {
+        await w.abort?.().catch(() => undefined);
+        throw e;
+      }
     } catch (e) {
-      await w.abort?.().catch(() => undefined);
-      throw e;
+      noSpace(e);
     }
   }
 
   async read(key: string, index: number, length: number): Promise<Uint8Array> {
     if (length === 0) return new Uint8Array(0);
+    let parts: OpfsDirectory | undefined;
+    try {
+      parts = await this.#parts(key, false);
+    } catch (e) {
+      if (!isNotFound(e)) throw e;
+    }
+    if (parts) {
+      const f = await (await parts.getFileHandle(String(index))).getFile();
+      if (f.size < length) throw new Error('file chunk is short');
+      return new Uint8Array(await f.slice(0, length).arrayBuffer());
+    }
+    // M2 layout: one file, chunk at its offset.
     const f = await (await this.dir.getFileHandle(fileName(key))).getFile();
     const start = index * FILE_CHUNK;
     if (f.size < start + length) throw new Error('file is short');
@@ -129,17 +202,28 @@ export class OpfsFileStore implements FileStore {
   }
 
   async blob(key: string, size: number, type: string): Promise<Blob> {
+    let parts: OpfsDirectory | undefined;
+    try {
+      parts = await this.#parts(key, false);
+    } catch (e) {
+      if (!isNotFound(e)) throw e;
+    }
+    if (parts) {
+      const count = Math.ceil(size / FILE_CHUNK);
+      const files: Blob[] = [];
+      for (let i = 0; i < count; i++) files.push(await (await parts.getFileHandle(String(i))).getFile());
+      const b = new Blob(files, { type });
+      if (b.size < size) throw new Error('file is incomplete');
+      return b.size === size ? b : b.slice(0, size, type);
+    }
     const f = await (await this.dir.getFileHandle(fileName(key))).getFile();
     if (f.size < size) throw new Error('file is incomplete');
     return f.slice(0, size, type);
   }
 
   async delete(key: string): Promise<void> {
-    try {
-      await this.dir.removeEntry(fileName(key));
-    } catch {
-      // Already gone.
-    }
+    await this.dir.removeEntry(`${fileName(key)}.parts`, { recursive: true }).catch(() => undefined);
+    await this.dir.removeEntry(fileName(key)).catch(() => undefined);
   }
 }
 

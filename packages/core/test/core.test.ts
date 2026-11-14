@@ -81,7 +81,10 @@ describe('facade', () => {
     unsub();
   });
 
-  it('pages backwards through local messages and the server history', async () => {
+  // About 0.6 s alone, but 60 sends plus a full restore: on a loaded machine
+  // (several test runs at once) it took over the default 5 s. The budget
+  // matches its own `eventually` waits (8 s each).
+  it('pages backwards through local messages and the server history', { timeout: 20_000 }, async () => {
     const server = new FakeServer();
     const { a, accA, accB } = await setup(server);
     const chat = await a.openChat(accA.id, accB.userId);

@@ -600,6 +600,8 @@ export class Transport {
     try {
       let res: Response;
       try {
+        // Aborted before it started (a cancel between two parts): no request at all.
+        if (ctl.signal.aborted) throw new DOMException('aborted', 'AbortError');
         res = await this.#fetch(url, {
           method: spec.method,
           headers,

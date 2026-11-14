@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
+  import VoiceRecorder from './VoiceRecorder.svelte';
+  import type { VoiceRecording } from '../lib/recorder.ts';
   import { app } from '../lib/app.svelte.ts';
   import { t } from '../lib/strings.ts';
 
@@ -13,6 +15,8 @@
     autofocus = false,
     onsend,
     onfiles,
+    onvoice,
+    onlocation,
   }: {
     accountId: string;
     chatId: string;
@@ -20,7 +24,12 @@
     onsend: (text: string) => Promise<boolean>;
     /** Files picked, pasted or taken with the camera; the current text goes along as the caption. */
     onfiles?: ((files: File[], text: string) => void) | undefined;
+    /** A finished voice recording; false when it could not be queued. */
+    onvoice?: ((rec: VoiceRecording) => Promise<boolean>) | undefined;
+    /** "Место" in the attachment menu. */
+    onlocation?: (() => void) | undefined;
   } = $props();
+  let recording = $state(false);
 
   const MAX_BYTES = 16 * 1024;
   let text = $state('');
@@ -143,6 +152,16 @@
       <button class="btn secondary small" type="button" onclick={() => pick(cameraInput)}><Icon name="camera" />{t.attach.camera}</button>
     {/if}
     <button class="btn secondary small" type="button" onclick={() => pick(fileInput)}><Icon name="file" />{t.attach.file}</button>
+    {#if onlocation}
+      <button
+        class="btn secondary small"
+        type="button"
+        onclick={() => {
+          menuOpen = false;
+          onlocation?.();
+        }}><Icon name="pin" />{t.location.button}</button
+      >
+    {/if}
   </div>
 {/if}
 <input bind:this={photoInput} class="visually-hidden" type="file" accept="image/*" multiple tabindex="-1" aria-hidden="true" onchange={onPicked} data-testid="photo-input" />
@@ -178,20 +197,25 @@
     onblur={saveDraft}
   ></textarea>
   {#if !coarse}<span id="composer-hint-{chatId}" class="visually-hidden">{t.chat.sendHintDesktop}</span>{/if}
-  <button
-    class="send"
-    type="button"
-    aria-label={t.chat.send}
-    disabled={text.trim().length === 0 || tooLong}
-    onclick={send}
-  >
-    <Icon name="send" />
-  </button>
+  {#if onvoice && (text.trim().length === 0 || recording)}
+    <VoiceRecorder onrecorded={onvoice} onactive={(a) => (recording = a)} />
+  {:else}
+    <button
+      class="send"
+      type="button"
+      aria-label={t.chat.send}
+      disabled={text.trim().length === 0 || tooLong}
+      onclick={send}
+    >
+      <Icon name="send" />
+    </button>
+  {/if}
 </div>
 {#if tooLong}<p class="too-long error-text" role="alert">{t.chat.tooLong}</p>{/if}
 
 <style>
   .composer {
+    position: relative;
     display: flex;
     align-items: flex-end;
     gap: var(--sp-2);

@@ -11,13 +11,16 @@ const pkg = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json')
  * M1 (fcd does not send it as a header yet). Only for the build: the dev
  * server injects inline styles. `connect-src https:` because the server
  * address can be typed by the administrator; 'self' covers plain-HTTP use on
- * the same origin. `frame-ancestors` cannot be set in <meta>.
+ * the same origin. `frame-ancestors` cannot be set in <meta>. `media-src blob:`:
+ * voice messages play from blob: URLs of app storage (M3). Keep in sync with
+ * server/src/headers.rs (a test there compares the two).
  */
 export const CSP = [
   "default-src 'none'",
   "script-src 'self'",
   "style-src 'self'",
   "img-src 'self' data: blob:",
+  "media-src blob:",
   "font-src 'self'",
   "connect-src 'self' https:",
   "worker-src 'self'",
@@ -112,6 +115,20 @@ export default defineConfig({
         main: resolve(import.meta.dirname, 'index.html'),
         device: resolve(import.meta.dirname, 'device/index.html'),
         server: resolve(import.meta.dirname, 'server/index.html'),
+      },
+      output: {
+        // Named shared chunks (they change at different speeds, so the
+        // service worker re-downloads less after an update). Screens used
+        // once or rarely (onboarding, settings, the image viewer, the place
+        // sheet, the recorder) are dynamic imports in the code.
+        codeSplitting: {
+          groups: [
+            { name: 'crypto', test: /node_modules[\\/].*@(noble|scure)[\\/]/, priority: 3 },
+            // Only what the first screen needs; other libraries (the QR code) stay with their screen.
+            { name: 'vendor', test: /node_modules[\\/].*(svelte|dexie|esm-env|clsx)[\\/]/, priority: 2 },
+            { name: 'core', test: /packages[\\/](core|protocol)[\\/]/, priority: 1 },
+          ],
+        },
       },
     },
   },

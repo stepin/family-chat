@@ -35,6 +35,14 @@ export function checkMessageText(text: string): void {
   }
 }
 
+/** The protocol's rules for a place (docs/PROTOCOL.md 7), checked before the message is queued. */
+export function checkLocation(l: Location): void {
+  const ok = (v: unknown, lo: number, hi: number) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
+  if (!l || !ok(l.lat, -90, 90) || !ok(l.lon, -180, 180) || !ok(l.accuracy, 0, 1e7)) {
+    throw new CoreError('invalid-input', 'location must have lat -90..90, lon -180..180 and accuracy 0..10^7 m');
+  }
+}
+
 export interface MessageExtras {
   readonly reply?: MsgRef | undefined;
   readonly attachments?: readonly Attachment[];
@@ -58,6 +66,7 @@ export async function enqueueMessage(
   const reply = extras.reply;
   const hasContent = (extras.attachments?.length ?? 0) > 0 || extras.location !== undefined;
   if (!hasContent || text.length > 0) checkMessageText(text);
+  if (extras.location !== undefined) checkLocation(extras.location);
   const { ctx, session } = rt;
   const { db } = ctx;
   const acc = session.accountId;

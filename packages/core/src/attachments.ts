@@ -32,9 +32,9 @@ import {
 import { isApiError, isTransient } from './api/errors.ts';
 import type { AccountRuntimeLike } from './apply.ts';
 import { describeError } from './db/diagnostics.ts';
-import type { BlobRow } from './db/schema.ts';
+import type { BlobRow, BlobStatus } from './db/schema.ts';
 import { CoreError, isCoreError } from './errors.ts';
-import { FILE_CHUNK, type FileStores } from './files.ts';
+import { FILE_CHUNK, roomFor, type FileStores } from './files.ts';
 import { backoffDelay } from './util/backoff.ts';
 import { Waker } from './util/clock.ts';
 
@@ -109,6 +109,8 @@ export async function prepareUploads(
     if (f.data.size > limit) throw new CoreError('too-large', `the file is larger than the server accepts (${limit} bytes)`);
   }
   const store = await files.preferred();
+  const total = inputs.reduce((n, f) => n + f.data.size, 0);
+  if (!(await roomFor(total))) throw new CoreError('no-space', 'not enough space on this device');
   const attachments: Attachment[] = [];
   const rows: BlobRow[] = [];
   const now = ctx.clock.now();
@@ -172,7 +174,18 @@ export interface TransferHooks {
   onUploaded?(): void;
 }
 
-/** Uploads and downloads of one account: one pass at a time across tabs. */
+const RUNNING: readonly BlobStatus[] = ['queued', 'active'];
+
+/**
+ * Uploads and downloads of one account: one pass at a time across tabs.
+ *
+ * Every status change of a running transfer is a compare-and-set in one
+ * transaction (`#set`): a cancel can land at any moment (this tab, another
+ * tab), and a later write of the transfer must never bring a cancelled row
+ * back to life. The abort controller is registered before the transfer marks
+ * itself active, and `cancel()` writes its status before aborting, so either
+ * the transfer sees the cancel at its start or the cancel aborts its request.
+ */
 export class Transfers {
   readonly #waker: Waker;
   readonly #aborts = new Map<string, AbortController>();
@@ -200,8 +213,8 @@ export class Transfers {
     try {
       const rows = await db.blobs.where('accountId').equals(acc).toArray();
       for (const r of rows) {
-        if ((r.status === 'queued' || r.status === 'active') && r.nextAttemptAt > clock.now()) {
-          await db.blobs.update([acc, r.blobId], { nextAttemptAt: clock.now() });
+        if (RUNNING.includes(r.status) && r.nextAttemptAt > clock.now()) {
+          await this.#set(r, RUNNING, { nextAttemptAt: clock.now() });
         }
       }
     } catch {
@@ -243,7 +256,7 @@ export class Transfers {
   async drain(): Promise<number> {
     const { ctx, session } = this.rt;
     const rows = (await ctx.db.blobs.where('accountId').equals(session.accountId).toArray())
-      .filter((r) => r.status === 'queued' || r.status === 'active')
+      .filter((r) => RUNNING.includes(r.status))
       .sort((a, b) => (a.direction === b.direction ? a.createdAt - b.createdAt : a.direction === 'up' ? -1 : 1));
     let next = Infinity;
     for (const row of rows) {
@@ -258,36 +271,59 @@ export class Transfers {
     return next;
   }
 
-  async #fresh(row: BlobRow): Promise<BlobRow | undefined> {
-    return this.rt.ctx.db.blobs.get([row.accountId, row.blobId]);
+  /**
+   * Compare-and-set: applies `changes` only while the row's status is one of
+   * `allowed`. Returns whether it did (false: cancelled or finished meanwhile).
+   */
+  async #set(row: BlobRow, allowed: readonly BlobStatus[], changes: Partial<BlobRow>): Promise<boolean> {
+    const { db } = this.rt.ctx;
+    return db.transaction('rw', db.blobs, async () => {
+      const fresh = await db.blobs.get([row.accountId, row.blobId]);
+      if (!fresh || !allowed.includes(fresh.status)) return false;
+      await db.blobs.update([row.accountId, row.blobId], changes);
+      return true;
+    });
   }
 
   /** Transient failure: retry later; anything else: failed. Returns the retry time, if any. */
   async #fail(row: BlobRow, e: unknown): Promise<number | undefined> {
     const { ctx } = this.rt;
-    const fresh = await this.#fresh(row);
-    if (!fresh || fresh.status === 'cancelled' || fresh.status === 'none') return undefined;
+    const fresh = await ctx.db.blobs.get([row.accountId, row.blobId]);
+    if (!fresh || !RUNNING.includes(fresh.status)) return undefined; // cancelled meanwhile
     if (isTransient(e) || isCoreError(e, 'login-invalid')) {
       const attempts = fresh.attempts + 1;
-      const nextAttemptAt = ctx.clock.now() + backoffDelay(attempts, ctx.backoff, ctx.random);
-      await ctx.db.blobs.update([row.accountId, row.blobId], { status: 'queued', attempts, nextAttemptAt, error: code(e) });
+      const retryAfter = isApiError(e) ? (e.retryAfterMs ?? 0) : 0;
+      const nextAttemptAt = ctx.clock.now() + Math.max(retryAfter, backoffDelay(attempts, ctx.backoff, ctx.random));
+      if (!(await this.#set(row, RUNNING, { status: 'queued', attempts, nextAttemptAt, error: code(e) }))) return undefined;
       void ctx.diag.info('transfer', `${row.direction} ${row.blobId} interrupted: ${describeError(e)}`, row.accountId);
       return nextAttemptAt;
     }
     const gone = isApiError(e, 'blob_not_found');
-    await ctx.db.blobs.update([row.accountId, row.blobId], { status: gone ? 'gone' : 'failed', error: code(e) });
+    if (!(await this.#set(row, RUNNING, { status: gone ? 'gone' : 'failed', error: code(e) }))) return undefined;
     void ctx.diag.warn('transfer', `${row.direction} ${row.blobId} ${gone ? 'is not on the server' : 'failed'}: ${describeError(e)}`, row.accountId);
     if (row.direction === 'up') this.hooks.onUploaded?.();
     return undefined;
   }
 
+  /** A cancel landed while parts were going up: the server copy may have been created after cancel's DELETE. */
+  async #removeFromServer(blobId: string): Promise<void> {
+    const { ctx, session } = this.rt;
+    try {
+      await session.call((t) => session.transport.deleteBlob(t, blobId));
+    } catch (e) {
+      if (!isApiError(e, 'blob_not_found')) {
+        void ctx.diag.info('transfer', `removing cancelled upload ${blobId} failed: ${describeError(e)}`, session.accountId);
+      }
+    }
+  }
+
   async #upload(row: BlobRow): Promise<number | undefined> {
     const { ctx, session } = this.rt;
-    const { db } = ctx;
     const ctl = new AbortController();
     this.#aborts.set(row.blobId, ctl);
+    let sent = false;
     try {
-      await db.blobs.update([row.accountId, row.blobId], { status: 'active' });
+      if (!(await this.#set(row, RUNNING, { status: 'active' }))) return undefined;
       const store = await this.files.of(row.storage ?? 'idb');
       const key = fileKey(row.accountId, row.blobId);
       // What is already on the server (an earlier attempt, before a restart).
@@ -305,57 +341,72 @@ export class Transfers {
           done += len;
           continue;
         }
-        const current = await this.#fresh(row);
-        if (!current || current.status !== 'active') return undefined; // cancelled meanwhile
+        if (ctl.signal.aborted) return undefined;
         const plain = await store.read(key, i, len);
         const ct = await encryptBlobPart(row.ref, i, plain);
+        sent = true;
         await session.call((t) => session.transport.putBlobPart(t, row.blobId, i, ct, ctl.signal));
         done += len;
-        await db.blobs.update([row.accountId, row.blobId], { bytesDone: Math.min(done, row.size), partsDone: i + 1 });
+        // Also the cancellation check before the next part.
+        if (!(await this.#set(row, ['active'], { bytesDone: Math.min(done, row.size), partsDone: i + 1, error: null }))) {
+          await this.#removeFromServer(row.blobId);
+          return undefined;
+        }
       }
-      const current = await this.#fresh(row);
-      if (!current || current.status !== 'active') return undefined;
-      await db.blobs.update([row.accountId, row.blobId], { status: 'done', bytesDone: row.size, partsDone: row.ref.parts, error: null });
+      if (!(await this.#set(row, ['active'], { status: 'done', bytesDone: row.size, partsDone: row.ref.parts, error: null }))) {
+        if (sent) await this.#removeFromServer(row.blobId);
+        return undefined;
+      }
       void ctx.diag.info('transfer', `upload ${row.blobId} complete (${row.ref.parts} part(s))`, row.accountId);
       this.hooks.onUploaded?.();
       return undefined;
     } catch (e) {
-      return this.#fail(row, e);
+      const at = await this.#fail(row, e);
+      if (sent && (await ctx.db.blobs.get([row.accountId, row.blobId]))?.status === 'cancelled') await this.#removeFromServer(row.blobId);
+      return at;
     } finally {
-      this.#aborts.delete(row.blobId);
+      if (this.#aborts.get(row.blobId) === ctl) this.#aborts.delete(row.blobId);
     }
   }
 
   async #download(row: BlobRow): Promise<number | undefined> {
     const { ctx, session } = this.rt;
-    const { db } = ctx;
     const ctl = new AbortController();
     this.#aborts.set(row.blobId, ctl);
     try {
       const store = row.storage ? await this.files.of(row.storage) : await this.files.preferred();
-      await db.blobs.update([row.accountId, row.blobId], { status: 'active', storage: store.kind });
+      if (!(await this.#set(row, RUNNING, { status: 'active', storage: store.kind }))) return undefined;
+      // Resume from the parts already written (they survive a restart).
+      const fresh = await ctx.db.blobs.get([row.accountId, row.blobId]);
+      const from = fresh?.partsDone ?? row.partsDone;
+      let bytes = fresh?.bytesDone ?? row.bytesDone;
+      if (!(await roomFor(row.size - bytes))) throw new CoreError('no-space', 'not enough space on this device');
       const key = fileKey(row.accountId, row.blobId);
-      let bytes = row.bytesDone;
-      for (let i = row.partsDone; i < row.ref.parts; i++) {
-        const current = await this.#fresh(row);
-        if (!current || current.status !== 'active') return undefined;
+      for (let i = from; i < row.ref.parts; i++) {
+        if (ctl.signal.aborted) return undefined;
         const ct = await session.call((t) => session.transport.getBlobPart(t, row.blobId, i, ctl.signal));
         const plain = await decryptBlobPart(row.ref, i, ct);
         await store.write(key, i, plain);
         bytes += plain.length;
-        await db.blobs.update([row.accountId, row.blobId], { partsDone: i + 1, bytesDone: bytes });
+        if (!(await this.#set(row, ['active'], { partsDone: i + 1, bytesDone: bytes, error: null }))) {
+          // Stopped meanwhile: cancel() may have removed the copy before this part landed.
+          if ((await ctx.db.blobs.get([row.accountId, row.blobId]))?.status === 'none') await store.delete(key).catch(() => undefined);
+          return undefined;
+        }
       }
-      await db.blobs.update([row.accountId, row.blobId], { status: 'done', bytesDone: row.size, error: null });
+      await this.#set(row, ['active'], { status: 'done', bytesDone: row.size, error: null });
       return undefined;
     } catch (e) {
-      if (isProtocolError(e)) {
-        await db.blobs.update([row.accountId, row.blobId], { status: 'failed', error: e.code });
-        void ctx.diag.warn('transfer', `download ${row.blobId} rejected: ${describeError(e)}`, row.accountId);
+      if (isProtocolError(e) || isCoreError(e, 'no-space')) {
+        const errorCode = isProtocolError(e) ? e.code : 'no-space';
+        if (await this.#set(row, RUNNING, { status: 'failed', error: errorCode })) {
+          void ctx.diag.warn('transfer', `download ${row.blobId} rejected: ${describeError(e)}`, row.accountId);
+        }
         return undefined;
       }
       return this.#fail(row, e);
     } finally {
-      this.#aborts.delete(row.blobId);
+      if (this.#aborts.get(row.blobId) === ctl) this.#aborts.delete(row.blobId);
     }
   }
 
@@ -376,27 +427,26 @@ export class Transfers {
   /**
    * Stops a transfer. A download goes back to "not downloaded" (the partial
    * copy is removed); an upload is cancelled and removed from the server.
+   * The status is written first, then the running request is aborted.
    */
   async cancel(blobId: string): Promise<void> {
-    const { ctx, session } = this.rt;
-    const { db } = ctx;
-    const acc = session.accountId;
-    const row = await db.blobs.get([acc, blobId]);
+    const { db } = this.rt.ctx;
+    const acc = this.rt.session.accountId;
+    const row = await db.transaction('rw', db.blobs, async () => {
+      const r = await db.blobs.get([acc, blobId]);
+      if (!r) return undefined;
+      if (r.direction === 'down') {
+        if (r.status === 'done') return undefined;
+        await db.blobs.update([acc, blobId], { status: 'none', partsDone: 0, bytesDone: 0, error: null });
+      } else {
+        await db.blobs.update([acc, blobId], { status: 'cancelled' });
+      }
+      return r;
+    });
     if (!row) return;
     this.#aborts.get(blobId)?.abort();
-    if (row.direction === 'down') {
-      if (row.status === 'done') return;
-      await db.blobs.update([acc, blobId], { status: 'none', partsDone: 0, bytesDone: 0, error: null });
-      if (row.storage) await (await this.files.of(row.storage)).delete(fileKey(acc, blobId)).catch(() => undefined);
-      return;
-    }
-    await db.blobs.update([acc, blobId], { status: 'cancelled' });
     if (row.storage) await (await this.files.of(row.storage)).delete(fileKey(acc, blobId)).catch(() => undefined);
-    try {
-      await session.call((t) => session.transport.deleteBlob(t, blobId));
-    } catch (e) {
-      if (!isApiError(e, 'blob_not_found')) void ctx.diag.info('transfer', `removing cancelled upload ${blobId} failed: ${describeError(e)}`, acc);
-    }
+    if (row.direction === 'up') await this.#removeFromServer(blobId);
   }
 
   /** Re-queues failed uploads of a message (manual retry). */
@@ -406,10 +456,20 @@ export class Transfers {
     const rows = await db.blobs.where('[accountId+msgId]').equals([acc, msgId]).toArray();
     for (const r of rows) {
       if (r.direction === 'up' && r.status === 'failed') {
-        await db.blobs.update([acc, r.blobId], { status: 'queued', attempts: 0, nextAttemptAt: clock.now(), error: null });
+        await this.#set(r, ['failed'], { status: 'queued', attempts: 0, nextAttemptAt: clock.now(), error: null });
       }
     }
     this.kick();
+  }
+
+  /** Marks a received voice message as listened to (the "не прослушано" mark goes away). */
+  async markHeard(blobId: string): Promise<void> {
+    const { db } = this.rt.ctx;
+    const acc = this.rt.session.accountId;
+    await db.transaction('rw', db.blobs, async () => {
+      const row = await db.blobs.get([acc, blobId]);
+      if (row && !row.heard) await db.blobs.update([acc, blobId], { heard: true });
+    });
   }
 
   /** The plaintext of a stored attachment as a Blob (backed by the storage). */

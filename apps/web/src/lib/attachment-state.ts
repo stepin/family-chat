@@ -59,8 +59,10 @@ export function attachmentUi(a: AttachmentView, ctx: AttachmentContext): Attachm
     case 'downloading':
       return { label: `Скачивается ${percent}%`, action: 'cancel-download', percent, tone: 'quiet' };
     case 'uploading':
+      if (a.error === 'storage_full') return { label: 'На сервере не хватает места', action: null, percent, tone: 'error' };
       return { label: `Загружается ${percent}%`, action: null, percent, tone: 'quiet' };
     case 'failed':
+      if (a.error === 'no-space') return { label: 'На устройстве не хватает места', action: 'retry-download', percent: null, tone: 'error' };
       return { label: 'Не удалось скачать', action: 'retry-download', percent: null, tone: 'error' };
     case 'gone':
       return { label: 'Удалено с сервера', action: null, percent: null, tone: 'quiet' };

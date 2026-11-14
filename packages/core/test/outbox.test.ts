@@ -109,7 +109,19 @@ describe('outbox', () => {
   });
 
   it('keeps the order: a message waiting for retry blocks the ones after it', async () => {
-    const { server, ctx, a, chatId } = await setup();
+    // The retry time must stay in the future between the two passes. With the
+    // FAST backoff (5 ms) a loaded machine could reach it before the second
+    // drain(), which then (correctly) sent both messages: the test, not the
+    // outbox, assumed the passes run within 5 ms. A manual clock removes the
+    // timing assumption.
+    let now = 1_000_000;
+    const clock = { now: () => now, setTimeout: (f: () => void, ms: number) => setTimeout(f, ms), clearTimeout: (h: unknown) => clearTimeout(h as number) };
+    const server = new FakeServer();
+    const base = await setup(server);
+    const ctx = new CoreContext({ db: base.ctx.db, fetch: server.fetch, ...FAST, clock });
+    const a = new AccountRuntime(ctx, base.row);
+    runtimes.push(a);
+    const { chatId } = base;
     server.offline = true;
     await enqueueMessage(a, chatId, 'first');
     await enqueueMessage(a, chatId, 'second');
@@ -118,10 +130,17 @@ describe('outbox', () => {
     const rows = await ctx.db.outbox.toArray();
     expect(rows.find((r) => r.body === 'first')!.attempts).toBe(1);
     expect(rows.find((r) => r.body === 'second')!.attempts).toBe(0);
-    // Before the retry time nothing is sent.
+    // Before the retry time nothing is sent, however long the pass takes in real time.
     server.offline = false;
+    now = next - 1;
     expect(await a.outbox.drain()).toBe(next);
     expect(server.log).toHaveLength(0);
+    // At the retry time both go out, in order.
+    now = next;
+    expect(await a.outbox.drain()).toBe(Infinity);
+    expect(server.log.map((e) => e.msgId)).toHaveLength(2);
+    const sent = (await ctx.db.messages.toArray()).sort((x, y) => x.gseq - y.gseq).map((m) => m.body);
+    expect(sent).toEqual(['first', 'second']);
   });
 
   it('stops sending when the account is removed', async () => {

@@ -8,6 +8,7 @@ import type {
   ChatKind,
   CoreDb,
   GroupRow,
+  LastMedia,
   MessageKind,
   MessageRow,
   OutboxRow,
@@ -39,6 +40,8 @@ export interface AttachmentView {
   readonly thumb: string | null;
   readonly durationMs: number | null;
   readonly peaks: readonly number[] | null;
+  /** Voice: listened to on this device (always true for own uploads). */
+  readonly heard: boolean;
   readonly status: AttachmentStatus;
   /** 0..1 while downloading or uploading, 1 when ready. */
   readonly progress: number;
@@ -98,6 +101,8 @@ export interface ChatSummary {
     readonly kind: MessageKind;
     readonly body: string;
     readonly time: number;
+    /** Attachment kind or 'location' when the message carries one (null for plain text). */
+    readonly media: LastMedia | null;
   } | null;
   readonly lastTime: number | null;
   readonly unread: number;
@@ -211,6 +216,7 @@ function attachmentViews(list: MessageRow['attachments'], blobs: Map<string, Blo
       thumb: a.thumb ?? null,
       durationMs: a.dur ?? null,
       peaks: a.peaks ?? null,
+      heard: row?.heard === true || row?.direction === 'up',
       status,
       progress: status === 'ready' ? 1 : row && a.blob.size > 0 ? Math.min(1, row.bytesDone / a.blob.size) : 0,
       error: row?.error ?? null,
@@ -269,6 +275,8 @@ function outboxView(o: OutboxRow, me: string, blobs: Map<string, BlobRow>): Mess
   const total = (o.attachments ?? []).reduce((n, a) => n + a.blob.size, 0);
   const done = (o.attachments ?? []).reduce((n, a) => n + (blobs.get(a.blob.id)?.bytesDone ?? 0), 0);
   const uploadFailed = atts.some((a) => a.status === 'failed');
+  // A full server disk (507) keeps the upload retrying; the message says why it waits.
+  const serverFull = atts.some((a) => a.status === 'uploading' && a.error === 'storage_full');
   return {
     key: `${me}/${o.msgId}`,
     accountId: o.accountId,
@@ -282,7 +290,7 @@ function outboxView(o: OutboxRow, me: string, blobs: Map<string, BlobRow>): Mess
     gseq: null,
     time: null,
     status: o.status === 'failed' || uploadFailed ? 'failed' : 'on-device',
-    error: o.error ?? (uploadFailed ? 'upload_failed' : null),
+    error: o.error ?? (uploadFailed ? 'upload_failed' : serverFull ? 'storage_full' : null),
     attachments: atts,
     location: o.location ?? null,
     fwd: o.fwd === true,
@@ -327,7 +335,14 @@ export async function chatSummaries(db: CoreDb): Promise<ChatSummary[]> {
       pinned: c.kind === 'self',
       member: g ? g.member : true,
       lastMessage: c.last
-        ? { senderId: c.last.senderId, outgoing: c.last.senderId === a.userId, kind: c.last.kind, body: c.last.body, time: c.last.time }
+        ? {
+            senderId: c.last.senderId,
+            outgoing: c.last.senderId === a.userId,
+            kind: c.last.kind,
+            body: c.last.body,
+            time: c.last.time,
+            media: c.last.media ?? null,
+          }
         : null,
       lastTime: c.last?.time ?? null,
       unread: c.unread,

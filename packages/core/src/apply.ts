@@ -434,6 +434,7 @@ async function applyOne(
         body: message.body,
         gseq: message.gseq,
         time: message.time,
+        ...(msg?.attachments?.[0] ? { media: msg.attachments[0].kind } : msg?.location ? { media: 'location' as const } : {}),
       };
     }
     if (item.senderId !== me && item.gseq > chat.readGseq) chat.unread += 1;

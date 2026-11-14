@@ -70,6 +70,7 @@ function att(over: Partial<AttachmentView>): AttachmentView {
     name: 'a.jpg',
     mime: 'image/jpeg',
     kind: 'image',
+    heard: false,
     size: 1000,
     width: 100,
     height: 100,

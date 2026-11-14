@@ -3,6 +3,7 @@
   import AttachmentItem from './AttachmentItem.svelte';
   import Avatar from './Avatar.svelte';
   import Icon from './Icon.svelte';
+  import LocationCard from './LocationCard.svelte';
   import { formatTime } from '../lib/format.ts';
   import { linkify } from '../lib/linkify.ts';
   import { sendStatus } from '../lib/status.ts';
@@ -64,9 +65,12 @@
       {#if attachments.length > 0}
         <div class="attachments">
           {#each attachments as a (a.blobId)}
-            <AttachmentItem accountId={message.accountId} attachment={a} sentAt={message.time} {now} {onopen} />
+            <AttachmentItem accountId={message.accountId} attachment={a} sentAt={message.time} {now} {onopen} outgoing={message.outgoing} />
           {/each}
         </div>
+      {/if}
+      {#if message.location}
+        <div class="attachments"><LocationCard place={message.location} /></div>
       {/if}
       {#if message.kind === 'update-required'}
         <p class="text muted">{t.chat.updateRequired}</p>
@@ -87,6 +91,9 @@
         {/if}
       </span>
     </div>
+    {#if message.outgoing && message.status === 'on-device' && message.error === 'storage_full'}
+      <p class="server-full small" role="status" data-testid="server-full">{t.attach.serverFull}</p>
+    {/if}
     {#if status && status.actions.length > 0 && message.status === 'failed'}
       <div class="actions">
         {#if status.actions.includes('retry')}
@@ -209,6 +216,15 @@
   .failed .status {
     color: var(--error);
     font-weight: 600;
+  }
+
+  .server-full {
+    max-width: 36rem;
+    margin-top: var(--sp-1);
+    padding: var(--sp-2) var(--sp-3);
+    border-radius: var(--r-m);
+    background: var(--warn-soft);
+    color: var(--text);
   }
 
   .actions {

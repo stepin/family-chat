@@ -4,18 +4,22 @@
   import { t } from '../lib/strings.ts';
   import ChatList from './ChatList.svelte';
   import Chat from './Chat.svelte';
-  import NewChat from './NewChat.svelte';
-  import Settings from './Settings.svelte';
-  import PhraseScreen from './PhraseScreen.svelte';
-  import ServerDetails from './ServerDetails.svelte';
-  import Invites from './Invites.svelte';
-  import Diagnostics from './Diagnostics.svelte';
-  import NewGroup from './NewGroup.svelte';
-  import ChatInfo from './ChatInfo.svelte';
-  import Contact from './Contact.svelte';
-  import MyProfile from './MyProfile.svelte';
-  import Storage from './Storage.svelte';
-  import Security from './Security.svelte';
+  import { lazy } from '../lib/lazy.ts';
+
+  // The list and the chat are in the first bundle; every other screen loads
+  // on first use (code splitting keeps the first load small).
+  const NewChat = lazy(() => import('./NewChat.svelte'));
+  const Settings = lazy(() => import('./Settings.svelte'));
+  const PhraseScreen = lazy(() => import('./PhraseScreen.svelte'));
+  const ServerDetails = lazy(() => import('./ServerDetails.svelte'));
+  const Invites = lazy(() => import('./Invites.svelte'));
+  const Diagnostics = lazy(() => import('./Diagnostics.svelte'));
+  const NewGroup = lazy(() => import('./NewGroup.svelte'));
+  const ChatInfo = lazy(() => import('./ChatInfo.svelte'));
+  const Contact = lazy(() => import('./Contact.svelte'));
+  const MyProfile = lazy(() => import('./MyProfile.svelte'));
+  const Storage = lazy(() => import('./Storage.svelte'));
+  const Security = lazy(() => import('./Security.svelte'));
 
   // One column below 900 px (a stack of screens over the chat list), two
   // columns from 900 px: the list and the open screen (docs/PLAN.md 8.2).
@@ -34,33 +38,33 @@
           <Chat accountId={top.accountId} chatId={top.chatId} focus={top.focus ?? false} />
         {/key}
       {:else if top.name === 'new-chat'}
-        <NewChat />
+        {#await NewChat() then { default: C }}<C />{/await}
       {:else if top.name === 'new-group'}
-        <NewGroup members={top.members ?? []} title={top.title ?? ''} />
+        {#await NewGroup() then { default: C }}<C members={top.members ?? []} title={top.title ?? ''} />{/await}
       {:else if top.name === 'chat-info'}
         {#key `${top.accountId}/${top.chatId}`}
-          <ChatInfo accountId={top.accountId} chatId={top.chatId} />
+          {#await ChatInfo() then { default: C }}<C accountId={top.accountId} chatId={top.chatId} />{/await}
         {/key}
       {:else if top.name === 'contact'}
         {#key `${top.accountId}/${top.userId}`}
-          <Contact accountId={top.accountId} userId={top.userId} />
+          {#await Contact() then { default: C }}<C accountId={top.accountId} userId={top.userId} />{/await}
         {/key}
       {:else if top.name === 'profile'}
-        <MyProfile />
+        {#await MyProfile() then { default: C }}<C />{/await}
       {:else if top.name === 'storage'}
-        <Storage />
+        {#await Storage() then { default: C }}<C />{/await}
       {:else if top.name === 'security'}
-        <Security />
+        {#await Security() then { default: C }}<C />{/await}
       {:else if top.name === 'settings'}
-        <Settings />
+        {#await Settings() then { default: C }}<C />{/await}
       {:else if top.name === 'phrase'}
-        <PhraseScreen />
+        {#await PhraseScreen() then { default: C }}<C />{/await}
       {:else if top.name === 'server'}
-        <ServerDetails />
+        {#await ServerDetails() then { default: C }}<C />{/await}
       {:else if top.name === 'invites'}
-        <Invites />
+        {#await Invites() then { default: C }}<C />{/await}
       {:else if top.name === 'diagnostics'}
-        <Diagnostics />
+        {#await Diagnostics() then { default: C }}<C />{/await}
       {:else}
         <div class="placeholder"><p class="muted">{t.list.pickChat}</p></div>
       {/if}
