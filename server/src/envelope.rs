@@ -6,7 +6,7 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ids::{DevId, UserId, b64_decode};
+use crate::ids::{DevId, FileHash, PackId, UserId, b64_decode};
 
 /// Longest accepted payload (decoded), bytes. Profiles carry no avatar
 /// bytes (the avatar is a separate file), so this is generous.
@@ -25,6 +25,7 @@ pub enum Kind {
     Profile,
     Auth,
     Revoked,
+    StickerPack,
 }
 
 impl Kind {
@@ -34,6 +35,7 @@ impl Kind {
             Kind::Profile => "profile",
             Kind::Auth => "auth",
             Kind::Revoked => "revoked",
+            Kind::StickerPack => "sticker-pack",
         }
     }
 }
@@ -59,8 +61,15 @@ pub fn signed_bytes(kind: Kind, payload: &[u8]) -> Vec<u8> {
 impl Envelope {
     /// Decodes the payload into JSON (no signature check).
     fn decode(&self) -> Result<(Vec<u8>, serde_json::Map<String, Value>), EnvError> {
+        self.decode_max(MAX_PAYLOAD)
+    }
+
+    fn decode_max(&self, max: usize) -> Result<(Vec<u8>, serde_json::Map<String, Value>), EnvError> {
+        if self.payload.len() > max.div_ceil(3) * 4 {
+            return Err(malformed("payload too large"));
+        }
         let bytes = b64_decode(&self.payload).ok_or_else(|| malformed("payload is not base64url"))?;
-        if bytes.len() > MAX_PAYLOAD {
+        if bytes.len() > max {
             return Err(malformed("payload too large"));
         }
         let v: Value = serde_json::from_slice(&bytes).map_err(|_| malformed("payload is not JSON"))?;
@@ -349,6 +358,181 @@ pub fn parse_revocation(env: &Envelope) -> Result<Revocation, EnvError> {
 
 pub fn verify_revocation(env: &Envelope, r: &Revocation, key: &VerifyingKey) -> Result<(), EnvError> {
     env.verify(Kind::Revoked, &r.bytes, key)
+}
+
+// ---- sticker packs (docs/PROTOCOL.md, "Наборы стикеров") ----
+
+/// Largest `sticker-pack` payload: a manifest of up to 200 stickers.
+pub const MAX_PACK_PAYLOAD: usize = 64 * 1024;
+/// Stickers in one pack.
+pub const MAX_PACK_STICKERS: usize = 200;
+/// Largest `.webp` sticker file.
+pub const MAX_WEBP_BYTES: u64 = 512 * 1024;
+/// Largest `.tgs` sticker file (gzip-compressed Lottie JSON).
+pub const MAX_TGS_BYTES: u64 = 128 * 1024;
+/// All files of one pack together.
+pub const MAX_PACK_BYTES: u64 = 50 * 1024 * 1024;
+/// Width and height of a sticker, pixels.
+pub const MAX_STICKER_SIDE: i64 = 1024;
+pub const MAX_EMOJI_CHARS: usize = 16;
+pub const MAX_EMOJI_BYTES: usize = 64;
+
+/// Sticker file format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StickerType {
+    Webp,
+    Tgs,
+}
+
+impl StickerType {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "webp" => Some(Self::Webp),
+            "tgs" => Some(Self::Tgs),
+            _ => None,
+        }
+    }
+
+    pub fn ext(self) -> &'static str {
+        match self {
+            Self::Webp => "webp",
+            Self::Tgs => "tgs",
+        }
+    }
+
+    pub fn max_bytes(self) -> u64 {
+        match self {
+            Self::Webp => MAX_WEBP_BYTES,
+            Self::Tgs => MAX_TGS_BYTES,
+        }
+    }
+
+    /// WebP is `RIFF <size> WEBP`; `.tgs` is gzip (`1F 8B`).
+    pub fn sniff(bytes: &[u8]) -> Option<Self> {
+        if ImageKind::sniff(bytes) == Some(ImageKind::Webp) {
+            return Some(Self::Webp);
+        }
+        if bytes.len() >= 2 && bytes[..2] == [0x1F, 0x8B] {
+            return Some(Self::Tgs);
+        }
+        None
+    }
+}
+
+/// Why an emoji (of a sticker or a reaction) is unacceptable: the rules of
+/// `packages/protocol` (1 to 16 code points, at most 64 bytes, no control or
+/// bidirectional characters, no surrounding spaces).
+pub fn emoji_problem(e: &str) -> Option<String> {
+    if e.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
+        .is_empty()
+    {
+        return Some("emoji must not be empty".into());
+    }
+    if e.chars().count() > MAX_EMOJI_CHARS || e.len() > MAX_EMOJI_BYTES {
+        return Some("emoji is too long".into());
+    }
+    if e.chars().any(forbidden_in_name) {
+        return Some("emoji contains control or bidirectional characters".into());
+    }
+    if e.trim() != e {
+        return Some("emoji must not contain surrounding spaces".into());
+    }
+    None
+}
+
+#[derive(Debug, Clone)]
+pub struct PackSticker {
+    pub file: FileHash,
+    pub kind: StickerType,
+    pub size: u64,
+}
+
+/// A verified sticker pack manifest.
+#[derive(Debug, Clone)]
+pub struct PackManifest {
+    pub pack_id: PackId,
+    pub author: UserId,
+    pub name: String,
+    pub stickers: Vec<PackSticker>,
+    pub envelope: Envelope,
+}
+
+impl PackManifest {
+    pub fn total_bytes(&self) -> u64 {
+        self.stickers.iter().map(|s| s.size).sum()
+    }
+}
+
+/// Parses a `sticker-pack` envelope: `{"v":1,"packId","serverId","author",
+/// "name","created","stickers":[{"file","type","size","emoji","w","h"}]}`.
+/// The signature is checked by [`verify_sticker_pack`] once the author's key is known.
+pub fn parse_sticker_pack(env: &Envelope, server_id: &str) -> Result<(PackManifest, Vec<u8>), EnvError> {
+    let (bytes, m) = env.decode_max(MAX_PACK_PAYLOAD)?;
+    check_version(&m)?;
+    let pack_id = PackId::parse(str_field(&m, "packId")?).ok_or_else(|| malformed("bad packId"))?;
+    if str_field(&m, "serverId")? != server_id {
+        return Err(malformed("the manifest belongs to another server"));
+    }
+    let author = UserId::parse(str_field(&m, "author")?).ok_or_else(|| malformed("bad author"))?;
+    let name = str_field(&m, "name")?;
+    if let Some(problem) = name_problem(name) {
+        return Err(malformed(problem));
+    }
+    if int_field(&m, "created")? < 0 {
+        return Err(malformed("created must not be negative"));
+    }
+    let list = m
+        .get("stickers")
+        .and_then(Value::as_array)
+        .ok_or_else(|| malformed("stickers must be a list"))?;
+    if list.is_empty() || list.len() > MAX_PACK_STICKERS {
+        return Err(malformed(format!("a pack has 1 to {MAX_PACK_STICKERS} stickers")));
+    }
+    let mut stickers = Vec::with_capacity(list.len());
+    let mut seen = std::collections::HashSet::new();
+    for s in list {
+        let o = s.as_object().ok_or_else(|| malformed("a sticker must be an object"))?;
+        let file = FileHash::parse(str_field(o, "file")?).ok_or_else(|| malformed("bad sticker file"))?;
+        if !seen.insert(file) {
+            return Err(malformed("the same file is listed twice"));
+        }
+        let kind =
+            StickerType::parse(str_field(o, "type")?).ok_or_else(|| malformed("sticker type must be webp or tgs"))?;
+        let size = int_field(o, "size")?;
+        if size < 1 || size as u64 > kind.max_bytes() {
+            return Err(malformed("sticker size is out of range"));
+        }
+        if let Some(p) = emoji_problem(str_field(o, "emoji")?) {
+            return Err(malformed(p));
+        }
+        for k in ["w", "h"] {
+            let v = int_field(o, k)?;
+            if !(1..=MAX_STICKER_SIDE).contains(&v) {
+                return Err(malformed(format!("sticker {k} must be 1 to {MAX_STICKER_SIDE}")));
+            }
+        }
+        stickers.push(PackSticker {
+            file,
+            kind,
+            size: size as u64,
+        });
+    }
+    let p = PackManifest {
+        pack_id,
+        author,
+        name: name.to_string(),
+        stickers,
+        envelope: env.clone(),
+    };
+    if p.total_bytes() > MAX_PACK_BYTES {
+        return Err(malformed("the pack is larger than allowed"));
+    }
+    Ok((p, bytes))
+}
+
+/// Checks the manifest's signature by the author's identity key.
+pub fn verify_sticker_pack(env: &Envelope, bytes: &[u8], key: &VerifyingKey) -> Result<(), EnvError> {
+    env.verify(Kind::StickerPack, bytes, key)
 }
 
 #[doc(hidden)]

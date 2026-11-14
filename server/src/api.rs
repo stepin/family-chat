@@ -607,6 +607,7 @@ pub async fn post_event(
         .and_then(|v| v.to_str().ok())
         .ok_or_else(|| ApiError::bad_request("X-FC-Epoch header is required"))
         .and_then(|v| v.parse::<u32>().map_err(|_| ApiError::bad_request("bad X-FC-Epoch")))?;
+    let silent = no_push_hint(&headers)?;
     let body = read_body(&headers, body, MAX_BODY).await?;
     if body.is_empty() {
         return Err(ApiError::bad_request("event body is empty"));
@@ -615,10 +616,22 @@ pub async fn post_event(
         .store
         .write(move |w| w.append(chat, c.user, c.dev, epoch, msg, &body, now_ms()))
         .await?;
-    if !a.duplicate {
+    if !a.duplicate && !silent {
         push_new_event(&st, &a, c.user, c.dev);
     }
     Ok(Json(json!({ "gseq": a.gseq, "time": a.time, "duplicate": a.duplicate })).into_response())
+}
+
+/// `X-FC-Push: none` on `POST /v1/chats/<id>/events`: the sender's hint that
+/// the event is not worth a notification (an edit, a deletion, a reaction).
+/// The server skips push for it; delivery is the same. Any other value is an
+/// error, so a typo does not silently notify.
+pub fn no_push_hint(headers: &HeaderMap) -> Result<bool, ApiError> {
+    match headers.get("x-fc-push").map(|v| v.to_str()) {
+        None => Ok(false),
+        Some(Ok("none")) => Ok(true),
+        Some(_) => Err(ApiError::bad_request("X-FC-Push must be \"none\" when present")),
+    }
 }
 
 #[derive(Deserialize)]

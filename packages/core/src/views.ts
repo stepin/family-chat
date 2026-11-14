@@ -1,13 +1,14 @@
 // View types of the M2 facade and the queries that build them from the
 // local database (used inside Dexie live queries, so they only read).
 
-import { compareGroupMembers, fingerprint, type AvatarRef, type Location, type MsgRef } from '@family-chat/protocol';
+import { compareGroupMembers, fingerprint, type AvatarRef, type Location, type MsgRef, type StickerRef } from '@family-chat/protocol';
 import { Dexie } from 'dexie';
 import type {
   BlobRow,
   ChatKind,
   CoreDb,
   GroupRow,
+  IdentityLinkRow,
   LastMedia,
   MessageKind,
   MessageRow,
@@ -16,6 +17,7 @@ import type {
   UserRow,
 } from './db/schema.ts';
 import { SERVICE_SENDER } from './groups.ts';
+import { linkValid } from './links.ts';
 
 /** State of one attachment as the UI shows it. */
 export type AttachmentStatus =
@@ -114,6 +116,9 @@ export interface MessageView {
   /** Device and seq of the original event (needed to delete it for everyone). */
   readonly devId?: string;
   readonly seq?: number | null;
+  // ---- M5 ----
+  /** A sticker message (the body is its emoji, shown when the sticker cannot be). */
+  readonly sticker?: StickerRef | null;
 }
 
 export interface ChatSummary {
@@ -260,16 +265,41 @@ function attachmentViews(list: MessageRow['attachments'], blobs: Map<string, Blo
   });
 }
 
+/**
+ * Direct chats with older identities linked to this chat's peer (M5, "the
+ * same person as…"): their messages are shown in this chat as one feed.
+ */
+export async function linkedChatIds(db: CoreDb, accountId: string, chatId: string): Promise<string[]> {
+  const chat = await db.chats.get([accountId, chatId]);
+  if (!chat || chat.kind !== 'dm') return [];
+  const links = await db.links.where('[accountId+to]').equals([accountId, chat.peerId]).toArray();
+  if (links.length === 0) return [];
+  const users = new Map((await db.users.where('accountId').equals(accountId).toArray()).map((u) => [u.userId, u]));
+  const out: string[] = [];
+  for (const l of links) {
+    if (!linkValid(l, users)) continue;
+    const old = await db.chats.where('accountId').equals(accountId).and((c) => c.kind === 'dm' && c.peerId === l.userId).first();
+    if (old) out.push(old.chatId);
+  }
+  return out;
+}
+
 /** Messages of a chat for ChatView (newest `limit` from the database, then the outbox). */
 export async function chatMessages(db: CoreDb, accountId: string, chatId: string, limit: number): Promise<MessageView[]> {
   const account = await db.accounts.get(accountId);
   const me = account?.userId ?? '';
-  const rows = await db.messages
-    .where('[accountId+chatId+gseq]')
-    .between([accountId, chatId, Dexie.minKey], [accountId, chatId, Dexie.maxKey])
-    .reverse()
-    .limit(limit)
-    .toArray();
+  const newest = (id: string) =>
+    db.messages
+      .where('[accountId+chatId+gseq]')
+      .between([accountId, id, Dexie.minKey], [accountId, id, Dexie.maxKey])
+      .reverse()
+      .limit(limit)
+      .toArray();
+  let rows = await newest(chatId);
+  // One feed with the chats of linked older identities (server order: gseq is global per server).
+  for (const other of await linkedChatIds(db, accountId, chatId)) rows = [...rows, ...(await newest(other))];
+  rows.sort((a, b) => b.gseq - a.gseq);
+  rows = rows.slice(0, limit);
   rows.reverse();
   const queued = (await db.outbox.where('[accountId+chatId]').equals([accountId, chatId]).toArray()).sort(
     (a, b) => a.createdAt - b.createdAt || a.seq - b.seq,
@@ -309,6 +339,7 @@ export async function chatMessages(db: CoreDb, accountId: string, chatId: string
     replyTo: m.reply ? (replies.get(`${m.reply.author}/${m.reply.id}`) ?? null) : null,
     devId: m.devId,
     seq: m.seq,
+    sticker: m.sticker ?? null,
   }));
   for (const o of pending) out.push({ ...outboxView(o, me, blobs), replyTo: o.reply ? (replies.get(`${o.reply.author}/${o.reply.id}`) ?? null) : null });
   return controls.length > 0 ? overlayControls(out, controls, me) : out;
@@ -330,7 +361,7 @@ function overlayControls(list: MessageView[], controls: readonly OutboxRow[], me
     if (m.kind !== 'msg') continue;
     if (c.kind === 'edit') out[i] = { ...m, body: c.body, edited: true };
     else if (c.kind === 'delete') {
-      out[i] = { ...m, kind: 'deleted', body: '', attachments: [], location: null, reactions: [], replyTo: null, edited: false };
+      out[i] = { ...m, kind: 'deleted', body: '', attachments: [], location: null, sticker: null, reactions: [], replyTo: null, edited: false };
     } else {
       const reactions = [...(m.reactions ?? [])];
       const at = reactions.findIndex((r) => r.emoji === c.emoji);
@@ -365,7 +396,7 @@ async function replyPreviews(db: CoreDb, accountId: string, refs: readonly (MsgR
       id: r.id,
       available: ok,
       body: ok ? m.body : '',
-      media: ok ? (m.attachments?.[0]?.kind ?? (m.location ? 'location' : null)) : null,
+      media: ok ? (m.attachments?.[0]?.kind ?? (m.location ? 'location' : m.sticker ? 'sticker' : null)) : null,
       fileName: ok ? (m.attachments?.[0]?.name ?? null) : null,
       gseq: ok ? m.gseq : null,
     });
@@ -399,18 +430,20 @@ function outboxView(o: OutboxRow, me: string, blobs: Map<string, BlobRow>): Mess
     fwd: o.fwd === true,
     service: null,
     upload: o.attachments && o.attachments.length > 0 ? { done: Math.min(done, total), total } : null,
+    sticker: o.sticker ?? null,
   };
 }
 
 /** All chats of all accounts: the chat with myself first, then the most recent. */
 export async function chatSummaries(db: CoreDb): Promise<ChatSummary[]> {
-  const [accounts, chats, users, drafts, outbox, groups] = await Promise.all([
+  const [accounts, chats, users, drafts, outbox, groups, links] = await Promise.all([
     db.accounts.toArray(),
     db.chats.toArray(),
     db.users.toArray(),
     db.drafts.toArray(),
     db.outbox.toArray(),
     db.groups.toArray(),
+    db.links.toArray(),
   ]);
   const acc = new Map(accounts.map((a) => [a.id, a]));
   const user = new Map(users.map((u) => [`${u.accountId}/${u.userId}`, u]));
@@ -457,8 +490,41 @@ export async function chatSummaries(db: CoreDb): Promise<ChatSummary[]> {
       sortKey: c.last?.time ?? c.createdAt,
     });
   }
-  items.sort((x, y) => Number(y.pinned) - Number(x.pinned) || y.sortKey - x.sortKey);
-  return items.map(({ sortKey: _sortKey, ...rest }) => rest);
+  const merged = mergeLinked(items, links, users);
+  merged.sort((x, y) => Number(y.pinned) - Number(x.pinned) || y.sortKey - x.sortKey);
+  return merged.map(({ sortKey: _sortKey, ...rest }) => rest);
+}
+
+/** Folds the direct chat with an older linked identity into the chat with the newer one (M5). */
+function mergeLinked<T extends ChatSummary & { sortKey: number }>(items: T[], links: readonly IdentityLinkRow[], users: readonly UserRow[]): T[] {
+  if (links.length === 0) return items;
+  const byAccount = new Map<string, Map<string, UserRow>>();
+  for (const u of users) {
+    let m = byAccount.get(u.accountId);
+    if (!m) byAccount.set(u.accountId, (m = new Map()));
+    m.set(u.userId, u);
+  }
+  const target = new Map<string, string>();
+  for (const l of links) if (linkValid(l, byAccount.get(l.accountId) ?? new Map())) target.set(`${l.accountId}/${l.userId}`, l.to);
+  const dmOf = new Map(items.filter((i) => i.kind === 'dm' && i.peerId).map((i) => [`${i.accountId}/${i.peerId}`, i]));
+  const out: T[] = [];
+  const patched = new Map<T, T>();
+  for (const i of items) {
+    const to = i.kind === 'dm' && i.peerId ? target.get(`${i.accountId}/${i.peerId}`) : undefined;
+    const into = to ? dmOf.get(`${i.accountId}/${to}`) : undefined;
+    if (!into) {
+      out.push(i);
+      continue;
+    }
+    const cur = patched.get(into) ?? into;
+    const newer = (i.lastTime ?? 0) > (cur.lastTime ?? 0);
+    patched.set(into, {
+      ...cur,
+      unread: cur.unread + i.unread,
+      ...(newer ? { lastMessage: i.lastMessage, lastTime: i.lastTime, sortKey: Math.max(cur.sortKey, i.sortKey) } : {}),
+    });
+  }
+  return out.map((i) => patched.get(i) ?? i);
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {

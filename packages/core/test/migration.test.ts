@@ -1,6 +1,6 @@
 // The database schema only grows: a database written by the M1 code (schema
-// version 1) or the M2/M3 code (version 2) opens with the current version,
-// keeps every row and gets the new tables and indexes.
+// version 1), the M2/M3 code (version 2) or the M4 code (version 3) opens with
+// the current version, keeps every row and gets the new tables and indexes.
 
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { Dexie } from 'dexie';
@@ -49,9 +49,21 @@ class M2Db extends M1Db {
   }
 }
 
+/** Exactly the M4 schema (commit de3ce51, src/db/schema.ts): versions 1 to 3. */
+class M4Db extends M2Db {
+  constructor(name: string, factory: IDBFactory) {
+    super(name, factory);
+    this.version(3).stores({
+      messages: '[accountId+senderId+msgId], [accountId+chatId+gseq], accountId, *words',
+      controls: '[accountId+senderId+msgId], [accountId+target], [accountId+chatId]',
+      tombstones: '[accountId+senderId+msgId], [accountId+chatId]',
+    });
+  }
+}
+
 describe('schema migration', () => {
   it('opens an M1 database, keeps its rows and adds the M2 tables and fields', async () => {
-    expect(DB_VERSION).toBe(3);
+    expect(DB_VERSION).toBe(4);
     const factory = new IDBFactory();
     const old = new M1Db('m1', factory);
     await old.open();
@@ -100,7 +112,7 @@ describe('schema migration to version 3 (M4)', () => {
     old.close();
 
     const db = await openDb(new CoreDb('m2', { indexedDB: factory, IDBKeyRange }));
-    expect(db.verno).toBe(3);
+    expect(db.verno).toBe(DB_VERSION);
     expect((await db.accounts.get('acc1'))!).toMatchObject({ cursor: 42, keysCursor: 3, token: 't' });
     const rows = await db.messages.toArray();
     expect(rows).toHaveLength(3);
@@ -111,6 +123,38 @@ describe('schema migration to version 3 (M4)', () => {
     expect(await db.tombstones.count()).toBe(0);
     expect((await searchMessages(db, { text: 'ёлк' })).hits.map((h) => h.msgId)).toEqual(['a'.repeat(26)]);
     expect((await searchMessages(db, { text: 'отчет' })).hits.map((h) => h.msgId)).toEqual(['b'.repeat(26)]);
+    db.close();
+  });
+});
+
+describe('schema migration to version 4 (M5)', () => {
+  it('opens an M4 database, keeps its rows and adds the sticker and link tables', async () => {
+    const factory = new IDBFactory();
+    const old = new M4Db('m4', factory);
+    await old.open();
+    await old.table('accounts').put({
+      id: 'acc1', serverUrl: 'https://fc.test', serverId: 'sid', familyName: 'Семья', userId: 'u'.repeat(26), devId: 'd'.repeat(16),
+      token: 't', admin: true, status: 'active', cursor: 42, initialSyncDone: true, retentionGap: null, retentionDays: 90,
+      pushAvailable: false, vapidPublicKey: null, pushRegistered: false, createdAt: 1, lastSyncAt: 2, keysCursor: 3, oldest: null, revoked: false, limits: null,
+    });
+    const base = { accountId: 'acc1', chatId: 'c'.repeat(26), senderId: 'p'.repeat(26), devId: 'x', reply: null };
+    await old.table('messages').put({ ...base, msgId: 'a'.repeat(26), seq: 1, gseq: 5, time: 6, kind: 'msg', body: 'Ёлка во дворе', words: ['елка', 'во', 'дворе'], reactions: [{ emoji: '👍', users: ['q'] }] });
+    await old.table('controls').put({ accountId: 'acc1', senderId: 'q', msgId: 'r'.repeat(26), chatId: base.chatId, gseq: 6, time: 7, epoch: 0, kind: 'react', target: `${base.senderId}/${'a'.repeat(26)}`, emoji: '👍', on: true });
+    await old.table('settings').put({ key: 'emoji.recent', value: ['👍'] });
+    old.close();
+
+    const db = await openDb(new CoreDb('m4', { indexedDB: factory, IDBKeyRange }));
+    expect(db.verno).toBe(4);
+    expect((await db.accounts.get('acc1'))!).toMatchObject({ cursor: 42, token: 't' });
+    const m = (await db.messages.toArray())[0]!;
+    expect(m).toMatchObject({ body: 'Ёлка во дворе', reactions: [{ emoji: '👍', users: ['q'] }] });
+    expect(m.sticker).toBeUndefined();
+    expect(await db.controls.count()).toBe(1);
+    expect((await db.settings.get('emoji.recent'))!.value).toEqual(['👍']);
+    expect((await searchMessages(db, { text: 'ёлк' })).hits).toHaveLength(1);
+    for (const t of ['stickerPacks', 'stickerFiles', 'links']) expect(await db.table(t).count()).toBe(0);
+    await db.links.put({ accountId: 'acc1', userId: 'o'.repeat(26), to: 'n'.repeat(26), fromFingerprint: 'f', toFingerprint: 'g', createdAt: 1 });
+    expect(await db.links.where('[accountId+to]').equals(['acc1', 'n'.repeat(26)]).count()).toBe(1);
     db.close();
   });
 });

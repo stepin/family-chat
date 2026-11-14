@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { IdentityLinkView } from '@family-chat/core';
   import Avatar from '../components/Avatar.svelte';
   import Icon from '../components/Icon.svelte';
   import Page from '../components/Page.svelte';
@@ -19,10 +20,43 @@
   const name = $derived(member ? (names.get(member.userId) ?? t.common.unknownName) : t.common.unknownName);
   const canWrite = $derived(!!member && !member.isMe && !member.removed && !member.revoked);
   let busy = $state(false);
+  // M5: "this is the same person as…" (docs/PLAN.md 8.6), local to this device.
+  let links = $state.raw<IdentityLinkView[]>([]);
+  let picking = $state(false);
+  let pick = $state('');
+  const link = $derived(links.find((l) => l.userId === userId || l.to === userId) ?? null);
+  const linkedName = $derived(link ? (names.get(link.userId === userId ? link.to : link.userId) ?? t.common.unknownName) : '');
+  const candidates = $derived(
+    app.members.filter((m) => !m.isMe && m.userId !== userId && !links.some((l) => l.userId === m.userId || l.to === m.userId)),
+  );
 
   onMount(() => {
     void app.core.refreshMembers(accountId).catch(() => undefined);
+    return app.core.identityLinks(accountId).subscribe((l) => (links = l));
   });
+
+  async function linkNow(e: SubmitEvent): Promise<void> {
+    e.preventDefault();
+    if (!pick) return;
+    busy = true;
+    try {
+      await app.core.linkIdentity(accountId, userId, pick);
+      picking = false;
+      pick = '';
+      app.notify(t.contact.linked);
+    } catch (err) {
+      app.notify(t.contact.linkFailed);
+      app.log('warn', 'contact', 'linking identities failed', err);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function unlink(): Promise<void> {
+    if (!link) return;
+    await app.core.unlinkIdentity(accountId, link.userId).catch(() => undefined);
+    app.notify(t.contact.unlinked);
+  }
 
   async function setVerified(on: boolean): Promise<void> {
     try {
@@ -107,12 +141,75 @@
         </label>
       {/if}
     </section>
+    {#if !member.isMe}
+      <section class="section" aria-labelledby="contact-link">
+        <h2 id="contact-link">{t.contact.sameIdentity}</h2>
+        {#if link}
+          <p data-testid="identity-link">{t.contact.linkedWith(linkedName)}</p>
+          {#if !link.valid}<p class="notice warn small">{t.contact.linkStale}</p>{/if}
+          <p class="muted small">{t.contact.linkLocal}</p>
+          <button class="btn secondary small" type="button" onclick={unlink}>{t.contact.unlink}</button>
+        {:else if picking}
+          <form class="stack" onsubmit={linkNow}>
+            <p class="small">{t.contact.linkLead}</p>
+            {#if candidates.length === 0}
+              <p class="muted">{t.contact.noCandidates}</p>
+            {:else}
+              <fieldset class="pick">
+                <legend>{t.contact.linkPick}</legend>
+                {#each candidates as c (c.userId)}
+                  <label class="choice">
+                    <input type="radio" name="link-to" value={c.userId} bind:group={pick} />
+                    <span>{names.get(c.userId) ?? t.common.unknownName} <span class="mono muted small">{c.fingerprint.slice(0, 11)}</span></span>
+                  </label>
+                {/each}
+              </fieldset>
+            {/if}
+            <p class="muted small">{t.contact.linkLocal}</p>
+            <div class="row">
+              <button class="btn small" type="submit" disabled={busy || !pick} data-testid="link-confirm">{t.contact.linkConfirm}</button>
+              <button class="btn secondary small" type="button" onclick={() => (picking = false)}>{t.common.cancel}</button>
+            </div>
+          </form>
+        {:else}
+          <button class="btn secondary small" type="button" onclick={() => (picking = true)} data-testid="link-start">{t.contact.linkAction}</button>
+        {/if}
+      </section>
+    {/if}
   {:else}
     <p class="muted" role="status">{t.common.loading}</p>
   {/if}
 </Page>
 
 <style>
+  .pick {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .pick legend {
+    margin-bottom: var(--sp-1);
+    font-weight: 600;
+  }
+
+  .choice {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    min-height: var(--touch);
+    cursor: pointer;
+  }
+
+  .choice input {
+    width: 22px;
+    height: 22px;
+    accent-color: var(--accent);
+  }
+
   .head {
     display: flex;
     flex-direction: column;

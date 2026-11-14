@@ -110,3 +110,39 @@ fn direct_chat_ids_match() {
         assert_eq!(id.to_string(), c["chatId"].as_str().unwrap(), "{c}");
     }
 }
+
+/// M5: the server accepts the vector manifest and rejects every negative one
+/// (it only distinguishes "malformed" from "bad signature"; another author is
+/// refused by the handler before the signature, another server is malformed).
+#[test]
+fn sticker_pack_vectors() {
+    let users = users();
+    let v = load("stickers.json");
+    let server_id = v["serverId"].as_str().unwrap();
+    let signer = v["signer"].as_str().unwrap();
+    let alice = key(&users, signer);
+    let e = env(&v["manifest"]["envelope"]);
+    let (m, bytes) = envelope::parse_sticker_pack(&e, server_id).unwrap();
+    assert_eq!(m.author, user_id(&users, signer));
+    envelope::verify_sticker_pack(&e, &bytes, &alice).unwrap();
+    for (f, s) in v["files"].as_array().unwrap().iter().zip(&m.stickers) {
+        let hex = f["bytesHex"].as_str().unwrap();
+        let b: Vec<u8> = (0..hex.len() / 2)
+            .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap())
+            .collect();
+        assert_eq!(fcd::ids::FileHash::of(&b), s.file);
+        assert_eq!(f["hash32"].as_str().unwrap(), s.file.to_string());
+        assert_eq!(fcd::envelope::StickerType::sniff(&b), Some(s.kind));
+    }
+    for c in v["negativeManifests"].as_array().unwrap() {
+        let name = c["name"].as_str().unwrap();
+        let e = env(&c["envelope"]);
+        let refused = match envelope::parse_sticker_pack(&e, server_id) {
+            Err(_) => true,
+            Ok((m, bytes)) => {
+                m.author != user_id(&users, signer) || envelope::verify_sticker_pack(&e, &bytes, &alice).is_err()
+            }
+        };
+        assert!(refused, "{name} must be refused");
+    }
+}

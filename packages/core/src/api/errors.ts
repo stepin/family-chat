@@ -37,7 +37,18 @@ export type ServerErrorCode =
   | 'too_large'
   | 'rate_limited'
   | 'internal'
-  | 'storage_full';
+  | 'storage_full'
+  // M5: sticker packs
+  | 'pack_not_found'
+  | 'file_not_found'
+  | 'hash_mismatch'
+  | 'bad_sticker'
+  | 'pack_published'
+  | 'missing_file'
+  | 'file_mismatch'
+  | 'not_author'
+  | 'bad_manifest'
+  | 'too_many_packs';
 
 const SERVER_CODES: ReadonlySet<string> = new Set<ServerErrorCode>([
   'bad_request',
@@ -75,6 +86,16 @@ const SERVER_CODES: ReadonlySet<string> = new Set<ServerErrorCode>([
   'rate_limited',
   'internal',
   'storage_full',
+  'pack_not_found',
+  'file_not_found',
+  'hash_mismatch',
+  'bad_sticker',
+  'pack_published',
+  'missing_file',
+  'file_mismatch',
+  'not_author',
+  'bad_manifest',
+  'too_many_packs',
 ]);
 
 /**

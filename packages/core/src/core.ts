@@ -5,7 +5,7 @@
 // No DOM: it needs fetch, IndexedDB, WebCrypto and timers, all present in a
 // worker. In M1 it may run on the main thread.
 
-import { dmChatId, fingerprint, type AvatarRef, type IdentityKeys, type Location, type MsgRef } from '@family-chat/protocol';
+import { dmChatId, fingerprint, type AvatarRef, type IdentityKeys, type Location, type MsgRef, type PackSticker, type StickerRef } from '@family-chat/protocol';
 import { Dexie, liveQuery } from 'dexie';
 import {
   AccountRuntime,
@@ -17,6 +17,7 @@ import {
   joinServer,
   keysFromPhrase,
   recoveryPhrase,
+  removeAccount,
   restoreAccount,
   revokeIdentity,
   updateProfile,
@@ -42,6 +43,7 @@ import type { FileStorePreference, OpfsDirectory } from './files.ts';
 import {
   chatMessages,
   chatSummaries,
+  linkedChatIds,
   groupView,
   transferView,
   type ChatSummary,
@@ -69,6 +71,13 @@ import { base64urlDecode, newMessageId } from '@family-chat/protocol';
 import { countFrom, searchMessages, textMatches, queryWords, type SearchHit } from './search.ts';
 import { handlePush, registerPush, unregisterPush, type PushNotice } from './push.ts';
 import type { ConnectionState } from './sync.ts';
+import { SETTING_BADGE_COUNT, unreadTotal } from './badge.ts';
+import { parseShared, SETTING_SHARE_PENDING, type SharedContent } from './share.ts';
+import { linkIdentities, linkValid, unlinkIdentity } from './links.ts';
+// The sticker import pipeline and the `.tgs` reader load on first use (their own chunk in the web build).
+import type { ImportInput, StickerImport } from './stickers/import.ts';
+import type { SanitizedLottie } from './stickers/tgs.ts';
+import type { IdentityLinkRow } from './db/schema.ts';
 import type { BackoffOptions } from './util/backoff.ts';
 import type { Clock } from './util/clock.ts';
 import type { LockManagerLike } from './util/locks.ts';
@@ -291,6 +300,31 @@ export interface OutgoingMessage {
   /** A place (the UI takes it from the Geolocation API); the message may have no text then. */
   readonly location?: Location;
   readonly fwd?: boolean;
+  /** A sticker (M5): `text` must then be its emoji; no attachments or place. */
+  readonly sticker?: StickerRef;
+}
+
+/** A published sticker pack of a family (M5). */
+export interface StickerPackView {
+  readonly accountId: string;
+  readonly packId: string;
+  readonly name: string;
+  /** Uploader; only they can delete the pack. */
+  readonly author: string;
+  readonly mine: boolean;
+  readonly stickers: readonly PackSticker[];
+  readonly publishedAt: number | null;
+}
+
+/** "The same person as…" (M5): an older identity shown together with a newer one. */
+export interface IdentityLinkView {
+  readonly accountId: string;
+  /** The older identity. */
+  readonly userId: string;
+  /** The newer identity (the same person). */
+  readonly to: string;
+  /** False when either identity's keys changed since: the link no longer applies. */
+  readonly valid: boolean;
 }
 
 export interface AvatarView {
@@ -329,6 +363,8 @@ export class FamilyChatCore {
   readonly drafts: Readable<DraftItem[]>;
   /** The diagnostics log, oldest first (at most 500 entries). */
   readonly diagnostics: Readable<DiagnosticEntry[]>;
+  /** M5: total unread over the accounts that are still members (the app icon badge and the title). */
+  readonly unreadTotal: Readable<number>;
 
   constructor(options: CoreOptions = {}) {
     this.db = options.db ?? new CoreDb(options.dbName ?? DEFAULT_DB_NAME, options.dbDeps ?? {});
@@ -386,6 +422,14 @@ export class FamilyChatCore {
       onError,
     );
     this.diagnostics = live<DiagnosticEntry[]>([], () => db.diagnostics.orderBy('id').toArray(), onError);
+    this.unreadTotal = live<number>(
+      0,
+      async () => {
+        const [accounts, summaries] = await Promise.all([db.accounts.toArray(), chatSummaries(db)]);
+        return unreadTotal(accounts, summaries);
+      },
+      onError,
+    );
   }
 
   // ---- lifecycle ----
@@ -501,6 +545,27 @@ export class FamilyChatCore {
 
   async updateProfile(accountId: string, name: string): Promise<void> {
     await updateProfile(await this.#runtime(accountId), name);
+  }
+
+  /**
+   * M5: removes an account (one family) from this device: its history,
+   * files, group keys and token. Other accounts keep running. The identity's
+   * seed is removed too when no other account here uses it.
+   */
+  async removeAccount(accountId: string): Promise<void> {
+    this.#ensureOpen();
+    const rt = this.#runtimes.get(accountId);
+    if (rt) {
+      await rt.stop();
+      this.#runtimes.delete(accountId);
+      this.#connUnsubs.get(accountId)?.();
+      this.#connUnsubs.delete(accountId);
+      this.#connection.update((m) => {
+        const { [accountId]: _gone, ...rest } = m;
+        return rest;
+      });
+    }
+    await removeAccount(this.#ctx, accountId);
   }
 
   // ---- directory ----
@@ -659,6 +724,7 @@ export class FamilyChatCore {
     }
     const m = await this.db.messages.get([accountId, me, msgId]);
     if (!m || m.kind !== 'msg' || m.chatId !== chatId) throw new CoreError('not-allowed', 'only my own messages can be edited');
+    if (m.sticker) throw new CoreError('not-allowed', 'a sticker cannot be edited');
     const hasContent = (m.attachments?.length ?? 0) > 0 || !!m.location;
     if (!hasContent || text.length > 0) checkText(text);
     if (text === m.body) return;
@@ -777,6 +843,7 @@ export class FamilyChatCore {
           ...(m.body ? { text: m.body } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
           ...(m.location ? { location: m.location } : {}),
+          ...(m.sticker ? { sticker: m.sticker } : {}),
           fwd: true,
         }),
       );
@@ -813,10 +880,14 @@ export class FamilyChatCore {
   }
 
   async markRead(accountId: string, chatId: string): Promise<void> {
+    // The chats of linked older identities are read together with this one (one feed).
+    const ids = [chatId, ...(await linkedChatIds(this.db, accountId, chatId))];
     await this.db.transaction('rw', this.db.chats, async () => {
-      const c = await this.db.chats.get([accountId, chatId]);
-      if (!c) return;
-      await this.db.chats.put({ ...c, unread: 0, readGseq: Math.max(c.readGseq, c.last?.gseq ?? 0) });
+      for (const id of ids) {
+        const c = await this.db.chats.get([accountId, id]);
+        if (!c) continue;
+        await this.db.chats.put({ ...c, unread: 0, readGseq: Math.max(c.readGseq, c.last?.gseq ?? 0) });
+      }
     });
   }
 
@@ -871,6 +942,7 @@ export class FamilyChatCore {
         reply: message.reply,
         ...(message.location ? { location: message.location } : {}),
         ...(message.fwd ? { fwd: true } : {}),
+        ...(message.sticker ? { sticker: message.sticker } : {}),
       });
       rt.outbox.kick();
       return msgId;
@@ -1142,6 +1214,140 @@ export class FamilyChatCore {
   /** What to show for a received push payload `{chatId, gseq}`. Never throws. */
   handlePush(payload: unknown): Promise<PushNotice> {
     return handlePush(this.#ctx, payload, (id) => this.#runtime(id));
+  }
+
+  // ---- M5: sticker packs ----
+
+  /** Published sticker packs of a family (live), oldest first. */
+  stickerPacks(accountId: string): Readable<StickerPackView[]> {
+    const db = this.db;
+    return live<StickerPackView[]>(
+      [],
+      async () => {
+        const me = (await db.accounts.get(accountId))?.userId;
+        const rows = await db.stickerPacks.where('accountId').equals(accountId).toArray();
+        rows.sort((a, b) => (a.publishedAt ?? a.created) - (b.publishedAt ?? b.created) || a.packId.localeCompare(b.packId));
+        return rows.map((r) => ({
+          accountId,
+          packId: r.packId,
+          name: r.name,
+          author: r.author,
+          mine: r.author === me,
+          stickers: r.stickers,
+          publishedAt: r.publishedAt,
+        }));
+      },
+      (e) => void this.#ctx.diag.error('db', `sticker packs query failed: ${String((e as Error)?.name)}`, accountId),
+    );
+  }
+
+  /** Reads the family's pack list from the server now (manifests are verified). */
+  async refreshStickers(accountId: string): Promise<void> {
+    await (await this.#runtime(accountId)).stickers.refresh();
+  }
+
+  /**
+   * Reads chosen `.webp`, `.tgs` and `.zip` files into a pack preview; every
+   * file is checked (StickerError for an unsafe archive or nothing usable).
+   * Nothing is stored or sent.
+   */
+  async importStickers(inputs: readonly ImportInput[]): Promise<StickerImport> {
+    const { importStickers } = await import('./stickers/import.ts');
+    return importStickers(inputs);
+  }
+
+  /** Unpacks and sanitises `.tgs` bytes (for previews of an imported pack). */
+  async readTgs(bytes: Uint8Array): Promise<SanitizedLottie> {
+    const { readTgs } = await import('./stickers/tgs.ts');
+    return readTgs(bytes);
+  }
+
+  /** Publishes an imported pack for the family. Returns its pack id. */
+  async publishStickerPack(accountId: string, name: string, pack: StickerImport): Promise<string> {
+    return (await this.#runtime(accountId)).stickers.publish(name, pack.stickers);
+  }
+
+  /** Deletes my pack for everyone. */
+  async deleteStickerPack(accountId: string, packId: string): Promise<void> {
+    await (await this.#runtime(accountId)).stickers.delete(packId);
+  }
+
+  /** A sticker image as a Blob (checked against its hash). CoreError `gone` when its pack was deleted. */
+  async stickerFile(accountId: string, packId: string, file: string): Promise<Blob> {
+    const f = await (await this.#runtime(accountId)).stickers.file(packId, file);
+    return new Blob([f.bytes as Uint8Array<ArrayBuffer>], { type: f.type === 'webp' ? 'image/webp' : 'application/octet-stream' });
+  }
+
+  /** The sanitised animation data of a `.tgs` sticker (expressions and external addresses removed). */
+  async stickerAnimation(accountId: string, packId: string, file: string): Promise<SanitizedLottie> {
+    return (await this.#runtime(accountId)).stickers.animation(packId, file);
+  }
+
+  /** Sends a sticker of a pack of this family as its own message. Returns the message id. */
+  async sendSticker(accountId: string, chatId: string, packId: string, file: string, reply?: MsgRef): Promise<string> {
+    const row = await this.db.stickerPacks.get([accountId, packId]);
+    const s = row?.stickers.find((x) => x.file === file);
+    if (!row || !s) throw new CoreError('gone', 'no such sticker');
+    return this.sendMessage(accountId, chatId, {
+      text: s.emoji,
+      sticker: { pack: packId, file, type: s.type, w: s.w, h: s.h },
+      ...(reply ? { reply } : {}),
+    });
+  }
+
+  // ---- M5: identity links ----
+
+  /** Links of a family on this device (live). */
+  identityLinks(accountId: string): Readable<IdentityLinkView[]> {
+    const db = this.db;
+    return live<IdentityLinkView[]>(
+      [],
+      async () => {
+        const users = new Map((await db.users.where('accountId').equals(accountId).toArray()).map((u) => [u.userId, u]));
+        return (await db.links.where('accountId').equals(accountId).toArray()).map((l: IdentityLinkRow) => ({
+          accountId,
+          userId: l.userId,
+          to: l.to,
+          valid: linkValid(l, users),
+        }));
+      },
+      (e) => void this.#ctx.diag.error('db', `links query failed: ${String((e as Error)?.name)}`, accountId),
+    );
+  }
+
+  /**
+   * "This is the same person as…": links two members of a family on this
+   * device after the person compared fingerprints. The older direct chat is
+   * shown inside the newer one. Local only. Returns the newer direct chat id.
+   */
+  async linkIdentity(accountId: string, a: string, b: string): Promise<string> {
+    const rt = await this.#runtime(accountId);
+    const link = await linkIdentities(this.#ctx, accountId, rt.session.userId, a, b);
+    return this.openChat(accountId, link.to);
+  }
+
+  async unlinkIdentity(accountId: string, userId: string): Promise<void> {
+    await unlinkIdentity(this.#ctx, accountId, userId);
+  }
+
+  // ---- M5: badge and shared content ----
+
+  /** Stores the total the app shows on the icon, for the service worker's count (badge.ts). */
+  async noteBadge(total: number): Promise<void> {
+    await this.db.settings.put({ key: SETTING_BADGE_COUNT, value: total });
+  }
+
+  /**
+   * Takes what was shared into the app (Web Share Target) and forgets it, or
+   * null. A stale or malformed stash is dropped.
+   */
+  async takeShared(): Promise<SharedContent | null> {
+    let value: unknown;
+    await this.db.transaction('rw', this.db.settings, async () => {
+      value = (await this.db.settings.get(SETTING_SHARE_PENDING))?.value;
+      if (value !== undefined) await this.db.settings.delete(SETTING_SHARE_PENDING);
+    });
+    return value === undefined ? null : parseShared(value, this.#ctx.clock.now());
   }
 
   // ---- settings and diagnostics ----

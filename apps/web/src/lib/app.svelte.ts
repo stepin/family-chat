@@ -5,6 +5,7 @@
 import {
   createCore,
   DbVersionError,
+  type SharedContent,
   type AccountView,
   type ChatSummary,
   type ConnectionState,
@@ -16,6 +17,7 @@ import {
   type Readable,
   type Unsubscribe,
 } from '@family-chat/core';
+import { showUnread } from './badge.ts';
 import { describe } from './errors.ts';
 import type { ParsedInvite } from './invite.ts';
 import { currentPlatform, type PlatformInfo } from './platform.ts';
@@ -38,10 +40,28 @@ const NO_FLAGS: Flags = { phraseConfirmed: false, phraseOffered: false, notifyDi
 
 export type BootPhase = 'loading' | 'ready' | 'db-newer' | 'failed' | 'old-browser';
 
+/** Setting: the family shown on this device (M5, several servers). */
+const CURRENT_ACCOUNT = 'ui.currentAccount';
+
+/** Shared content waiting for its chat (Web Share Target, M5). */
+export interface PendingShare {
+  readonly accountId: string;
+  readonly chatId: string;
+  readonly content: SharedContent;
+}
+
 class AppState {
   phase: BootPhase = $state('loading');
-  /** Accounts on this device (the UI uses the first one in M1). */
+  /** Accounts on this device (families on several servers, M5). */
   accounts: AccountView[] = $state.raw([]);
+  /** The family shown now (M5); falls back to the first account. */
+  currentId: string | null = $state(null);
+  /** Total unread over all families (the icon badge and the title). */
+  unreadTotal = $state(0);
+  /** Shared content (Web Share Target) on its way into a chat. */
+  pendingShare: PendingShare | null = $state.raw(null);
+  /** Shared content waiting for the person to choose a chat (the chooser is open). */
+  choosingShare: SharedContent | null = $state.raw(null);
   /** Invitation read from the address (or pasted), kept in memory only. */
   invite: ParsedInvite | null = $state.raw(null);
   /** A new version of the app is waiting (service worker). */
@@ -82,9 +102,37 @@ class AppState {
     return this.#core;
   }
 
-  /** The account shown (several servers are not in the M1 interface). */
+  /** The family shown now (M5: one of several servers). */
   get account(): AccountView | null {
-    return this.accounts[0] ?? null;
+    return this.accounts.find((a) => a.id === this.currentId) ?? this.accounts[0] ?? null;
+  }
+
+  /** Unread messages per family (for the switcher). */
+  get unreadByAccount(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const c of this.chatList) out[c.accountId] = (out[c.accountId] ?? 0) + c.unread;
+    return out;
+  }
+
+  /** Shows another family: its chat list, members and settings. */
+  async switchAccount(accountId: string): Promise<void> {
+    // A family added a moment ago may not be in the live list yet.
+    if (!this.accounts.some((a) => a.id === accountId)) this.accounts = await this.core.accountList();
+    if (!this.accounts.some((a) => a.id === accountId)) return;
+    this.currentId = accountId;
+    this.#watchMembers();
+    await this.#core?.setSetting(CURRENT_ACCOUNT, accountId).catch(() => undefined);
+  }
+
+  /**
+   * Removes a family from this device (with its local history). Shows
+   * another family afterwards, or the welcome screen when none is left.
+   */
+  async removeAccount(accountId: string): Promise<void> {
+    await this.core.removeAccount(accountId);
+    this.accounts = await this.core.accountList();
+    if (this.currentId === accountId) this.currentId = this.accounts[0]?.id ?? null;
+    this.#watchMembers();
   }
 
   async boot(): Promise<void> {
@@ -104,6 +152,8 @@ class AppState {
     // The first value of the live query arrives asynchronously; read once to
     // decide the first screen without a flash of the welcome screen.
     this.accounts = await core.accountList();
+    const saved = await core.getSetting<string>(CURRENT_ACCOUNT).catch(() => undefined);
+    this.currentId = this.accounts.some((a) => a.id === saved) ? (saved ?? null) : (this.accounts[0]?.id ?? null);
     follow(core.accounts, (list) => {
       this.accounts = list;
       this.#watchMembers();
@@ -113,12 +163,22 @@ class AppState {
       this.chatsLoaded = true;
     });
     follow(core.transfers, (list) => (this.transfers = list));
+    // The badge and the title follow the total; the count is stored for the service worker.
+    follow(core.unreadTotal, (n) => {
+      this.unreadTotal = n;
+      showUnread(n);
+      void core.noteBadge(n).catch(() => undefined);
+    });
     follow(core.outbox, (list) => (this.outbox = list));
     core.connection.subscribe((c) => (this.connection = c));
     this.#watchMembers();
     window.addEventListener('online', () => core.wake());
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') core.wake();
+      if (document.visibilityState !== 'visible') return;
+      core.wake();
+      // The service worker may have counted pushes meanwhile: back to the real total.
+      showUnread(this.unreadTotal);
+      void core.noteBadge(this.unreadTotal).catch(() => undefined);
     });
     this.phase = 'ready';
   }

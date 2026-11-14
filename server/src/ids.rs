@@ -111,6 +111,19 @@ id_type!(ChatId, 16, "chatId");
 id_type!(DevId, 10, "devId");
 id_type!(MsgId, 16, "msgId");
 id_type!(BlobId, 16, "blobId");
+id_type!(PackId, 16, "packId");
+// Sticker file name: base32 of the first 20 bytes of SHA-256 of the file (32 characters).
+id_type!(FileHash, 20, "file hash");
+
+impl FileHash {
+    /// The name a file with these bytes must have.
+    pub fn of(bytes: &[u8]) -> FileHash {
+        let h = Sha256::digest(bytes);
+        let mut id = [0u8; 20];
+        id.copy_from_slice(&h[..20]);
+        FileHash(id)
+    }
+}
 
 impl UserId {
     /// `userId` = base32 of the first 16 bytes of SHA-256(signPub).

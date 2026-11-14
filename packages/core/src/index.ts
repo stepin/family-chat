@@ -1,4 +1,4 @@
-// @family-chat/core: the client core (stage M4; no UI, no DOM).
+// @family-chat/core: the client core (stage M5; no UI, no DOM).
 // API client, local database, session and identity, sync engine, outbox,
 // directory, groups, attachments, avatars, revocation, archive,
 // administration, push, and the facade for the UI.
@@ -22,7 +22,24 @@ export type {
   AvatarView,
   GlobalSearchResult,
   ChatSearchResult,
+  StickerPackView,
+  IdentityLinkView,
 } from './core.ts';
+// M5: stickers, badge, shared content.
+export { StickerError, isStickerError } from './stickers/errors.ts';
+export type { StickerErrorCode } from './stickers/errors.ts';
+// The import pipeline (zip.ts, import.ts, tgs.ts) is reached through the facade
+// (importStickers, readTgs, stickerAnimation), which loads it on first use.
+export type { ImportInput, ImportedSticker, StickerImport } from './stickers/import.ts';
+export type { SanitizedLottie, LottieInfo } from './stickers/tgs.ts';
+export type { ZipLimits, ZipEntry } from './stickers/zip.ts';
+export { webpInfo } from './stickers/webp.ts';
+export type { WebpInfo } from './stickers/webp.ts';
+export { unreadTotal, badgeAfterPush, titleWithUnread, SETTING_BADGE_COUNT, MAX_BADGE } from './badge.ts';
+export { parseShared, sharedText, SETTING_SHARE_PENDING, MAX_SHARED_FILES, MAX_SHARED_BYTES, MAX_SHARED_TEXT } from './share.ts';
+export type { SharedContent, ShareProblem } from './share.ts';
+export { MAX_PACK_STICKERS, MAX_PACK_BYTES, MAX_WEBP_STICKER_BYTES, MAX_TGS_STICKER_BYTES, MAX_PACK_NAME_CHARS } from '@family-chat/protocol';
+export type { PackSticker, StickerRef, StickerType } from '@family-chat/protocol';
 export type {
   ChatSummary,
   GroupView,
@@ -96,6 +113,9 @@ export type {
   ControlRow,
   TombstoneRow,
   OutboxControl,
+  StickerPackRow,
+  StickerFileRow,
+  IdentityLinkRow,
 } from './db/schema.ts';
 export { MAX_DIAGNOSTICS } from './db/diagnostics.ts';
 

@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte';
   import Icon from './Icon.svelte';
   import { app } from '../lib/app.svelte.ts';
+  import { nav } from '../lib/nav.svelte.ts';
   import { EMOJI_BY_CHAR, EMOJI_CATEGORIES, searchEmoji, type Emoji } from '../lib/emoji-data.ts';
   import { t } from '../lib/strings.ts';
 
@@ -9,7 +10,27 @@
   // emoji only, a Russian search, categories as tabs, recently used ones kept
   // on this device. Keyboard: arrows move in the grid, Enter picks, Escape
   // closes, focus goes back to where it was.
-  let { onpick, onclose, title = t.emoji.title }: { onpick: (emoji: string) => void; onclose: () => void; title?: string } = $props();
+  //
+  // M5: from the composer it also has a "Стикеры" tab (the sticker panel is
+  // its own chunk, loaded when the tab is opened).
+  let {
+    onpick,
+    onclose,
+    title = t.emoji.title,
+    stickers = null,
+    onsticker,
+  }: {
+    onpick: (emoji: string) => void;
+    onclose: () => void;
+    title?: string;
+    /** Account whose sticker packs are offered (null: emoji only, as for reactions). */
+    stickers?: string | null;
+    onsticker?: (packId: string, file: string) => void;
+  } = $props();
+
+  const MODE_KEY = 'picker.mode';
+  const loadStickers = () => import('./StickerPanel.svelte');
+  let mode = $state<'emoji' | 'stickers'>('emoji');
 
   const RECENT_KEY = 'emoji.recent';
   const RECENT_MAX = 24;
@@ -32,9 +53,28 @@
   );
   const gridLabel = $derived(query.trim() ? t.emoji.search : (tabs.find((x) => x.id === tab)?.label ?? ''));
 
+  function setMode(m: 'emoji' | 'stickers'): void {
+    mode = m;
+    void app.core.setSetting(MODE_KEY, m).catch(() => undefined);
+    if (m === 'emoji') void tick().then(() => searchEl?.focus());
+  }
+
+  function onModeKey(e: KeyboardEvent): void {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    const next = mode === 'emoji' ? 'stickers' : 'emoji';
+    setMode(next);
+    void tick().then(() => document.getElementById(`picker-mode-${next}`)?.focus());
+  }
+
   onMount(() => {
     returnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialog?.showModal();
+    if (stickers) {
+      void app.core.getSetting<string>(MODE_KEY).then((m) => {
+        if (m === 'stickers') mode = 'stickers';
+      });
+    }
     void app.core.getSetting<string[]>(RECENT_KEY).then((r) => {
       if (Array.isArray(r)) {
         recent = r.filter((x) => typeof x === 'string').slice(0, RECENT_MAX);
@@ -134,6 +174,44 @@
     <h2 id="emoji-title">{title}</h2>
     <button class="icon-btn" type="button" aria-label={t.emoji.close} onclick={close}><Icon name="close" /></button>
   </div>
+  {#if stickers}
+    <!-- svelte-ignore a11y_interactive_supports_focus -->
+    <div class="modes" role="tablist" aria-label={t.emoji.modes} tabindex="-1" onkeydown={onModeKey}>
+      {#each [{ id: 'emoji', label: t.emoji.emojiTab }, { id: 'stickers', label: t.emoji.stickersTab }] as m (m.id)}
+        <button
+          id="picker-mode-{m.id}"
+          class="mode"
+          type="button"
+          role="tab"
+          aria-selected={mode === m.id}
+          aria-controls="picker-panel-{m.id}"
+          tabindex={mode === m.id ? 0 : -1}
+          data-testid="picker-mode-{m.id}"
+          onclick={() => setMode(m.id as 'emoji' | 'stickers')}>{m.label}</button
+        >
+      {/each}
+    </div>
+  {/if}
+  {#if stickers && mode === 'stickers'}
+    <div id="picker-panel-stickers" class="panel" role="tabpanel" aria-labelledby="picker-mode-stickers">
+      {#await loadStickers()}
+        <p class="muted none" role="status">{t.stickers.loading}</p>
+      {:then { default: StickerPanel }}
+        <StickerPanel
+          accountId={stickers}
+          onpick={(packId, file) => {
+            onsticker?.(packId, file);
+            close();
+          }}
+          onmanage={() => {
+            close();
+            nav.push({ name: 'sticker-packs' });
+          }}
+        />
+      {/await}
+    </div>
+  {:else}
+  <div id="picker-panel-emoji" class="panel" role={stickers ? 'tabpanel' : undefined} aria-labelledby={stickers ? 'picker-mode-emoji' : undefined}>
   <label class="visually-hidden" for="emoji-search">{t.emoji.search}</label>
   <input
     id="emoji-search"
@@ -191,6 +269,8 @@
       {/each}
     </div>
   {/if}
+  </div>
+  {/if}
 </dialog>
 
 <style>
@@ -217,6 +297,38 @@
   .head h2 {
     font-size: var(--text-m);
     padding-left: var(--sp-1);
+  }
+
+  .modes {
+    display: flex;
+    gap: var(--sp-1);
+    flex: 0 0 auto;
+  }
+
+  .mode {
+    flex: 1 1 0;
+    min-height: var(--touch);
+    border: 0;
+    border-radius: var(--r-m);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .mode[aria-selected='true'] {
+    background: var(--accent-soft);
+    color: var(--on-accent-soft);
+    box-shadow: inset 0 -3px 0 var(--accent);
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   .search {

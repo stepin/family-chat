@@ -30,7 +30,8 @@ pub const SERVER_FILE: &str = "server.json";
 pub const VAPID_FILE: &str = "vapid.json";
 pub const CONFIG_FILE: &str = "config.toml";
 /// Directories created now for the layout of section 6; filled from M1 on.
-pub const DIRS: [&str; 6] = ["users", "invites", "chats", "log", "blobs", "tmp"];
+/// `packs/` (M5, sticker packs) is an addition: older builds ignore it.
+pub const DIRS: [&str; 7] = ["users", "invites", "chats", "log", "blobs", "packs", "tmp"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

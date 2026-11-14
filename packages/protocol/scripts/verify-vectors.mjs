@@ -808,6 +808,76 @@ const archives = {};
   }
 }
 
+// ---- stickers.json (M5) ----
+{
+  const sv = load('stickers.json');
+  const alice = users[sv.signer];
+  const isB32 = (v, n) => typeof v === 'string' && v.length === Math.ceil((n * 8) / 5) && /^[a-z2-7]+$/.test(v) && b32dec(v).length === n;
+  const hash32 = (b) => b32enc(sha256(b).subarray(0, 20));
+  // eslint-disable-next-line no-control-regex
+  const forbidden = /[\u0000-\u001f\u007f-\u009f؜‎‏‪-‮⁦-⁩]/u;
+  const emojiOk = (e) =>
+    typeof e === 'string' && e.trim().length > 0 && e.trim() === e && [...e].length <= 16 && utf8(e).length <= 64 && !forbidden.test(e);
+  const side = (v) => Number.isSafeInteger(v) && v >= 1 && v <= 1024;
+  for (const f of sv.files) eq(hash32(unhex(f.bytesHex)), f.hash32, `hash32 of ${f.name}`);
+
+  function verifyPack(text, signer, serverId) {
+    const env = JSON.parse(text);
+    if (Object.keys(env).length !== 2) return 'malformed';
+    const payload = b64dec(env.payload);
+    const j = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(payload));
+    if (j.v !== 1) return 'unsupported-version';
+    if (!isB32(j.packId, 16) || !isB32(j.author, 16) || typeof j.serverId !== 'string') return 'malformed';
+    if (typeof j.name !== 'string' || j.name.trim() === '' || [...j.name].length > 64 || forbidden.test(j.name)) return 'malformed';
+    if (!Number.isSafeInteger(j.created) || j.created < 0) return 'malformed';
+    if (!Array.isArray(j.stickers) || j.stickers.length < 1 || j.stickers.length > 200) return 'malformed';
+    const seen = new Set();
+    let total = 0;
+    for (const s of j.stickers) {
+      const max = s.type === 'webp' ? 512 * 1024 : s.type === 'tgs' ? 128 * 1024 : 0;
+      if (!isB32(s.file, 20) || max === 0 || !Number.isSafeInteger(s.size) || s.size < 1 || s.size > max) return 'malformed';
+      if (!emojiOk(s.emoji) || !side(s.w) || !side(s.h) || seen.has(s.file)) return 'malformed';
+      seen.add(s.file);
+      total += s.size;
+    }
+    if (total > 50 * 1024 * 1024) return 'too-large';
+    if (j.author !== signer.userId) return 'user-id-mismatch';
+    if (!edVerify(signer.signPub, cat(utf8('fc/v1/sticker-pack\n'), payload), b64dec(env.sig))) return 'bad-signature';
+    if (j.serverId !== serverId) return 'wrong-server';
+    return { payload, j };
+  }
+
+  const r = verifyPack(sv.manifest.envelope, alice, sv.serverId);
+  check(typeof r === 'object', `sticker-pack manifest verifies (${typeof r === 'string' ? r : 'ok'})`);
+  if (typeof r === 'object') {
+    eq(r.payload.toString('utf8'), sv.manifest.payloadText, 'sticker-pack payload text');
+    eq(hex(cat(utf8('fc/v1/sticker-pack\n'), r.payload)), sv.manifest.signingInputHex, 'sticker-pack signing input');
+    eq(b64enc(edSign(alice.signSecret, cat(utf8('fc/v1/sticker-pack\n'), r.payload))), JSON.parse(sv.manifest.envelope).sig, 'sticker-pack deterministic signature');
+    eq(Object.keys(r.j).join(','), 'v,packId,serverId,author,name,created,stickers', 'sticker-pack field order');
+    for (const s of r.j.stickers) eq(Object.keys(s).join(','), 'file,type,size,emoji,w,h', 'sticker field order');
+    eq(JSON.stringify(r.j.stickers.map((s) => s.file)), JSON.stringify(sv.files.map((f) => f.hash32)), 'manifest names the files by hash32');
+  }
+  for (const c of sv.negativeManifests) {
+    const got = verifyPack(c.envelope, alice, sv.serverId);
+    eq(typeof got === 'string' ? got : 'ok', c.expectedError, c.name);
+  }
+
+  function msgError(text) {
+    const m = JSON.parse(text);
+    if (m.v !== 1 || m.t !== 'msg') return 'malformed';
+    if (m.sticker !== undefined) {
+      const s = m.sticker;
+      if (typeof s !== 'object' || s === null || !isB32(s.pack, 16) || !isB32(s.file, 20) || !['webp', 'tgs'].includes(s.type)) return 'malformed';
+      if (!side(s.w) || !side(s.h) || !emojiOk(m.body) || m.attachments !== undefined || m.location !== undefined) return 'malformed';
+    }
+    return 'ok';
+  }
+  eq(msgError(sv.message.text), 'ok', 'sticker message');
+  eq(JSON.parse(sv.message.text).body, sv.message.fallbackBody, 'sticker message carries the emoji as body');
+  eq(Object.keys(JSON.parse(sv.message.text)).join(','), 'v,t,id,dev,seq,body,sticker', 'sticker message field order');
+  for (const c of sv.negativeMessages) eq(msgError(c.text), c.expectedError, c.name);
+}
+
 if (failures > 0) {
   console.error(`${failures} of ${checks} checks failed`);
   process.exit(1);

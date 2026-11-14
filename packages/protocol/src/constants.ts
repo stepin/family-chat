@@ -79,3 +79,8 @@ export const MAX_FILE_NAME_BYTES = 255;
 export const ARCHIVE_BLOCK_SIZE = 1024 * 1024;
 /** Largest single archive record (split bigger data into several records). */
 export const MAX_ARCHIVE_RECORD_BYTES = 16 * 1024 * 1024;
+
+// ---- M5: sticker packs (the other limits are in sticker.ts) ----
+
+/** Largest `sticker-pack` envelope payload (exact signed JSON bytes). */
+export const MAX_PACK_PAYLOAD_BYTES = 65536;

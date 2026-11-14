@@ -1,0 +1,105 @@
+{
+  "note": "Test vectors for docs/PROTOCOL.md (M5, sticker packs). Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only. Users alice and bob are the ones of identity.json.",
+  "serverId": "vxbbn4ruwvo3jpqh6s3xbp64fi",
+  "signer": "alice",
+  "files": [
+    {
+      "name": "webp",
+      "bytesHex": "524946461000000057454250565038207465737420737469636b6572206f6e65",
+      "hash32": "v4izzy5an7no2poo23imehoitwok3tyk"
+    },
+    {
+      "name": "tgs",
+      "bytesHex": "1f8b08007465737420737469636b65722074776f",
+      "hash32": "ogiplxebsrt525ivo4f3pey26elzbjqt"
+    }
+  ],
+  "manifest": {
+    "envelope": "{\"payload\":\"eyJ2IjoxLCJwYWNrSWQiOiJtZnJnZ3pkZm16dHdxMmxrbm53ZzIzdHBvYSIsInNlcnZlcklkIjoidnhiYm40cnV3dm8zanBxaDZzM3hicDY0ZmkiLCJhdXRob3IiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQmtC-0YLQuNC60LgiLCJjcmVhdGVkIjoxNzY3MjI1NjAwMDAwLCJzdGlja2VycyI6W3siZmlsZSI6InY0aXp6eTVhbjdubzJwb28yM2ltZWhvaXR3b2szdHlrIiwidHlwZSI6IndlYnAiLCJzaXplIjozMiwiZW1vamkiOiLwn5i6IiwidyI6NTEyLCJoIjo1MTJ9LHsiZmlsZSI6Im9naXBseGVic3J0NTI1aXZvNGYzcGV5MjZlbHpianF0IiwidHlwZSI6InRncyIsInNpemUiOjIwLCJlbW9qaSI6IvCfjokiLCJ3Ijo1MTIsImgiOjUxMn1dfQ\",\"sig\":\"ZqiKpgUMOliCWggquaNg4XEXT0chEX5C4vrptCwPjS8blv6B-9s_FCN8gXtbITTqszc_u6ybyaMnJRYBCNpyBw\"}",
+    "payloadText": "{\"v\":1,\"packId\":\"mfrggzdfmztwq2lknnwg23tpoa\",\"serverId\":\"vxbbn4ruwvo3jpqh6s3xbp64fi\",\"author\":\"bv2upztgktzihpyf7mtd6wkqam\",\"name\":\"Котики\",\"created\":1767225600000,\"stickers\":[{\"file\":\"v4izzy5an7no2poo23imehoitwok3tyk\",\"type\":\"webp\",\"size\":32,\"emoji\":\"😺\",\"w\":512,\"h\":512},{\"file\":\"ogiplxebsrt525ivo4f3pey26elzbjqt\",\"type\":\"tgs\",\"size\":20,\"emoji\":\"🎉\",\"w\":512,\"h\":512}]}",
+    "signingInputHex": "66632f76312f737469636b65722d7061636b0a7b2276223a312c227061636b4964223a226d667267677a64666d7a747771326c6b6e6e7767323374706f61222c227365727665724964223a22767862626e34727577766f336a70716836733378627036346669222c22617574686f72223a2262763275707a74676b747a6968707966376d746436776b71616d222c226e616d65223a22d09ad0bed182d0b8d0bad0b8222c2263726561746564223a313736373232353630303030302c22737469636b657273223a5b7b2266696c65223a227634697a7a7935616e376e6f32706f6f3233696d65686f6974776f6b3374796b222c2274797065223a2277656270222c2273697a65223a33322c22656d6f6a69223a22f09f98ba222c2277223a3531322c2268223a3531327d2c7b2266696c65223a226f6769706c78656273727435323569766f3466337065793236656c7a626a7174222c2274797065223a22746773222c2273697a65223a32302c22656d6f6a69223a22f09f8e89222c2277223a3531322c2268223a3531327d5d7d"
+  },
+  "negativeManifests": [
+    {
+      "name": "payload changed after signing",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJwYWNrSWQiOiJtZnJnZ3pkZm16dHdxMmxrbm53ZzIzdHBvYSIsInNlcnZlcklkIjoidnhiYm40cnV3dm8zanBxaDZzM3hicDY0ZmkiLCJhdXRob3IiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQodC-0LHQsNGH0LrQuCIsImNyZWF0ZWQiOjE3NjcyMjU2MDAwMDAsInN0aWNrZXJzIjpbeyJmaWxlIjoidjRpenp5NWFuN25vMnBvbzIzaW1laG9pdHdvazN0eWsiLCJ0eXBlIjoid2VicCIsInNpemUiOjMyLCJlbW9qaSI6IvCfmLoiLCJ3Ijo1MTIsImgiOjUxMn0seyJmaWxlIjoib2dpcGx4ZWJzcnQ1MjVpdm80ZjNwZXkyNmVsemJqcXQiLCJ0eXBlIjoidGdzIiwic2l6ZSI6MjAsImVtb2ppIjoi8J-OiSIsInciOjUxMiwiaCI6NTEyfV19\",\"sig\":\"ZqiKpgUMOliCWggquaNg4XEXT0chEX5C4vrptCwPjS8blv6B-9s_FCN8gXtbITTqszc_u6ybyaMnJRYBCNpyBw\"}",
+      "expectedError": "bad-signature"
+    },
+    {
+      "name": "signed by bob, author alice",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJwYWNrSWQiOiJtZnJnZ3pkZm16dHdxMmxrbm53ZzIzdHBvYSIsInNlcnZlcklkIjoidnhiYm40cnV3dm8zanBxaDZzM3hicDY0ZmkiLCJhdXRob3IiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQmtC-0YLQuNC60LgiLCJjcmVhdGVkIjoxNzY3MjI1NjAwMDAwLCJzdGlja2VycyI6W3siZmlsZSI6InY0aXp6eTVhbjdubzJwb28yM2ltZWhvaXR3b2szdHlrIiwidHlwZSI6IndlYnAiLCJzaXplIjozMiwiZW1vamkiOiLwn5i6IiwidyI6NTEyLCJoIjo1MTJ9LHsiZmlsZSI6Im9naXBseGVic3J0NTI1aXZvNGYzcGV5MjZlbHpianF0IiwidHlwZSI6InRncyIsInNpemUiOjIwLCJlbW9qaSI6IvCfjokiLCJ3Ijo1MTIsImgiOjUxMn1dfQ\",\"sig\":\"yxEj7ht1c9Ezp-hQNeOqDzBozyJrcR5O-OTrsSsEkiPi1oBekLmTbZjAnxjrhK8A0s4LhFtQtLWAZXkMXfBRAw\"}",
+      "expectedError": "bad-signature"
+    },
+    {
+      "name": "author is not the signer",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJwYWNrSWQiOiJtZnJnZ3pkZm16dHdxMmxrbm53ZzIzdHBvYSIsInNlcnZlcklkIjoidnhiYm40cnV3dm8zanBxaDZzM3hicDY0ZmkiLCJhdXRob3IiOiI3cTczZ200M2I2a2Z2N215eDdxZ3VwYXRkaSIsIm5hbWUiOiLQmtC-0YLQuNC60LgiLCJjcmVhdGVkIjoxNzY3MjI1NjAwMDAwLCJzdGlja2VycyI6W3siZmlsZSI6InY0aXp6eTVhbjdubzJwb28yM2ltZWhvaXR3b2szdHlrIiwidHlwZSI6IndlYnAiLCJzaXplIjozMiwiZW1vamkiOiLwn5i6IiwidyI6NTEyLCJoIjo1MTJ9LHsiZmlsZSI6Im9naXBseGVic3J0NTI1aXZvNGYzcGV5MjZlbHpianF0IiwidHlwZSI6InRncyIsInNpemUiOjIwLCJlbW9qaSI6IvCfjokiLCJ3Ijo1MTIsImgiOjUxMn1dfQ\",\"sig\":\"CuJfNlNPjlC16NsXwFsmibVO5pmjrfMM7Nt1esTxTi-pC0UTLV6MJiNEN-KyJQDbizeTTnJHRL5XXMsKx-XDDw\"}",
+      "expectedError": "user-id-mismatch"
+    },
+    {
+      "name": "another server",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJwYWNrSWQiOiJtZnJnZ3pkZm16dHdxMmxrbm53ZzIzdHBvYSIsInNlcnZlcklkIjoiYW5vdGhlci1zZXJ2ZXIiLCJhdXRob3IiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQmtC-0YLQuNC60LgiLCJjcmVhdGVkIjoxNzY3MjI1NjAwMDAwLCJzdGlja2VycyI6W3siZmlsZSI6InY0aXp6eTVhbjdubzJwb28yM2ltZWhvaXR3b2szdHlrIiwidHlwZSI6IndlYnAiLCJzaXplIjozMiwiZW1vamkiOiLwn5i6IiwidyI6NTEyLCJoIjo1MTJ9LHsiZmlsZSI6Im9naXBseGVic3J0NTI1aXZvNGYzcGV5MjZlbHpianF0IiwidHlwZSI6InRncyIsInNpemUiOjIwLCJlbW9qaSI6IvCfjokiLCJ3Ijo1MTIsImgiOjUxMn1dfQ\",\"sig\":\"w1GKyu0Y0nRwR05OvmH4i4kSCcoDTw7NFSYKRoonln8qSortaHxCN8_Cy_loWoywCV43f_-rmSU34TbeGYAXAg\"}",
+      "expectedError": "wrong-server"
+    },
+    {
+      "name": "file name is not a hash32",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJwYWNrSWQiOiJtZnJnZ3pkZm16dHdxMmxrbm53ZzIzdHBvYSIsInNlcnZlcklkIjoidnhiYm40cnV3dm8zanBxaDZzM3hicDY0ZmkiLCJhdXRob3IiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQmtC-0YLQuNC60LgiLCJjcmVhdGVkIjoxNzY3MjI1NjAwMDAwLCJzdGlja2VycyI6W3siZmlsZSI6Im5vdC1hLWhhc2giLCJ0eXBlIjoid2VicCIsInNpemUiOjMyLCJlbW9qaSI6IvCfmLoiLCJ3Ijo1MTIsImgiOjUxMn1dfQ\",\"sig\":\"rXKknp7clNAivVZNNnHuk35NFsW4cYZmuJXIM4mOeJBUUT06WwFMgj9oGpeDlRmSctJixU9EBTnCJECYLjiYAw\"}",
+      "expectedError": "malformed"
+    },
+    {
+      "name": "unknown sticker type",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJwYWNrSWQiOiJtZnJnZ3pkZm16dHdxMmxrbm53ZzIzdHBvYSIsInNlcnZlcklkIjoidnhiYm40cnV3dm8zanBxaDZzM3hicDY0ZmkiLCJhdXRob3IiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQmtC-0YLQuNC60LgiLCJjcmVhdGVkIjoxNzY3MjI1NjAwMDAwLCJzdGlja2VycyI6W3siZmlsZSI6InY0aXp6eTVhbjdubzJwb28yM2ltZWhvaXR3b2szdHlrIiwidHlwZSI6InN2ZyIsInNpemUiOjMyLCJlbW9qaSI6IvCfmLoiLCJ3Ijo1MTIsImgiOjUxMn1dfQ\",\"sig\":\"kKAf3SqpJxyAoLMKIrP1wo2HbyCCIZLAzZ3ArdVXp7vfZxoMP7e9Nn9wKMt8vYCafGK4ztCIMm804WAf7-JXBA\"}",
+      "expectedError": "malformed"
+    },
+    {
+      "name": "tgs larger than allowed",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJwYWNrSWQiOiJtZnJnZ3pkZm16dHdxMmxrbm53ZzIzdHBvYSIsInNlcnZlcklkIjoidnhiYm40cnV3dm8zanBxaDZzM3hicDY0ZmkiLCJhdXRob3IiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQmtC-0YLQuNC60LgiLCJjcmVhdGVkIjoxNzY3MjI1NjAwMDAwLCJzdGlja2VycyI6W3siZmlsZSI6Im9naXBseGVic3J0NTI1aXZvNGYzcGV5MjZlbHpianF0IiwidHlwZSI6InRncyIsInNpemUiOjEzMTA3MywiZW1vamkiOiLwn46JIiwidyI6NTEyLCJoIjo1MTJ9XX0\",\"sig\":\"ZIkVhoF_Pw3bSt4N77pwkty56a52qvKf1cOZXhUAYWPkaxRTvlIh4BONzGZoCXre2Tr7ucnZnnVQqxEhi_SKDA\"}",
+      "expectedError": "malformed"
+    },
+    {
+      "name": "the same file twice",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJwYWNrSWQiOiJtZnJnZ3pkZm16dHdxMmxrbm53ZzIzdHBvYSIsInNlcnZlcklkIjoidnhiYm40cnV3dm8zanBxaDZzM3hicDY0ZmkiLCJhdXRob3IiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQmtC-0YLQuNC60LgiLCJjcmVhdGVkIjoxNzY3MjI1NjAwMDAwLCJzdGlja2VycyI6W3siZmlsZSI6InY0aXp6eTVhbjdubzJwb28yM2ltZWhvaXR3b2szdHlrIiwidHlwZSI6IndlYnAiLCJzaXplIjozMiwiZW1vamkiOiLwn5i6IiwidyI6NTEyLCJoIjo1MTJ9LHsiZmlsZSI6InY0aXp6eTVhbjdubzJwb28yM2ltZWhvaXR3b2szdHlrIiwidHlwZSI6IndlYnAiLCJzaXplIjozMiwiZW1vamkiOiLwn5i6IiwidyI6NTEyLCJoIjo1MTJ9XX0\",\"sig\":\"pLS9cxUgTX75wVzKsWJ9CJEFO9HR5n1kNVD6Arxc3Fx4FH-xMzIKYVn7KP9vUILoNjgK9uPlcbb-5OSZ25U4BA\"}",
+      "expectedError": "malformed"
+    },
+    {
+      "name": "no stickers",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJwYWNrSWQiOiJtZnJnZ3pkZm16dHdxMmxrbm53ZzIzdHBvYSIsInNlcnZlcklkIjoidnhiYm40cnV3dm8zanBxaDZzM3hicDY0ZmkiLCJhdXRob3IiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQmtC-0YLQuNC60LgiLCJjcmVhdGVkIjoxNzY3MjI1NjAwMDAwLCJzdGlja2VycyI6W119\",\"sig\":\"6PkvsW_DcqhAPN8DoEfG9KAwnbf18kROzH9AMVLgffaSNyZGWKRtQJosB3eVHzfooANoM3YPsycVTN0BXiOGCA\"}",
+      "expectedError": "malformed"
+    },
+    {
+      "name": "version 2",
+      "envelope": "{\"payload\":\"eyJ2IjoyLCJwYWNrSWQiOiJtZnJnZ3pkZm16dHdxMmxrbm53ZzIzdHBvYSIsInNlcnZlcklkIjoidnhiYm40cnV3dm8zanBxaDZzM3hicDY0ZmkiLCJhdXRob3IiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQmtC-0YLQuNC60LgiLCJjcmVhdGVkIjoxNzY3MjI1NjAwMDAwLCJzdGlja2VycyI6W3siZmlsZSI6InY0aXp6eTVhbjdubzJwb28yM2ltZWhvaXR3b2szdHlrIiwidHlwZSI6IndlYnAiLCJzaXplIjozMiwiZW1vamkiOiLwn5i6IiwidyI6NTEyLCJoIjo1MTJ9LHsiZmlsZSI6Im9naXBseGVic3J0NTI1aXZvNGYzcGV5MjZlbHpianF0IiwidHlwZSI6InRncyIsInNpemUiOjIwLCJlbW9qaSI6IvCfjokiLCJ3Ijo1MTIsImgiOjUxMn1dfQ\",\"sig\":\"aIZdUOkEpQIT82h7sKehWqd5HBogy6DnULj5yJU682lUrTH5FEaxZ7rjrKhAm_t1xHy3EctjvyZNpH2kNlTJBg\"}",
+      "expectedError": "unsupported-version"
+    },
+    {
+      "name": "signed as a profile",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJwYWNrSWQiOiJtZnJnZ3pkZm16dHdxMmxrbm53ZzIzdHBvYSIsInNlcnZlcklkIjoidnhiYm40cnV3dm8zanBxaDZzM3hicDY0ZmkiLCJhdXRob3IiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQmtC-0YLQuNC60LgiLCJjcmVhdGVkIjoxNzY3MjI1NjAwMDAwLCJzdGlja2VycyI6W3siZmlsZSI6InY0aXp6eTVhbjdubzJwb28yM2ltZWhvaXR3b2szdHlrIiwidHlwZSI6IndlYnAiLCJzaXplIjozMiwiZW1vamkiOiLwn5i6IiwidyI6NTEyLCJoIjo1MTJ9LHsiZmlsZSI6Im9naXBseGVic3J0NTI1aXZvNGYzcGV5MjZlbHpianF0IiwidHlwZSI6InRncyIsInNpemUiOjIwLCJlbW9qaSI6IvCfjokiLCJ3Ijo1MTIsImgiOjUxMn1dfQ\",\"sig\":\"HwsvbGwvGELCCOWEzpIyPJQdPxTEDgeaCPdauMr7Z53tJo9AcZDjeSA2xeB5fKPt-Q3pqybVBiJYBwAp9hYyAQ\"}",
+      "expectedError": "bad-signature"
+    }
+  ],
+  "message": {
+    "text": "{\"v\":1,\"t\":\"msg\",\"id\":\"aebagbafaydqqcikbmga2dqpca\",\"dev\":\"mfrggzdfmztwq2lk\",\"seq\":9,\"body\":\"😺\",\"sticker\":{\"pack\":\"mfrggzdfmztwq2lknnwg23tpoa\",\"file\":\"v4izzy5an7no2poo23imehoitwok3tyk\",\"type\":\"webp\",\"w\":512,\"h\":512}}",
+    "fallbackBody": "😺"
+  },
+  "negativeMessages": [
+    {
+      "name": "sticker without the emoji body",
+      "text": "{\"v\":1,\"t\":\"msg\",\"id\":\"aebagbafaydqqcikbmga2dqpca\",\"dev\":\"mfrggzdfmztwq2lk\",\"seq\":9,\"sticker\":{\"pack\":\"mfrggzdfmztwq2lknnwg23tpoa\",\"file\":\"v4izzy5an7no2poo23imehoitwok3tyk\",\"type\":\"webp\",\"w\":512,\"h\":512}}",
+      "expectedError": "malformed"
+    },
+    {
+      "name": "sticker with an attachment",
+      "text": "{\"v\":1,\"t\":\"msg\",\"id\":\"aebagbafaydqqcikbmga2dqpca\",\"dev\":\"mfrggzdfmztwq2lk\",\"seq\":9,\"body\":\"😺\",\"location\":{\"lat\":1,\"lon\":2,\"accuracy\":3},\"sticker\":{\"pack\":\"mfrggzdfmztwq2lknnwg23tpoa\",\"file\":\"v4izzy5an7no2poo23imehoitwok3tyk\",\"type\":\"webp\",\"w\":512,\"h\":512}}",
+      "expectedError": "malformed"
+    },
+    {
+      "name": "sticker file is not a hash32",
+      "text": "{\"v\":1,\"t\":\"msg\",\"id\":\"aebagbafaydqqcikbmga2dqpca\",\"dev\":\"mfrggzdfmztwq2lk\",\"seq\":9,\"body\":\"😺\",\"sticker\":{\"pack\":\"mfrggzdfmztwq2lknnwg23tpoa\",\"file\":\"x\",\"type\":\"webp\",\"w\":512,\"h\":512}}",
+      "expectedError": "malformed"
+    },
+    {
+      "name": "body is text, not an emoji",
+      "text": "{\"v\":1,\"t\":\"msg\",\"id\":\"aebagbafaydqqcikbmga2dqpca\",\"dev\":\"mfrggzdfmztwq2lk\",\"seq\":9,\"body\":\"длинный текстдлинный текст\",\"sticker\":{\"pack\":\"mfrggzdfmztwq2lknnwg23tpoa\",\"file\":\"v4izzy5an7no2poo23imehoitwok3tyk\",\"type\":\"webp\",\"w\":512,\"h\":512}}",
+      "expectedError": "malformed"
+    }
+  ]
+}

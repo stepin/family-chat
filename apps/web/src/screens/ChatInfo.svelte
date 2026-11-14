@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { GroupMemberView, GroupView } from '@family-chat/core';
+  import type { GroupMemberView, GroupView, IdentityLinkView } from '@family-chat/core';
   import Avatar from '../components/Avatar.svelte';
   import MemberChecklist from '../components/MemberChecklist.svelte';
   import Page from '../components/Page.svelte';
@@ -44,10 +44,35 @@
   let newOwner = $state<string | null>(null);
   let dlgError = $state<string | null>(null);
 
+  // M5: a member linked on this device to a newer identity (docs/PLAN.md 8.6): the owner is offered to add it.
+  let links = $state.raw<IdentityLinkView[]>([]);
+  const suggested = $derived(
+    canManage
+      ? links.filter((l) => l.valid && inGroup.has(l.userId) && !inGroup.has(l.to) && addable.some((m) => m.userId === l.to))
+      : [],
+  );
+
   onMount(() => {
     void app.core.refreshMembers(accountId).catch(() => undefined);
-    return app.core.group(accountId, chatId).subscribe((g) => (group = g));
+    const unsubLinks = app.core.identityLinks(accountId).subscribe((l) => (links = l));
+    const unsub = app.core.group(accountId, chatId).subscribe((g) => (group = g));
+    return () => {
+      unsub();
+      unsubLinks();
+    };
   });
+
+  async function addLinked(userId: string): Promise<void> {
+    busy = true;
+    try {
+      await app.core.addGroupMembers(accountId, chatId, [userId]);
+    } catch (e) {
+      app.notify(errorText(e));
+      app.log('warn', 'group', 'adding a linked identity failed', e);
+    } finally {
+      busy = false;
+    }
+  }
 
   function nameOf(m: GroupMemberView): string {
     return names.get(m.userId) ?? m.name ?? t.common.unknownName;
@@ -178,6 +203,12 @@
     {#if !group.member}
       <p class="notice">{t.group.notMember}</p>
     {/if}
+    {#each suggested as l (l.userId)}
+      <div class="notice stack" data-testid="linked-suggestion">
+        <p>{t.group.linkedSuggestion(names.get(l.userId) ?? t.common.unknownName, names.get(l.to) ?? t.common.unknownName)}</p>
+        <button class="btn small" type="button" disabled={busy} onclick={() => addLinked(l.to)}>{t.group.addLinked}</button>
+      </div>
+    {/each}
 
     <section class="section" aria-labelledby="info-members">
       <div class="row between">

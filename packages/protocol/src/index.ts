@@ -69,6 +69,27 @@ export type {
 } from './payload.ts';
 
 export { encodeEvent, decodeEvent, MAX_PAYLOAD_BYTES } from './event.ts';
+
+export {
+  createStickerPackEnvelope,
+  verifyStickerPackEnvelope,
+  readStickerPackHeader,
+  stickerFileHash,
+  stickerFileMatches,
+  stickerEmojiProblem,
+  stickerRefProblem,
+  maxStickerBytes,
+  PACK_ID_BYTES,
+  STICKER_HASH_BYTES,
+  MAX_PACK_STICKERS,
+  MAX_PACK_NAME_CHARS,
+  MAX_WEBP_STICKER_BYTES,
+  MAX_TGS_STICKER_BYTES,
+  MAX_PACK_BYTES,
+  MAX_STICKER_SIDE,
+  STICKER_TYPES,
+} from './sticker.ts';
+export type { StickerPack, StickerPackInput, PackSticker, StickerRef, StickerType } from './sticker.ts';
 export type { EventContext, EncodeEventInput, DecodeEventInput, DecodedEvent } from './event.ts';
 
 export {

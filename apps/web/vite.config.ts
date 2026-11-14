@@ -14,6 +14,19 @@ const pkg = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json')
  * the same origin. `frame-ancestors` cannot be set in <meta>. `media-src blob:`:
  * voice messages play from blob: URLs of app storage (M3). Keep in sync with
  * server/src/headers.rs (a test there compares the two).
+ *
+ * M5, several family servers: the app opened from one server talks to the
+ * others directly (CORS `*`, bearer tokens). `https:` already covers every
+ * other family server on the internet; a list of the family's servers cannot
+ * be put into a static policy (the person adds them later, and a <meta> tag or
+ * a header cannot change at run time). The only addition is plain HTTP on
+ * this computer's loopback addresses (`http://localhost:*`,
+ * `http://127.0.0.1:*`): browsers treat them as secure
+ * contexts, so a second server on the same machine works without TLS (and the
+ * end-to-end tests run two servers that way). Any other plain-HTTP address is
+ * still refused (and an HTTPS page could not reach it anyway: mixed content).
+ * Stickers need nothing new: images are blob: URLs, the light Lottie build
+ * draws SVG through the DOM and needs no `unsafe-eval`.
  */
 export const CSP = [
   "default-src 'none'",
@@ -22,7 +35,7 @@ export const CSP = [
   "img-src 'self' data: blob:",
   "media-src blob:",
   "font-src 'self'",
-  "connect-src 'self' https:",
+  "connect-src 'self' https: http://localhost:* http://127.0.0.1:*",
   "worker-src 'self'",
   "manifest-src 'self'",
   "base-uri 'none'",
@@ -96,6 +109,20 @@ export default defineConfig({
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
+        // Web Share Target (M5): "Поделиться" from other apps into a chat. The
+        // service worker (public/push-sw.js) answers this POST, keeps the
+        // content on the device and opens the app.
+        share_target: {
+          action: './share-target',
+          method: 'POST',
+          enctype: 'multipart/form-data',
+          params: {
+            title: 'title',
+            text: 'text',
+            url: 'url',
+            files: [{ name: 'files', accept: ['image/*', 'video/*', 'audio/*', 'application/pdf', 'text/*', '*/*'] }],
+          },
+        },
       },
       workbox: {
         // App shell only; requests to /v1 are never cached.
@@ -126,7 +153,8 @@ export default defineConfig({
             { name: 'crypto', test: /node_modules[\\/].*@(noble|scure)[\\/]/, priority: 3 },
             // Only what the first screen needs; other libraries (the QR code) stay with their screen.
             { name: 'vendor', test: /node_modules[\\/].*(svelte|dexie|esm-env|clsx)[\\/]/, priority: 2 },
-            { name: 'core', test: /packages[\\/](core|protocol)[\\/]/, priority: 1 },
+            // M5: the sticker import pipeline and the .tgs reader stay out of it (loaded on first use).
+            { name: 'core', test: /packages[\\/](core|protocol)[\\/](?!src[\\/]stickers[\\/](import|tgs|zip)\.ts$)/, priority: 1 },
           ],
         },
       },

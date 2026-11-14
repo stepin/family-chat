@@ -9,13 +9,13 @@ export interface AdminResult {
 }
 
 /** The administrator route: admin code, name, recovery phrase with confirmation, first invitation. */
-export async function setupAdmin(page: Page, fcd: Fcd, name = 'Мама'): Promise<AdminResult> {
+export async function setupAdmin(page: Page, fcd: Fcd, name = 'Мама', family = 'Ивановы'): Promise<AdminResult> {
   await page.goto(`${fcd.url}/`);
   await page.getByRole('button', { name: 'Настроить для своей семьи' }).click();
   await expect(page.getByLabel('Адрес сервера')).toHaveValue(fcd.url);
   await page.getByLabel('Код администратора').fill(fcd.adminCode);
   await page.getByRole('button', { name: 'Дальше' }).click();
-  await expect(page.getByText('Сервер отвечает: семья «Ивановы».')).toBeVisible();
+  await expect(page.getByText(`Сервер отвечает: семья «${family}».`)).toBeVisible();
   await page.getByLabel('Как вас зовут').fill(name);
   await page.getByRole('button', { name: 'Создать семью' }).click();
 

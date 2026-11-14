@@ -1,13 +1,14 @@
 <script lang="ts">
   import type { ChatSummary, Member } from '@family-chat/core';
   import Avatar from '../components/Avatar.svelte';
+  import FamilySwitcher from '../components/FamilySwitcher.svelte';
   import Icon from '../components/Icon.svelte';
   import StatusLine from '../components/StatusLine.svelte';
   import { app } from '../lib/app.svelte.ts';
   import { formatListTime } from '../lib/format.ts';
   import { displayNames } from '../lib/names.ts';
   import { nav } from '../lib/nav.svelte.ts';
-  import { enableNotifications, notifyEnv, notifyState } from '../lib/push.ts';
+  import { enableNotifications, notifyEnv, notifyState, pushAccountOf } from '../lib/push.ts';
   import { archiveReminder, type Reminder } from '../lib/storage.ts';
   import { t } from '../lib/strings.ts';
 
@@ -57,7 +58,7 @@
   });
 
   let notifyEnvNow = $state(notifyEnv());
-  const pushState = $derived(notifyState(notifyEnvNow, app.platform, account));
+  const pushState = $derived(notifyState(notifyEnvNow, app.platform, account, pushAccountOf(app.accounts, location.origin)));
   const offerNotify = $derived(
     app.flagsLoaded && !app.flags.notifyDismissed && !removed && pushState === 'off' && otherChats.some((c) => c.lastMessage),
   );
@@ -89,7 +90,7 @@
 
   async function turnOnNotifications(): Promise<void> {
     try {
-      await enableNotifications(app.core, account);
+      await enableNotifications(app.core, account, app.accounts);
     } catch (e) {
       app.notify(t.notify.failed);
       app.log('warn', 'push', 'enabling notifications failed', e);
@@ -120,8 +121,10 @@
     if (last.kind === 'deleted') return t.list.deleted;
     if (last.kind === 'service') return t.list.groupChanged;
     const media =
-      last.media === 'voice' ? t.list.voice : last.media === 'location' ? t.list.location : last.media === 'image' ? t.list.photo : last.media === 'file' ? t.list.file : null;
-    const body = last.body.replace(/\s+/g, ' ').trim() || media || t.list.attachment(1);
+      last.media === 'sticker'
+        ? `${t.list.sticker} ${last.body}`.trim()
+        : last.media === 'voice' ? t.list.voice : last.media === 'location' ? t.list.location : last.media === 'image' ? t.list.photo : last.media === 'file' ? t.list.file : null;
+    const body = (last.media === 'sticker' ? media : last.body.replace(/\s+/g, ' ').trim()) || media || t.list.attachment(1);
     if (last.outgoing && c.kind !== 'self') return `${t.list.youPrefix} ${body}`;
     if (c.kind === 'group' && last.senderId) {
       const who = names.get(last.senderId);
@@ -162,7 +165,7 @@
 
 <section class="screen" aria-labelledby="list-title">
   <header class="screen-header">
-    <h1 id="list-title" class="family">{account.familyName}</h1>
+    <FamilySwitcher />
     <button class="icon-btn" type="button" aria-label={t.search.open} onclick={() => nav.push({ name: 'search' })} data-testid="open-search">
       <Icon name="search" />
     </button>
@@ -307,10 +310,6 @@
 </section>
 
 <style>
-  .family {
-    padding-left: var(--sp-2);
-  }
-
   .body {
     flex: 1 1 auto;
     min-height: 0;

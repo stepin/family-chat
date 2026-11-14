@@ -31,7 +31,11 @@ export type Route =
   | { readonly name: 'phrase' }
   | { readonly name: 'server' }
   | { readonly name: 'invites' }
-  | { readonly name: 'diagnostics' };
+  | { readonly name: 'diagnostics' }
+  // M5
+  | { readonly name: 'families' }
+  | { readonly name: 'add-family' }
+  | { readonly name: 'sticker-packs' };
 
 export type RouteName = Route['name'];
 

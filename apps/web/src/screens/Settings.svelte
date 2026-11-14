@@ -54,6 +54,14 @@
       <span class="label">{t.settings.family}<span class="sub">{account.familyName}</span></span>
       <Icon name="chevron" size={20} />
     </button>
+    <button class="item" type="button" onclick={() => nav.push({ name: 'families' })}>
+      <span class="label">{t.settings.families}<span class="sub">{app.accounts.map((a) => a.familyName).join(', ')}</span></span>
+      <Icon name="chevron" size={20} />
+    </button>
+    <button class="item" type="button" onclick={() => nav.push({ name: 'sticker-packs' })}>
+      <span class="label">{t.settings.stickers}<span class="sub">{t.stickers.manageHint}</span></span>
+      <Icon name="chevron" size={20} />
+    </button>
     <button class="item" type="button" onclick={() => nav.push({ name: 'diagnostics' })}>
       <span class="label">{t.settings.diagnostics}</span>
       <Icon name="chevron" size={20} />

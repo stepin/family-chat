@@ -30,6 +30,10 @@ import { Groups } from './groups.ts';
 import { OutboxSender } from './outbox.ts';
 import { authenticateDevice, Session } from './session.ts';
 import { SyncEngine } from './sync.ts';
+import { StickerPacks } from './stickers/packs.ts';
+import { fileKey } from './attachments.ts';
+import { removeFiles } from './apply.ts';
+import { Dexie, type Table } from 'dexie';
 
 export const SUPPORTED_PROTOCOL = 1;
 
@@ -40,6 +44,8 @@ export class AccountRuntime implements AccountRuntimeLike {
   readonly sync: SyncEngine;
   readonly outbox: OutboxSender;
   readonly transfers: Transfers;
+  /** Sticker packs of this server (M5). */
+  readonly stickers: StickerPacks;
   #started = false;
   #connectedOnce = false;
 
@@ -58,6 +64,7 @@ export class AccountRuntime implements AccountRuntimeLike {
       },
     });
     this.outbox = new OutboxSender(this);
+    this.stickers = new StickerPacks(this);
     this.transfers = new Transfers(this, ctx.files, { onUploaded: () => this.outbox.kick() });
     this.sync = new SyncEngine(this, {
       onConnected: () => {
@@ -66,6 +73,9 @@ export class AccountRuntime implements AccountRuntimeLike {
         if (!this.#connectedOnce) {
           this.#connectedOnce = true;
           this.groups.kick({ full: true });
+          void this.stickers.refresh().catch((e: unknown) =>
+            void ctx.diag.info('stickers', `sticker packs not refreshed: ${String((e as Error)?.name)}`, this.session.accountId),
+          );
         }
       },
     });
@@ -345,6 +355,66 @@ export async function revokeIdentity(ctx: CoreContext, serverUrl: string, keys: 
     if (r.userId === keys.userId) await ctx.db.accounts.update(r.id, { status: 'removed', revoked: true });
   }
   void ctx.diag.warn('auth', `identity ${keys.userId} revoked on ${url}`);
+}
+
+/** Tables whose primary key starts with `accountId` (everything an account owns on this device). */
+function accountTables(ctx: CoreContext): Table<unknown, unknown[]>[] {
+  const db = ctx.db;
+  return [
+    db.users,
+    db.chats,
+    db.events,
+    db.messages,
+    db.outbox,
+    db.counters,
+    db.seqTrack,
+    db.drafts,
+    db.groups,
+    db.groupStates,
+    db.epochKeys,
+    db.sealedKeys,
+    db.groupPending,
+    db.notices,
+    db.pendingEvents,
+    db.blobs,
+    db.avatars,
+    db.controls,
+    db.tombstones,
+    db.stickerPacks,
+    db.stickerFiles,
+    db.links,
+  ] as unknown as Table<unknown, unknown[]>[];
+}
+
+/**
+ * Removes an account from this device (M5): its history, files, keys of its
+ * groups and its token. Nothing is sent to other servers. The server keeps
+ * the device registered (there is no endpoint to drop a device token); the
+ * push subscription is removed there when possible. The identity seed is
+ * removed too when no other account on this device uses it: coming back then
+ * needs the recovery phrase. Call with the account's loops stopped.
+ */
+export async function removeAccount(ctx: CoreContext, accountId: string): Promise<void> {
+  const { db } = ctx;
+  const row = await db.accounts.get(accountId);
+  if (!row) throw new CoreError('no-account');
+  if (row.pushRegistered && row.status === 'active') {
+    const t = ctx.transport(row.serverUrl);
+    await Promise.race([t.deletePush(row.token).catch(() => undefined), new Promise((r) => setTimeout(r, 3000))]);
+  }
+  const files = (await db.blobs.where('accountId').equals(accountId).toArray())
+    .filter((b) => b.storage)
+    .map((b) => ({ storage: b.storage!, key: fileKey(accountId, b.blobId) }));
+  const others = (await db.accounts.toArray()).filter((a) => a.id !== accountId && a.userId === row.userId);
+  const tables = accountTables(ctx);
+  await db.transaction('rw', [db.accounts, db.identities, ...tables], async () => {
+    for (const t of tables) await t.where(':id').between([accountId], [accountId, Dexie.maxKey]).delete();
+    await db.accounts.delete(accountId);
+    if (others.length === 0) await db.identities.delete(row.userId);
+  });
+  if (others.length === 0) ctx.forgetKeys(row.userId);
+  await removeFiles(ctx, files);
+  void ctx.diag.info('auth', `account removed from this device (server ${row.serverId})`);
 }
 
 /** Identity keys from a recovery phrase (for revoking without a device). The phrase is a secret. */

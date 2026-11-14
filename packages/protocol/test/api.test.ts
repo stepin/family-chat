@@ -28,6 +28,7 @@ describe('public API', () => {
         'createIdentityEnvelope',
         'createProfileEnvelope',
         'createRevocationEnvelope',
+        'createStickerPackEnvelope',
         'decodeEvent',
         'decodePayload',
         'decryptBlobPart',
@@ -47,6 +48,7 @@ describe('public API', () => {
         'groupStateActions',
         'isProtocolError',
         'isValidPhrase',
+        'maxStickerBytes',
         'newBlob',
         'newDevId',
         'newEpochSecret',
@@ -64,11 +66,16 @@ describe('public API', () => {
         'readArchive',
         'readGroupKey',
         'readGroupStateHeader',
+        'readStickerPackHeader',
         'removeGroupMembers',
         'renameGroup',
         'sealGroupKey',
         'seedToPhrase',
         'serializeEnvelope',
+        'stickerEmojiProblem',
+        'stickerFileHash',
+        'stickerFileMatches',
+        'stickerRefProblem',
         'transferGroupOwnership',
         'userIdFromSignPub',
         'validateAttachment',
@@ -78,6 +85,7 @@ describe('public API', () => {
         'verifyIdentityEnvelope',
         'verifyProfileEnvelope',
         'verifyRevocationEnvelope',
+        'verifyStickerPackEnvelope',
       ].sort(),
     );
     for (const internal of [
@@ -106,6 +114,11 @@ describe('public API', () => {
     expect(api.ARCHIVE_HEADER_BYTES).toBe(36);
     expect(api.IMAGE_TYPES).toEqual(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
     expect(api.VOICE_TYPES).toEqual(['audio/mp4', 'audio/webm', 'audio/ogg']);
+    expect(api.MAX_PACK_STICKERS).toBe(200);
+    expect(api.MAX_PACK_PAYLOAD_BYTES).toBe(65536);
+    expect(api.MAX_WEBP_STICKER_BYTES).toBe(512 * 1024);
+    expect(api.MAX_TGS_STICKER_BYTES).toBe(128 * 1024);
+    expect(api.MAX_PACK_BYTES).toBe(50 * 1024 * 1024);
   });
 
   it('package.json exposes only the entry point', () => {

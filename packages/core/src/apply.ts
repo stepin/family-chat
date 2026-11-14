@@ -360,6 +360,7 @@ export function outboxPayload(row: OutboxRow): MsgPayload {
     ...(row.fwd ? { fwd: true as const } : {}),
     ...(row.attachments && row.attachments.length > 0 ? { attachments: row.attachments } : {}),
     ...(row.location ? { location: row.location } : {}),
+    ...(row.sticker ? { sticker: row.sticker } : {}),
   };
 }
 
@@ -470,7 +471,7 @@ function lastOf(m: MessageRow): NonNullable<ChatRow['last']> {
     body: m.body,
     gseq: m.gseq,
     time: m.time,
-    ...(m.attachments?.[0] ? { media: m.attachments[0].kind } : m.location ? { media: 'location' as const } : {}),
+    ...(m.attachments?.[0] ? { media: m.attachments[0].kind } : m.location ? { media: 'location' as const } : m.sticker ? { media: 'sticker' as const } : {}),
   };
 }
 
@@ -570,6 +571,7 @@ async function applyOne(
       ...(msg?.attachments ? { attachments: [...msg.attachments] } : {}),
       ...(msg?.location ? { location: msg.location } : {}),
       ...(msg?.fwd ? { fwd: true as const } : {}),
+      ...(msg?.sticker ? { sticker: msg.sticker } : {}),
     };
     message.words = messageWords(message);
     await db.messages.put(message);

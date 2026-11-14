@@ -22,6 +22,7 @@ use crate::datadir::{DataDir, check_admin_code, now_ms};
 pub use crate::error::ApiError;
 use crate::groups;
 use crate::headers;
+use crate::packs::{self, PackStore};
 use crate::ratelimit::RateLimiter;
 use crate::store::{Store, StoreConfig};
 use crate::webpush::{PushClient, Subscription, VapidKey};
@@ -44,6 +45,8 @@ pub struct AppState {
     /// Becomes `true` when the server starts shutting down.
     pub shutdown: watch::Receiver<bool>,
     pub store: Store,
+    /// Sticker packs (`packs/`).
+    pub packs: PackStore,
     pub limiter: RateLimiter,
 }
 
@@ -68,6 +71,7 @@ impl AppState {
                     .saturating_add(blobs::TOTAL_SLACK_BYTES),
             },
         )?;
+        let packs = PackStore::open(&dir.path, settings.min_free_mb);
         Ok(Arc::new(AppState {
             push: settings.push.then(|| PushClient::new(settings.push_subject.clone())),
             settings,
@@ -77,6 +81,7 @@ impl AppState {
             assets,
             shutdown,
             store,
+            packs,
             limiter: RateLimiter::default(),
         }))
     }
@@ -93,6 +98,13 @@ pub fn spawn_maintenance(st: Arc<AppState>) {
                 _ = shutdown.wait_for(|v| *v) => return,
             }
             st.store.write(|w| w.retention(now_ms())).await;
+            let st2 = st.clone();
+            let removed = tokio::task::spawn_blocking(move || st2.packs.remove_stale_drafts(now_ms()))
+                .await
+                .unwrap_or(0);
+            if removed > 0 {
+                tracing::info!("удалены неопубликованные черновики наборов стикеров: {removed}");
+            }
         }
     });
 }
@@ -121,6 +133,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/blobs/{id}", get(blobs::info).delete(blobs::delete))
         .route("/v1/blobs/{id}/{part}", put(blobs::put_part).get(blobs::get_part))
         .route("/v1/events", get(api::events))
+        .route("/v1/packs", get(packs::list))
+        .route(
+            "/v1/packs/{id}",
+            get(packs::get).put(packs::publish).delete(packs::delete),
+        )
+        .route("/v1/packs/{id}/files/{hash}", get(packs::get_file).put(packs::put_file))
         .route("/v1/admin/invites", post(api::create_invite).get(api::list_invites))
         .route("/v1/admin/invites/{id}", delete(api::delete_invite))
         .route("/v1/admin/users", get(api::admin_users))
@@ -164,7 +182,7 @@ async fn cors(req: Request, next: Next) -> Response {
     );
     h.insert(
         header::ACCESS_CONTROL_ALLOW_HEADERS,
-        HeaderValue::from_static("Authorization, Content-Type, Idempotency-Key, X-FC-Epoch"),
+        HeaderValue::from_static("Authorization, Content-Type, Idempotency-Key, X-FC-Epoch, X-FC-Push"),
     );
     h.insert(
         header::ACCESS_CONTROL_EXPOSE_HEADERS,
@@ -182,6 +200,19 @@ async fn fallback(
 ) -> Response {
     if uri.path().starts_with("/v1/") || uri.path() == "/v1" {
         return ApiError::new(StatusCode::NOT_FOUND, "not_found", "no such API endpoint").into_response();
+    }
+    // Web Share Target (M5): the installed app's service worker answers this
+    // POST itself. When it reaches the server (no service worker yet), the
+    // shared content is dropped and the app opens with an explanation.
+    if method == Method::POST && uri.path().ends_with("/share-target") {
+        return (
+            StatusCode::SEE_OTHER,
+            [
+                (header::LOCATION, "./?share=unavailable"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+        )
+            .into_response();
     }
     st.assets.serve(&method, &uri, &headers).await
 }
@@ -206,6 +237,8 @@ async fn hello(State(st): State<Arc<AppState>>) -> Response {
         "maxStateBytes": groups::MAX_STATE_BYTES,
         "maxSealedKeyBytes": groups::MAX_SEALED_KEY_BYTES,
         "maxGroupMembers": groups::MAX_MEMBERS,
+        "maxPackStickers": crate::envelope::MAX_PACK_STICKERS,
+        "maxPackBytes": crate::envelope::MAX_PACK_BYTES,
         "adminCodeActive": st.store.read(|m| !m.server.admin_code_hash.is_empty()),
         "m0": st.m0,
     }))

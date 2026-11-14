@@ -71,3 +71,16 @@ export function pageServerUrl(loc: Location): string {
 export function inviteLinkFor(invite: ParsedInvite): string {
   return `${invite.serverUrl}/#invite=${invite.code}`;
 }
+
+/** The same server address, ignoring case of the host and a trailing slash. */
+export function sameServer(a: string, b: string): boolean {
+  const norm = (s: string): string => {
+    try {
+      const u = new URL(s);
+      return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`.toLowerCase();
+    } catch {
+      return s.replace(/\/+$/, '').toLowerCase();
+    }
+  };
+  return norm(a) === norm(b);
+}

@@ -84,6 +84,17 @@ export interface PostEventInput {
   readonly msgId: string;
   readonly epoch: number;
   readonly body: Uint8Array;
+  /** M5: the event is not worth a notification (`X-FC-Push: none`): edits, deletions, reactions. */
+  readonly silent?: boolean;
+}
+
+/** An element of `GET /v1/packs` (M5). The manifest is verified by the caller. */
+export interface PackEntry {
+  readonly packId: string;
+  readonly owner: string;
+  readonly manifest: SignedEnvelope;
+  readonly publishedAt: number | null;
+  readonly bytes: number;
 }
 
 export interface PostEventResult {

@@ -21,6 +21,11 @@
   const Storage = lazy(() => import('./Storage.svelte'));
   const Security = lazy(() => import('./Security.svelte'));
   const SearchScreen = lazy(() => import('./SearchScreen.svelte'));
+  // M5: families on this device, adding one, sticker packs, the share chooser.
+  const Families = lazy(() => import('./Families.svelte'));
+  const AddFamily = lazy(() => import('./AddFamily.svelte'));
+  const StickerPacks = lazy(() => import('./StickerPacks.svelte'));
+  const ForwardSheet = lazy(() => import('../components/ForwardSheet.svelte'));
 
   // One column below 900 px (a stack of screens over the chat list), two
   // columns from 900 px: the list and the open screen (docs/PLAN.md 8.2).
@@ -68,12 +73,40 @@
         {#await Invites() then { default: C }}<C />{/await}
       {:else if top.name === 'diagnostics'}
         {#await Diagnostics() then { default: C }}<C />{/await}
+      {:else if top.name === 'families'}
+        {#await Families() then { default: C }}<C />{/await}
+      {:else if top.name === 'add-family'}
+        {#await AddFamily() then { default: C }}<C />{/await}
+      {:else if top.name === 'sticker-packs'}
+        {#key app.account?.id}
+          {#await StickerPacks() then { default: C }}<C />{/await}
+        {/key}
       {:else}
         <div class="placeholder"><p class="muted">{t.list.pickChat}</p></div>
       {/if}
     </div>
   {/if}
 </div>
+
+{#if app.choosingShare}
+  {@const content = app.choosingShare}
+  {#await ForwardSheet() then { default: Sheet }}
+    <Sheet
+      accountId={app.account?.id ?? ''}
+      share={content}
+      onchoose={async (accountId: string, chatId: string) => {
+        // Read before the sheet goes away (the {@const} follows app.choosingShare).
+        const shared = app.choosingShare ?? content;
+        app.choosingShare = null;
+        if (accountId !== app.account?.id) await app.switchAccount(accountId);
+        app.pendingShare = { accountId, chatId, content: shared };
+        nav.reset({ name: 'list' });
+        nav.openChat(accountId, chatId, true);
+      }}
+      onclose={() => (app.choosingShare = null)}
+    />
+  {/await}
+{/if}
 
 <style>
   .main {

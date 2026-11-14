@@ -15,13 +15,15 @@ import type {
   GroupState,
   Location,
   MsgRef,
+  PackSticker,
   SignedEnvelope,
+  StickerRef,
 } from '@family-chat/protocol';
 import type { NoticeBody, ServerEvent } from '../api/types.ts';
 import { messageWords } from '../search.ts';
 
 export const DEFAULT_DB_NAME = 'family-chat';
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;
 
 export type AccountStatus = 'active' | 'login-invalid' | 'removed';
 
@@ -130,7 +132,7 @@ export interface LastMessage {
   media?: LastMedia;
 }
 
-export type LastMedia = 'image' | 'voice' | 'file' | 'location';
+export type LastMedia = 'image' | 'voice' | 'file' | 'location' | 'sticker';
 
 export type ChatKind = 'dm' | 'self' | 'group';
 
@@ -215,6 +217,9 @@ export interface MessageRow {
   edited?: { gseq: number; time: number };
   /** Aggregated reactions (absent: none). */
   reactions?: ReactionAgg[];
+  // ---- version 4 (M5) ----
+  /** A sticker message: the reference (the body holds its emoji). */
+  sticker?: StickerRef;
 }
 
 /** Payload of a queued control event (M4): edit, delete for everyone or reaction. */
@@ -299,6 +304,8 @@ export interface OutboxRow {
   // ---- version 3 (M4) ----
   /** A control event instead of a message (not shown as a message of its own). */
   control?: OutboxControl;
+  // ---- version 4 (M5) ----
+  sticker?: StickerRef;
 }
 
 /** Next `seq` of this device in a chat. */
@@ -485,6 +492,51 @@ export interface AvatarRow {
   fetchedAt: number;
 }
 
+// ---- version 4 (M5): sticker packs and identity links ----
+
+/** A published sticker pack of a server, its manifest verified against the uploader's identity. */
+export interface StickerPackRow {
+  accountId: string;
+  packId: string;
+  /** Uploader (the manifest's signer). */
+  author: string;
+  name: string;
+  created: number;
+  stickers: PackSticker[];
+  manifest: SignedEnvelope;
+  publishedAt: number | null;
+  /** Local time of the last listing that contained it. */
+  seenAt: number;
+}
+
+/** A sticker file, checked against its name (hash) and the manifest's size. */
+export interface StickerFileRow {
+  accountId: string;
+  /** hash32 of the bytes. */
+  file: string;
+  packId: string;
+  type: 'webp' | 'tgs';
+  bytes: Uint8Array;
+  fetchedAt: number;
+}
+
+/**
+ * "This is the same person as…" (docs/PLAN.md 8.6): `userId` (an older
+ * identity of a relative) is shown together with `to` (the current one) on
+ * this device. Local only, never sent to a server.
+ */
+export interface IdentityLinkRow {
+  accountId: string;
+  /** The older identity. */
+  userId: string;
+  /** The identity it is the same person as. */
+  to: string;
+  /** Fingerprints of both at the moment of linking (the link is dropped from views if keys change). */
+  fromFingerprint: string;
+  toFingerprint: string;
+  createdAt: number;
+}
+
 /** Fallback cross-context lock (when Web Locks are unavailable). */
 export interface LeaseRow {
   name: string;
@@ -524,6 +576,9 @@ export class CoreDb extends Dexie {
   avatars!: Table<AvatarRow, [string, string]>;
   controls!: Table<ControlRow, [string, string, string]>;
   tombstones!: Table<TombstoneRow, [string, string, string]>;
+  stickerPacks!: Table<StickerPackRow, [string, string]>;
+  stickerFiles!: Table<StickerFileRow, [string, string]>;
+  links!: Table<IdentityLinkRow, [string, string]>;
 
   constructor(name: string = DEFAULT_DB_NAME, deps: DbDeps = {}) {
     super(name, deps.indexedDB ? { indexedDB: deps.indexedDB, IDBKeyRange: deps.IDBKeyRange } : undefined);
@@ -585,6 +640,13 @@ export class CoreDb extends Dexie {
             m.words = messageWords(m);
           });
       });
+    // Version 4 (M5): sticker packs, their files and identity links. Only additions, no upgrade
+    // of existing rows is needed (the new optional fields are simply absent in old rows).
+    this.version(4).stores({
+      stickerPacks: '[accountId+packId], accountId',
+      stickerFiles: '[accountId+file], [accountId+packId]',
+      links: '[accountId+userId], accountId, [accountId+to]',
+    });
   }
 }
 

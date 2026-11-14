@@ -5,6 +5,7 @@
   import Icon from './Icon.svelte';
   import LocationCard from './LocationCard.svelte';
   import { formatTime } from '../lib/format.ts';
+  import { lazy } from '../lib/lazy.ts';
   import { linkify } from '../lib/linkify.ts';
   import { sendStatus } from '../lib/status.ts';
   import { t } from '../lib/strings.ts';
@@ -55,6 +56,9 @@
     highlight?: boolean;
   } = $props();
 
+  // M5: stickers are drawn by their own chunk (WebP or the light Lottie player).
+  const loadSticker = lazy(() => import('./StickerView.svelte'));
+
   const LONG_PRESS_MS = 480;
   let pressTimer: ReturnType<typeof setTimeout> | undefined;
   let pressStart: { x: number; y: number } | null = null;
@@ -63,6 +67,7 @@
   let bubbleEl: HTMLElement | undefined = $state();
 
   const deleted = $derived(message.kind === 'deleted');
+  const sticker = $derived(!deleted && message.kind === 'msg' ? (message.sticker ?? null) : null);
   const reactions = $derived(message.reactions ?? []);
   const quote = $derived(message.replyTo ?? null);
   const quoteText = $derived.by(() => {
@@ -72,6 +77,7 @@
     if (quote.media === 'image') return t.msg.photo;
     if (quote.media === 'voice') return t.msg.voice;
     if (quote.media === 'location') return t.msg.place;
+    if (quote.media === 'sticker') return t.msg.sticker;
     return quote.fileName ?? t.msg.file;
   });
   const menuEnabled = $derived(!!onmenu && message.kind !== 'service' && message.kind !== 'update-required' && message.status !== 'on-device');
@@ -165,6 +171,7 @@
     <div
       class="bubble"
       class:deleted
+      class:sticker-bubble={sticker !== null}
       bind:this={bubbleEl}
       oncontextmenu={onContextMenu}
       onpointerdown={(e) => longPress(e, () => openMenu())}
@@ -203,7 +210,15 @@
       {#if message.location}
         <div class="attachments"><LocationCard place={message.location} /></div>
       {/if}
-      {#if message.kind === 'update-required'}
+      {#if sticker}
+        {#await loadSticker()}
+          <span class="sticker-wait" aria-hidden="true">{message.body}</span>
+        {:then { default: StickerView }}
+          <StickerView accountId={message.accountId} pack={sticker.pack} file={sticker.file} type={sticker.type} emoji={message.body} w={sticker.w} h={sticker.h} />
+        {:catch}
+          <span class="sticker-wait" aria-hidden="true">{message.body}</span>
+        {/await}
+      {:else if message.kind === 'update-required'}
         <p class="text muted">{t.chat.updateRequired}</p>
       {:else if message.body.length > 0}
         <!-- prettier-ignore -->
@@ -520,6 +535,33 @@
   .out .bubble {
     background: var(--accent-soft);
     color: var(--on-accent-soft);
+  }
+
+  /* A sticker is its own bubble without a background (docs/PLAN.md 8). */
+  .bubble.sticker-bubble,
+  .out .bubble.sticker-bubble {
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--text);
+  }
+
+  .sticker-bubble .meta {
+    width: fit-content;
+    margin-left: auto;
+    padding: 1px var(--sp-2);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+  }
+
+  .sticker-wait {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 160px;
+    height: 160px;
+    font-size: 2.5rem;
   }
 
   .failed .bubble {

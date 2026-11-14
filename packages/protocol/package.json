@@ -10,7 +10,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run && node scripts/verify-vectors.mjs",
-    "vectors:generate": "node scripts/gen-vectors.ts && node scripts/gen-vectors-m2.ts",
+    "vectors:generate": "node scripts/gen-vectors.ts && node scripts/gen-vectors-m2.ts && node scripts/gen-vectors-m5.ts",
     "vectors:verify": "node scripts/verify-vectors.mjs"
   },
   "devDependencies": {

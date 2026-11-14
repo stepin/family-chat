@@ -30,6 +30,7 @@ import type {
   JoinRequest,
   MeEntry,
   NewInvite,
+  PackEntry,
   PostEventInput,
   PostEventResult,
   PushSubscriptionInput,
@@ -221,7 +222,8 @@ export class Transport {
         template: '/v1/chats/{chatId}/events',
         token,
         bytes: input.body,
-        headers: { 'Idempotency-Key': input.msgId, 'X-FC-Epoch': String(input.epoch) },
+        // `X-FC-Push: none` (M5): an edit, a deletion or a reaction is not worth a notification.
+        headers: { 'Idempotency-Key': input.msgId, 'X-FC-Epoch': String(input.epoch), ...(input.silent ? { 'X-FC-Push': 'none' } : {}) },
         signal,
       }),
       'post event',
@@ -451,6 +453,61 @@ export class Transport {
 
   async deleteBlob(token: string, blobId: string, signal?: AbortSignal): Promise<void> {
     await this.#json({ method: 'DELETE', path: `/v1/blobs/${encodeURIComponent(blobId)}`, template: '/v1/blobs/{blobId}', token, signal });
+  }
+
+  // ---- sticker packs (M5) ----
+
+  /** `GET /v1/packs`: published packs of the family (manifests not verified here). */
+  async packs(token: string, signal?: AbortSignal): Promise<PackEntry[]> {
+    const o = obj(await this.#json({ method: 'GET', path: '/v1/packs', template: '/v1/packs', token, signal }), 'packs');
+    return arr(o, 'packs').map((p) => {
+      const x = obj(p, 'pack');
+      return {
+        packId: str(x, 'packId'),
+        owner: str(x, 'owner'),
+        manifest: envelope(x.manifest, 'manifest'),
+        publishedAt: nullableNum(x, 'publishedAt'),
+        bytes: num(x, 'bytes'),
+      };
+    });
+  }
+
+  /** `PUT /v1/packs/<packId>/files/<hash>`: one file of a draft. */
+  async putPackFile(token: string, packId: string, hash: string, bytes: Uint8Array, signal?: AbortSignal): Promise<void> {
+    await this.#json({
+      method: 'PUT',
+      path: `/v1/packs/${encodeURIComponent(packId)}/files/${encodeURIComponent(hash)}`,
+      template: '/v1/packs/{packId}/files/{hash}',
+      token,
+      bytes,
+      signal,
+    });
+  }
+
+  /** `PUT /v1/packs/<packId>`: publishes the draft with its signed manifest. */
+  async publishPack(token: string, packId: string, manifest: SignedEnvelope, signal?: AbortSignal): Promise<void> {
+    await this.#json({
+      method: 'PUT',
+      path: `/v1/packs/${encodeURIComponent(packId)}`,
+      template: '/v1/packs/{packId}',
+      token,
+      json: { payload: manifest.payload, sig: manifest.sig },
+      signal,
+    });
+  }
+
+  async packFile(token: string, packId: string, hash: string, signal?: AbortSignal): Promise<Uint8Array> {
+    return this.#bytes({
+      method: 'GET',
+      path: `/v1/packs/${encodeURIComponent(packId)}/files/${encodeURIComponent(hash)}`,
+      template: '/v1/packs/{packId}/files/{hash}',
+      token,
+      signal,
+    });
+  }
+
+  async deletePack(token: string, packId: string, signal?: AbortSignal): Promise<void> {
+    await this.#json({ method: 'DELETE', path: `/v1/packs/${encodeURIComponent(packId)}`, template: '/v1/packs/{packId}', token, signal });
   }
 
   // ---- administration ----

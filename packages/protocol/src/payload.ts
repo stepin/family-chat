@@ -19,6 +19,7 @@ import {
 } from './constants.ts';
 import { malformed, ProtocolError } from './errors.ts';
 import { isObject, isSafeUint, nameProblem, parseJsonObject, type JsonObject } from './json.ts';
+import { stickerEmojiProblem, stickerRefOut, stickerRefProblem, type StickerRef } from './sticker.ts';
 
 export type { Attachment } from './attachment.ts';
 
@@ -57,6 +58,11 @@ export interface MsgPayload extends Common {
   readonly fwd?: true;
   readonly attachments?: readonly Attachment[];
   readonly location?: Location;
+  /**
+   * A sticker (M5). `body` is then the sticker's emoji (what a client without stickers shows);
+   * no attachments and no location.
+   */
+  readonly sticker?: StickerRef;
 }
 
 /** Replace the body of an own message. Only the author of `target` may edit it. */
@@ -115,6 +121,8 @@ export interface MsgInput {
   readonly fwd?: boolean;
   readonly attachments?: readonly Attachment[];
   readonly location?: Location;
+  /** A sticker; `body` must then be its emoji. */
+  readonly sticker?: StickerRef;
 }
 
 interface CommonInput {
@@ -196,7 +204,8 @@ function checkBodyInput(body: unknown, kind: string): void {
 
 /**
  * Serialise a `msg` payload. Field order is fixed: v, t, id, dev, seq, body, reply, fwd,
- * attachments, location. At least one of a non-empty body, attachments and location is required.
+ * attachments, location, sticker. At least one of a non-empty body, attachments and location is
+ * required. A sticker message has `body` = the sticker's emoji and neither attachments nor location.
  */
 export function encodeMsgPayload(input: MsgInput): Bytes {
   const bad = (m: string) => new ProtocolError('invalid-argument', `msg: ${m}`);
@@ -225,6 +234,12 @@ export function encodeMsgPayload(input: MsgInput): Bytes {
     const p = locationProblem(input.location);
     if (p) throw bad(p);
     out.location = loc(input.location);
+  }
+  if (input.sticker !== undefined) {
+    const p = stickerRefProblem(input.sticker) ?? stickerEmojiProblem(input.body);
+    if (p) throw bad(p);
+    if (out.attachments !== undefined || out.location !== undefined) throw bad('a sticker message has no attachments or location');
+    out.sticker = stickerRefOut(input.sticker);
   }
   if (out.body === undefined && out.attachments === undefined && out.location === undefined) {
     throw bad('a message needs a body, attachments or a location');
@@ -360,6 +375,12 @@ function decodeMsg(o: JsonObject, id: string): MsgPayload {
     const p = locationProblem(o.location);
     if (p) throw malformed(`msg: ${p}`);
     msg.location = loc(o.location as Location);
+  }
+  if (o.sticker !== undefined) {
+    const p = stickerRefProblem(o.sticker) ?? stickerEmojiProblem(o.body);
+    if (p) throw malformed(`msg: ${p}`);
+    if (msg.attachments !== undefined || msg.location !== undefined) throw malformed('msg: a sticker message has no attachments or location');
+    msg.sticker = stickerRefOut(o.sticker as StickerRef);
   }
   return msg;
 }

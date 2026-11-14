@@ -87,6 +87,8 @@
   let dialogFor = $state.raw<{ kind: 'delete'; key: string } | { kind: 'who'; key: string; emoji: string } | null>(null);
   let highlightKey = $state<string | null>(null);
   let highlightTimer: ReturnType<typeof setTimeout> | undefined;
+  // Text shared into the app (M5), put into the composer once it exists.
+  let sharedText = $state<string | null>(null);
   // Search inside this chat.
   let searchOpen = $state(false);
   let searchButton: HTMLButtonElement | undefined = $state();
@@ -147,9 +149,9 @@
     if (m.kind === 'deleted') return ['delete'];
     const out: MessageAction[] = [];
     if (!blocked && showComposer) out.push('reply');
-    if (m.body.trim().length > 0) out.push('copy');
+    if (m.body.trim().length > 0 && !m.sticker) out.push('copy');
     if (!removed) out.push('forward');
-    if (m.outgoing && m.kind === 'msg' && !blocked) out.push('edit');
+    if (m.outgoing && m.kind === 'msg' && !blocked && !m.sticker) out.push('edit');
     out.push('delete');
     return out;
   }
@@ -158,7 +160,7 @@
     const first = m.attachments?.[0];
     const body = m.body.replace(/\s+/g, ' ').trim();
     const text =
-      body ||
+      (m.sticker ? `${t.msg.sticker} ${body}` : body) ||
       (m.location ? t.msg.place : first?.kind === 'image' ? t.msg.photo : first?.kind === 'voice' ? t.msg.voice : (first?.name ?? t.msg.file));
     return { name: m.outgoing ? t.msg.youName : nameOf(m.senderId), text };
   }
@@ -380,6 +382,16 @@
       io.observe(sentinel);
     }
     if (!app.hello) void app.refreshHello();
+    // Content shared into the app (Web Share Target, M5) for this chat: files go to the preview, text to the field.
+    const share = app.pendingShare;
+    if (share && share.accountId === accountId && share.chatId === chatId) {
+      app.pendingShare = null;
+      if (share.content.files.length > 0) {
+        pending = [...share.content.files];
+        caption = share.content.text;
+      } else sharedText = share.content.text;
+      app.notify(t.share.ready);
+    }
     return () => {
       clearTimeout(highlightTimer);
       unsub();
@@ -391,6 +403,26 @@
       io?.disconnect();
     };
   });
+
+  $effect(() => {
+    if (sharedText !== null && composer) {
+      composer.insert(sharedText);
+      sharedText = null;
+    }
+  });
+
+  async function sendSticker(packId: string, file: string): Promise<void> {
+    if (blocked) return;
+    try {
+      stickToBottom = true;
+      const reply = takeReply();
+      await app.core.sendSticker(accountId, chatId, packId, file, reply);
+      afterFirstSend();
+    } catch (e) {
+      app.notify(isCoreError(e, 'gone') ? t.stickers.unavailable : errorText(e));
+      app.log('warn', 'chat', 'sending a sticker failed', e);
+    }
+  }
 
   function afterFirstSend(): void {
     // Invited relatives are offered the recovery phrase after the first sent message.
@@ -796,7 +828,9 @@
     <p class="visually-hidden" role="status">{t.emoji.loading}</p>
   {:then { default: EmojiPicker }}
     <EmojiPicker
-      title={target.kind === 'react' ? t.msg.reactions : t.emoji.title}
+      title={target.kind === 'react' ? t.msg.reactions : t.emoji.titleWithStickers}
+      stickers={target.kind === 'composer' ? accountId : null}
+      onsticker={(packId, file) => void sendSticker(packId, file)}
       onpick={(emoji) => {
         if (target.kind === 'composer') composer?.insert(emoji);
         else {

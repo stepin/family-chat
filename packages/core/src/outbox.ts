@@ -16,7 +16,10 @@ import {
   encodeReactPayload,
   MAX_BODY_BYTES,
   newMessageId,
+  stickerEmojiProblem,
+  stickerRefProblem,
   type Attachment,
+  type StickerRef,
   type ChatKeys,
   type Location,
   type MsgRef,
@@ -51,6 +54,8 @@ export interface MessageExtras {
   readonly attachments?: readonly Attachment[];
   readonly location?: Location;
   readonly fwd?: boolean;
+  /** A sticker (M5); the text is then its emoji. */
+  readonly sticker?: StickerRef;
   /** Use this message id (attachments were prepared under it). */
   readonly msgId?: string;
   /** Extra work in the same transaction as the outbox row (attachment rows). */
@@ -70,6 +75,10 @@ export async function enqueueMessage(
   const hasContent = (extras.attachments?.length ?? 0) > 0 || extras.location !== undefined;
   if (!hasContent || text.length > 0) checkMessageText(text);
   if (extras.location !== undefined) checkLocation(extras.location);
+  if (extras.sticker !== undefined) {
+    const p = stickerRefProblem(extras.sticker) ?? stickerEmojiProblem(text);
+    if (p || hasContent) throw new CoreError('invalid-input', `sticker: ${p ?? 'no attachments or place with a sticker'}`);
+  }
   const { ctx, session } = rt;
   const { db } = ctx;
   const acc = session.accountId;
@@ -104,8 +113,10 @@ export async function enqueueMessage(
       ...(extras.attachments && extras.attachments.length > 0 ? { attachments: [...extras.attachments] } : {}),
       ...(extras.location ? { location: extras.location } : {}),
       ...(extras.fwd ? { fwd: true as const } : {}),
+      ...(extras.sticker ? { sticker: extras.sticker } : {}),
     });
-    await db.drafts.delete([acc, chatId]);
+    // A sticker leaves the half-written text alone.
+    if (!extras.sticker) await db.drafts.delete([acc, chatId]);
     await extras.inTransaction?.();
   });
   return msgId;
@@ -270,7 +281,14 @@ export class OutboxSender {
           const sendBody = body;
           try {
             res = await session.call((t) =>
-              session.transport.postEvent(t, { chatId: fresh.chatId, msgId: fresh.msgId, epoch: keys.epoch, body: sendBody }),
+              session.transport.postEvent(t, {
+                chatId: fresh.chatId,
+                msgId: fresh.msgId,
+                epoch: keys.epoch,
+                body: sendBody,
+                // Edits, deletions and reactions ask the server not to notify (docs/API.md 4.1).
+                ...(fresh.control ? { silent: true } : {}),
+              }),
             );
             break;
           } catch (e) {

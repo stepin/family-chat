@@ -8,6 +8,7 @@ import {
   DEV_ID_BYTES,
   MAX_ENVELOPE_PAYLOAD_BYTES,
   MAX_NAME_CHARS,
+  MAX_PACK_PAYLOAD_BYTES,
   MAX_STATE_PAYLOAD_BYTES,
   PROTOCOL_VERSION,
   PUBLIC_KEY_BYTES,
@@ -26,7 +27,7 @@ import {
 } from './json.ts';
 import { checkSignPub, sign, userIdFromSignPub, verify, type IdentityKeys } from './keys.ts';
 
-export type EnvelopeKind = 'identity' | 'profile' | 'auth' | 'revoked' | 'group-state' | 'group-key';
+export type EnvelopeKind = 'identity' | 'profile' | 'auth' | 'revoked' | 'group-state' | 'group-key' | 'sticker-pack';
 
 export interface SignedEnvelope {
   readonly payload: string;
@@ -83,9 +84,11 @@ export function envelopeSigningInput(kind: EnvelopeKind, payload: Uint8Array): B
   return concat(utf8(`fc/v1/${kind}\n`), payload);
 }
 
-/** Largest payload of an envelope kind; group states carry member lists and get more room. */
+/** Largest payload of an envelope kind; group states and sticker packs carry lists and get more room. */
 export function maxPayloadBytes(kind: EnvelopeKind): number {
-  return kind === 'group-state' ? MAX_STATE_PAYLOAD_BYTES : MAX_ENVELOPE_PAYLOAD_BYTES;
+  if (kind === 'group-state') return MAX_STATE_PAYLOAD_BYTES;
+  if (kind === 'sticker-pack') return MAX_PACK_PAYLOAD_BYTES;
+  return MAX_ENVELOPE_PAYLOAD_BYTES;
 }
 
 /** Sign exact payload bytes. Internal: used by the group modules. */

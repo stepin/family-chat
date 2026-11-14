@@ -15,6 +15,9 @@
   let understood = $state(false);
   let busy = $state(false);
   let error = $state<string | null>(null);
+  // M5: the same identity in several families (the same phrase gives the same keys and userId).
+  const sameIdentity = $derived(app.accounts.filter((a) => a.userId === account.userId));
+  const otherIdentities = $derived(new Set(app.accounts.filter((a) => a.userId !== account.userId).map((a) => a.userId)).size);
 
   function ask(e: MouseEvent): void {
     opener = e.currentTarget as HTMLElement;
@@ -42,6 +45,14 @@
 </script>
 
 <Page title={t.security.title} onback={() => nav.back()}>
+  <section class="section" aria-labelledby="sec-identity">
+    <h2 id="sec-identity">{t.security.identityTitle}</h2>
+    <p data-testid="identity-families">
+      {sameIdentity.length > 1 ? t.security.identityShared(sameIdentity.map((a) => `«${a.familyName}»`).sort((x, y) => x.localeCompare(y, "ru")).join(', ')) : t.security.identityOwn}
+    </p>
+    {#if otherIdentities > 0}<p class="muted small">{t.security.identityOthers(otherIdentities)}</p>{/if}
+  </section>
+
   <section class="section links" aria-label={t.settings.phrase}>
     <button class="item" type="button" onclick={() => nav.push({ name: 'phrase' })}>
       <span class="label">{t.settings.phrase}<span class="sub">{t.phrase.status(app.flags.phraseConfirmed)}</span></span>

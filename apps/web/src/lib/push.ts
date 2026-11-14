@@ -1,5 +1,12 @@
 // Notifications: the real state on this device, enabling (permission first,
 // then the push subscription handed to the server through core.push).
+//
+// Several families (M5): a browser keeps one push subscription per app, tied
+// to one server's VAPID key, and every family server has its own key. So
+// notifications come from one family on this device: the one the person
+// enabled them for (by default the family whose server the app was opened
+// from). The other families are checked while the app is open; the settings
+// say so and offer to move notifications to another family.
 
 import type { AccountView, FamilyChatCore } from '@family-chat/core';
 import type { PlatformInfo } from './platform.ts';
@@ -18,7 +25,9 @@ export type NotifyState =
   /** The browser cannot receive Web Push. */
   | 'unsupported'
   /** The family server has push turned off. */
-  | 'server-off';
+  | 'server-off'
+  /** Notifications come from another family on this device (one subscription per browser). */
+  | 'other-family';
 
 export interface NotifyEnv {
   readonly hasNotification: boolean;
@@ -36,10 +45,34 @@ export function notifyEnv(): NotifyEnv {
   };
 }
 
-export function notifyState(env: NotifyEnv, platform: PlatformInfo, account: AccountView | null): NotifyState {
+/**
+ * The family whose server sends this device's notifications: one already
+ * registered, else the one whose server the app was opened from, else the
+ * first. Removed accounts never.
+ */
+export function pushAccountOf(accounts: readonly AccountView[], origin: string): AccountView | null {
+  const active = accounts.filter((a) => a.status !== 'removed');
+  const sameOrigin = (a: AccountView): boolean => {
+    try {
+      return new URL(a.serverUrl).origin === origin;
+    } catch {
+      return false;
+    }
+  };
+  const registered = active.filter((a) => a.pushRegistered);
+  return registered.find(sameOrigin) ?? registered[0] ?? active.find(sameOrigin) ?? active[0] ?? null;
+}
+
+export function notifyState(
+  env: NotifyEnv,
+  platform: PlatformInfo,
+  account: AccountView | null,
+  pushAccount: AccountView | null = account,
+): NotifyState {
   if (platform.os === 'ios' && !platform.standalone) return 'ios-install';
   if (!env.hasNotification || !env.hasServiceWorker || !env.hasPushManager) return 'unsupported';
   if (account && (!account.pushAvailable || !account.vapidPublicKey)) return 'server-off';
+  if (account && pushAccount && pushAccount.id !== account.id && pushAccount.pushRegistered) return 'other-family';
   if (env.permission === 'denied') return 'denied';
   if (env.permission === 'granted') return account?.pushRegistered ? 'allowed' : 'granted-unregistered';
   return 'off';
@@ -90,9 +123,17 @@ async function subscribeAndRegister(core: FamilyChatCore, account: AccountView):
  * Called straight from the tap: the permission request is the first thing
  * that happens (Safari requires it inside the user gesture).
  */
-export async function enableNotifications(core: FamilyChatCore, account: AccountView): Promise<NotificationPermission> {
+export async function enableNotifications(
+  core: FamilyChatCore,
+  account: AccountView,
+  accounts: readonly AccountView[] = [account],
+): Promise<NotificationPermission> {
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') return permission;
+  // Only one family can have the browser's subscription: the others give it up first.
+  for (const other of accounts) {
+    if (other.id !== account.id && other.pushRegistered) await core.push.unregister(other.id).catch(() => undefined);
+  }
   await subscribeAndRegister(core, account);
   return permission;
 }
@@ -108,7 +149,9 @@ export async function disableNotifications(core: FamilyChatCore, account: Accoun
  * At start: when permission is granted, hand the current subscription to the
  * server again (the server drops subscriptions the push service rejected).
  */
-export async function refreshSubscription(core: FamilyChatCore, account: AccountView): Promise<void> {
+export async function refreshSubscription(core: FamilyChatCore, accounts: readonly AccountView[]): Promise<void> {
+  const account = pushAccountOf(accounts, location.origin);
+  if (!account) return;
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   if (!account.pushAvailable || !account.vapidPublicKey || !('serviceWorker' in navigator)) return;
   const reg = await registration(5_000);

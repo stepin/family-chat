@@ -101,4 +101,9 @@ export class CoreContext {
   rememberKeys(keys: IdentityKeys): void {
     this.#keys.set(keys.userId, keys);
   }
+
+  /** Drops the cached keys of an identity whose seed was removed from this device. */
+  forgetKeys(userId: string): void {
+    this.#keys.delete(userId);
+  }
 }
