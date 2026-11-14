@@ -66,6 +66,8 @@ jobs:
         run: pnpm test:e2e:fcd
         env:
           FCD_BIN: ${{ github.workspace }}/server/target/debug/fcd
+      - name: Site in the browser (axe, keyboard, 360 px, app under app/)
+        run: pnpm test:e2e:site
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -73,4 +75,36 @@ jobs:
           path: |
             apps/web/playwright-report
             apps/web/playwright-report-fcd
+            apps/site/playwright-report-site
           retention-days: 7
+
+  # Windows code paths of the server (free disk space, console signals, no
+  # Unix permissions). Lint and unit tests must pass. The integration tests
+  # (real processes, files, sockets) have not yet been confirmed on a Windows
+  # machine, so for now their result is reported without failing the run.
+  server-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @family-chat/web run build
+      - run: cargo clippy --locked --all-targets -- -D warnings
+        working-directory: server
+      - run: cargo test --locked --lib --bins
+        working-directory: server
+      - name: Integration tests (not yet confirmed on Windows)
+        run: cargo test --locked --tests
+        working-directory: server
+        continue-on-error: true

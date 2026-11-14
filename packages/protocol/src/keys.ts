@@ -25,7 +25,7 @@ export function sha256Bytes(data: Uint8Array): Bytes {
 
 /**
  * Secret and public keys of one identity. Holds secrets: never log or serialise it.
- * `selfKey` is reserved for the archive format (M2) and is not used in M1.
+ * `selfKey` is used by the archive format (docs/PROTOCOL.md 17).
  */
 export interface IdentityKeys {
   readonly userId: string;

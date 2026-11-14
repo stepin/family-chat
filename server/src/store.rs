@@ -577,7 +577,26 @@ pub fn disk_space(p: &Path) -> Option<(u64, u64)> {
     ))
 }
 
-#[cfg(not(unix))]
+/// Free and total bytes of the volume holding `p` (Windows): the free space
+/// counts only what this user may use (quotas), like `f_bavail` on Unix.
+#[cfg(windows)]
+pub fn disk_space(p: &Path) -> Option<(u64, u64)> {
+    use std::os::windows::ffi::OsStrExt;
+    let wide: Vec<u16> = p.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let (mut free, mut total, mut total_free) = (0u64, 0u64, 0u64);
+    // SAFETY: `wide` is a NUL-terminated UTF-16 path; the out-pointers are valid u64s.
+    let ok = unsafe {
+        windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut free,
+            &mut total,
+            &mut total_free,
+        )
+    };
+    (ok != 0).then_some((free, total))
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn disk_space(_p: &Path) -> Option<(u64, u64)> {
     None
 }
@@ -2051,6 +2070,18 @@ mod tests {
     use super::*;
 
     const DAY: u64 = MS_PER_DAY;
+
+    /// The free-space check (507) needs real numbers on every supported
+    /// system: statvfs on Unix, GetDiskFreeSpaceExW on Windows.
+    #[test]
+    fn disk_space_is_known() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (free, total) = disk_space(tmp.path()).expect("free space of the temp folder");
+        assert!(total > 0);
+        assert!(free <= total);
+        #[cfg(unix)]
+        assert!(disk_space(&tmp.path().join("no-such-folder")).is_none());
+    }
 
     #[test]
     fn reference_time_rule() {

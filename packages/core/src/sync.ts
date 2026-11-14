@@ -81,6 +81,9 @@ export class SyncEngine {
     const { ctx, session } = this.rt;
     const acc = session.accountId;
     let more: boolean = false;
+    // The first request after a start does not wait: when nothing is new the
+    // long request would keep the status at "connecting" for up to 25 s.
+    let first = true;
     this.#state.set({ kind: 'connecting' });
     while (this.#running) {
       const status = session.status.get();
@@ -96,13 +99,14 @@ export class SyncEngine {
       try {
         const account = await ctx.db.accounts.get(acc);
         if (!account) return;
-        const wait: number = more || !account.initialSyncDone ? 0 : ctx.waitSeconds;
+        const wait: number = first || more || !account.initialSyncDone ? 0 : ctx.waitSeconds;
         this.#abort = new AbortController();
         const signal = this.#abort.signal;
         const page: EventsPage = await session.call((t) =>
           session.transport.events(t, { after: account.cursor, limit: EVENTS_PAGE_LIMIT, wait }, signal),
         );
         this.#abort = undefined;
+        first = false;
         this.#failures = 0;
         this.#offlineSince = undefined;
         if (this.#state.get().kind !== 'connected') this.#state.set({ kind: 'connected', since: ctx.clock.now() });

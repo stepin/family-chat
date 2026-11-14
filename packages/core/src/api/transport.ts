@@ -122,6 +122,7 @@ export class Transport {
       protocol: num(o, 'protocol'),
       server: str(o, 'server'),
       version: str(o, 'version'),
+      commit: typeof o.commit === 'string' && /^[0-9a-f]{1,40}$/.test(o.commit) ? o.commit : null,
       serverId: str(o, 'serverId'),
       familyName: str(o, 'familyName'),
       retentionDays: num(o, 'retentionDays'),

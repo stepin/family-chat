@@ -185,7 +185,10 @@ fn binary_prints_code_once_locks_folder_and_stops_on_sigterm() {
     let data = tmp.path().to_str().unwrap();
     let args = ["--data", data, "--listen", "127.0.0.1", "--port", "0"];
 
+    // Stopping by signal (below) is Unix-only; elsewhere `first` is never mutated.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut first = Proc::spawn(&args);
+    let listen_line = first.wait_line("слушаю", Duration::from_secs(20));
     let code_line = first.wait_line("код администратора:", Duration::from_secs(20));
     let code = code_line.rsplit(' ').next().unwrap().to_string();
     assert_eq!(code.len(), 19, "{code_line}");
@@ -194,6 +197,25 @@ fn binary_prints_code_once_locks_folder_and_stops_on_sigterm() {
     assert_eq!(second.wait_exit(Duration::from_secs(10)), 1);
     let out = second.all_output();
     assert!(out.contains("уже используется другим процессом fcd"), "{out}");
+
+    // `fcd healthcheck` against the running server (port from the line it printed).
+    let port = listen_line
+        .rsplit(':')
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let check = |port: &str| {
+        Command::new(env!("CARGO_BIN_EXE_fcd"))
+            .args(["healthcheck", "--data", data, "--listen", "127.0.0.1", "--port", port])
+            .output()
+            .unwrap()
+    };
+    let ok = check(&port);
+    assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stderr));
+    assert!(String::from_utf8_lossy(&ok.stdout).contains("отвечает"));
 
     #[cfg(unix)]
     {
@@ -205,6 +227,8 @@ fn binary_prints_code_once_locks_folder_and_stops_on_sigterm() {
         assert_eq!(first.wait_exit(Duration::from_secs(10)), 0);
         let out = first.all_output();
         assert!(out.contains("остановлен"), "{out}");
+        let down = check(&port);
+        assert_eq!(down.status.code(), Some(1), "healthcheck of a stopped server fails");
 
         // Restart: no code is printed again.
         let mut again = Proc::spawn(&args);

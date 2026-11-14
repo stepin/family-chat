@@ -14,7 +14,11 @@
     "test:integration": "pnpm --filter @family-chat/core run test:integration",
     "test:e2e": "pnpm --filter @family-chat/web run test:e2e",
     "test:e2e:fcd": "pnpm --filter @family-chat/web run test:e2e:fcd",
-    "test:e2e:big": "pnpm --filter @family-chat/web run test:e2e:big"
+    "test:e2e:big": "pnpm --filter @family-chat/web run test:e2e:big",
+    "test:e2e:site": "pnpm --filter @family-chat/site run test:e2e",
+    "site:preview": "pnpm --filter @family-chat/site run preview",
+    "site:screenshots": "pnpm --filter @family-chat/site run screenshots",
+    "release": "bash scripts/release.sh"
   },
   "devDependencies": {
     "typescript": "^6.0.3"

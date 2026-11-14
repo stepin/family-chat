@@ -63,9 +63,10 @@ describe('Transport', () => {
       m0: false,
     };
     const { t, calls } = client(() => json(hello));
-    // An M1 server sends no limits: the defaults of docs/API.md 1.7 fill in.
+    // An M1 server sends no limits and no commit: the defaults of docs/API.md 1.7 fill in.
     expect(await t.hello()).toEqual({
       ...hello,
+      commit: null,
       maxPartBytes: 4194560,
       maxBlobBytes: 200 * 1048576 + 65536,
       maxAvatarBytes: 262144,
@@ -77,6 +78,12 @@ describe('Transport', () => {
     expect(calls[0]!.init.credentials).toBe('omit');
     expect(calls[0]!.init.cache).toBe('no-store');
     expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBeUndefined();
+
+    // M6: the build commit, accepted only as hex.
+    const withCommit = client(() => json({ ...hello, commit: '0123456789ab' }));
+    expect((await withCommit.t.hello()).commit).toBe('0123456789ab');
+    const badCommit = client(() => json({ ...hello, commit: '<b>x</b>' }));
+    expect((await badCommit.t.hello()).commit).toBeNull();
   });
 
   it('join, challenge, auth/device', async () => {

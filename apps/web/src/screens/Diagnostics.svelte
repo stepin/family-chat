@@ -14,9 +14,25 @@
 
   onMount(() => follow(app.core.diagnostics, (list) => (entries = [...list].reverse().slice(0, 200))));
 
+  /** One line per family server: its version, or why it is unknown. */
+  async function serverLines(): Promise<string[]> {
+    return Promise.all(
+      app.accounts.map(async (a) => {
+        try {
+          const h = await app.core.serverInfo(a.serverUrl);
+          return `${t.settings.serverVersion(h.version, h.commit)}: ${a.serverUrl}`;
+        } catch {
+          return `${t.diagnostics.serverUnknown}: ${a.serverUrl}`;
+        }
+      }),
+    );
+  }
+
   async function copyReport(): Promise<void> {
     const report = await app.core.diagnosticsReport();
-    const header = `Family Chat ${__APP_VERSION__}\n${navigator.userAgent}\n\n`;
+    const servers = await serverLines();
+    const commit = __APP_COMMIT__ ? ` (${__APP_COMMIT__})` : '';
+    const header = `Family Chat ${__APP_VERSION__}${commit}\n${servers.map((l) => `${l}\n`).join('')}${navigator.userAgent}\n\n`;
     status = (await copyText(header + report)) ? t.common.copied : t.common.copyFailed;
   }
 

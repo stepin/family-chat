@@ -159,6 +159,22 @@ async fn serves_https_with_own_certificate() {
         !matches!(r, Ok(Ok(ref res)) if res.status() == 200),
         "plain HTTP must not work"
     );
+
+    // `fcd healthcheck` finds out that the port speaks TLS and still gets the hello.
+    let out = tokio::task::spawn_blocking({
+        let port = port.to_string();
+        move || {
+            Command::new(env!("CARGO_BIN_EXE_fcd"))
+                .args(["healthcheck", "--listen", "127.0.0.1", "--port", &port])
+                .output()
+                .unwrap()
+        }
+    })
+    .await
+    .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{text}");
+    assert!(text.contains("отвечает"), "{text}");
 }
 
 #[test]

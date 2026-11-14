@@ -26,6 +26,14 @@ async fn hello_reports_server_info() {
     assert!(res.header("set-cookie").is_none());
     let j = res.json();
     assert_eq!(j["protocol"], 1);
+    assert_eq!(j["version"], env!("CARGO_PKG_VERSION"));
+    // The build commit (M6): what `fcd --version` shows, or null when unknown.
+    if fcd::GIT_COMMIT.is_empty() {
+        assert!(j["commit"].is_null());
+    } else {
+        assert_eq!(j["commit"], fcd::GIT_COMMIT);
+        assert!(fcd::VERSION_LINE.contains(fcd::GIT_COMMIT));
+    }
     assert_eq!(j["serverId"], srv.dir.server.server_id.as_str());
     assert_eq!(j["familyName"], "Ивановы");
     assert_eq!(j["retentionDays"], 30);

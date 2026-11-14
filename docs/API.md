@@ -1,4 +1,4 @@
-# API сервера `fcd` (этапы M2-M5)
+# API сервера `fcd` (этапы M2-M6)
 
 Документ описывает HTTP API сервера `fcd` версии 0.1 (протокол `1`) так, чтобы по нему одному можно было написать клиент. Форматы шифрования событий, состояния группы, запечатанных ключей и вложений описаны в `docs/PROTOCOL.md`: для сервера всё это непрозрачные байты.
 
@@ -137,6 +137,7 @@ Authorization: Bearer <токен устройства>
   "protocol": 1,
   "server": "fcd",
   "version": "0.1.0",
+  "commit": "3208eeb2c67a",
   "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
   "familyName": "Семья",
   "retentionDays": 90,
@@ -156,6 +157,7 @@ Authorization: Bearer <токен устройства>
 }
 ```
 
+- `commit`: коммит, из которого собран сервер (до 12 шестнадцатеричных знаков), или `null`, если неизвестен (M6). То же показывает `fcd --version`.
 - `vapidPublicKey`: открытый ключ VAPID (несжатая точка P-256, 65 байт, base64url) для `PushManager.subscribe({applicationServerKey})`; `null`, если `push` выключен.
 - `adminCodeActive`: `true`, пока код администратора ещё не использован (на сервере нет администратора). Клиент по нему выбирает экран: «введите код администратора» или «нужно приглашение».
 - `time`: часы сервера; клиент может показать предупреждение о сильном расхождении, но порядок от часов клиента не зависит.
@@ -917,6 +919,7 @@ chatId = base32( SHA-256( utf8("fc/v1/dm\n" + serverId + "\n" + lo + "\n" + hi) 
 ```json
 {
   "version": "0.1.0",
+  "commit": "3208eeb2c67a",
   "dataBytes": 1234567,
   "freeBytes": 9876543210,
   "totalBytes": 32000000000,
@@ -932,7 +935,7 @@ chatId = base32( SHA-256( utf8("fc/v1/dm\n" + serverId + "\n" + lo + "\n" + hi) 
 }
 ```
 
-`users`: число текущих участников, исключённые в него не входят (они считаются в `removedUsers`). `events`: записи журнала, служебные тоже. `chats`: все чаты, группы тоже; `groups`: из них групп. `dataBytes`: сумма размеров файлов папки данных. `freeBytes`, `totalBytes`: место файловой системы, где лежит папка (доступное непривилегированному процессу); `null` там, где сервер не умеет это узнать (Windows). Когда свободного меньше `min_free_mb` из настроек (по умолчанию 100 МБ), отправка событий, создание и смена групп, вступление, загрузка аватара и частей вложений отвечают 507.
+`users`: число текущих участников, исключённые в него не входят (они считаются в `removedUsers`). `events`: записи журнала, служебные тоже. `chats`: все чаты, группы тоже; `groups`: из них групп. `dataBytes`: сумма размеров файлов папки данных. `freeBytes`, `totalBytes`: место файловой системы, где лежит папка (доступное непривилегированному процессу); `null`, если система не сообщила их (на Linux, macOS и Windows сервер их узнаёт). Когда свободного меньше `min_free_mb` из настроек (по умолчанию 100 МБ), отправка событий, создание и смена групп, вступление, загрузка аватара и частей вложений отвечают 507.
 
 ## 11. Срок хранения
 
@@ -948,7 +951,7 @@ chatId = base32( SHA-256( utf8("fc/v1/dm\n" + serverId + "\n" + lo + "\n" + hi) 
 На каждом ответе (и клиента, и API, в том числе на ошибках и 404):
 
 - `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
-- Встроенный клиент (всё вне `/v1/`): `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https:; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`. Это политика из `apps/web/vite.config.ts` (её же сборка кладёт в `<meta>`) плюс `frame-ancestors`, который в `<meta>` не работает; совпадение проверяет тест сервера.
+- Встроенный клиент (всё вне `/v1/`): `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src blob:; font-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`. Это политика из `apps/web/vite.config.ts` (её же сборка кладёт в `<meta>`) плюс `frame-ancestors`, который в `<meta>` не работает; совпадение проверяет тест сервера.
 - Кэш клиента: файлы `assets/` (имена с хэшем) `Cache-Control: public, max-age=31536000, immutable`; `sw.js` и другие файлы, оканчивающиеся на `sw.js`, `no-store`; остальное `no-cache` с `ETag`.
 - API (`/v1/...`): `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; sandbox`, `Cache-Control: no-store` (кроме аватаров, раздел 4.4). Части вложений идут как `application/octet-stream` с `Content-Disposition: attachment`, поэтому браузер никогда не покажет их как страницу.
 
@@ -1021,6 +1024,11 @@ packs/<packId>/
 2. Заголовок `X-FC-Push: none` у `POST /v1/chats/<id>/events` (5.3) и он же в `Access-Control-Allow-Headers`.
 3. `POST …/share-target` без service worker (12.4).
 4. Сервер M4 и старые клиенты работают как прежде: старый клиент не шлёт `X-FC-Push` (его правки и реакции по-прежнему вызывают уведомления), а сообщение со стикером показывает как эмодзи.
+
+## 13c. Что добавилось в M6
+
+Только совместимые добавления: поле `commit` в `GET /v1/hello` и `GET /v1/admin/stats` (раздел 2 и 10). Команды
+сервера `fcd healthcheck` и `fcd admin list` API не меняют.
 
 ## 14. Что клиенту важно помнить
 

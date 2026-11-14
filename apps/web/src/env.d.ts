@@ -1,5 +1,7 @@
 /** Version of the web client (apps/web/package.json), set by Vite. */
 declare const __APP_VERSION__: string;
+/** Git commit of the build (12 hex digits) or an empty string, set by Vite. */
+declare const __APP_COMMIT__: string;
 
 /** The light build of lottie-web: SVG renderer only, no expressions (M5 stickers). */
 declare module 'lottie-web/build/player/esm/lottie_light.min.js' {

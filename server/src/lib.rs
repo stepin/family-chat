@@ -11,6 +11,7 @@ pub mod error;
 pub mod eventlog;
 pub mod groups;
 pub mod headers;
+pub mod healthcheck;
 pub mod ids;
 pub mod notice;
 pub mod packs;
@@ -31,43 +32,74 @@ use crate::assets::Assets;
 use crate::config::Overrides;
 use crate::datadir::DataDir;
 
+/// Version of this build.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Git commit of this build (12 hex digits), empty when unknown.
+pub const GIT_COMMIT: &str = env!("FCD_GIT_COMMIT");
+
+/// `0.1.0 (commit 0123456789ab)`, or `0.1.0` when the commit is unknown.
+pub const VERSION_LINE: &str = env!("FCD_VERSION_LINE");
+
+const AFTER_HELP: &str = "\
+Settings also live in <DIR>/config.toml (written at first start); flags win over the file.
+Only in config.toml: push_subject (contact sent to push services) and min_free_mb
+(below this much free disk space new messages are refused, default 100).
+
+Examples:
+  fcd --data /srv/family-chat                     first start prints the address and the admin code
+  fcd --data /srv/family-chat --port 8080 --listen 127.0.0.1
+  fcd --data /srv/family-chat --tls-cert fullchain.pem --tls-key privkey.pem
+  fcd reset-admin-code --data /srv/family-chat    (server stopped)
+  fcd admin list --data /srv/family-chat          (server stopped)
+  fcd healthcheck --data /srv/family-chat         exit code 0 when the server answers
+
+Logging: RUST_LOG=debug for more detail, NO_COLOR=1 for plain output.";
+
 #[derive(Debug, Parser)]
-#[command(name = "fcd", version, about = "Family Chat server")]
+#[command(
+    name = "fcd",
+    version = VERSION_LINE,
+    about = "Family Chat server: end-to-end encrypted family chat with the web client built in",
+    long_about = "Family Chat server: end-to-end encrypted family chat with the web client built in.\n\n\
+                  Serves the web app and the API on one port, keeps only encrypted data in the data \
+                  folder, at most --retention-days days, and sends Web Push notifications.",
+    after_help = AFTER_HELP
+)]
 pub struct Cli {
-    /// Data folder (created on first start).
+    /// Data folder: created on first start, holds everything the server keeps.
     #[arg(long, global = true, value_name = "DIR")]
     pub data: Option<PathBuf>,
-    /// HTTP port [default: 8787].
-    #[arg(long)]
+    /// TCP port for HTTP (or HTTPS with --tls-cert) [default: 8787].
+    #[arg(long, global = true)]
     pub port: Option<u16>,
-    /// Listen address [default: 0.0.0.0].
-    #[arg(long, value_name = "IP")]
+    /// IP address to listen on; 127.0.0.1 behind a reverse proxy on the same machine [default: 0.0.0.0].
+    #[arg(long, global = true, value_name = "IP")]
     pub listen: Option<String>,
-    /// Family name shown to members.
+    /// Family name shown to members [default: Семья].
     #[arg(long)]
     pub family_name: Option<String>,
-    /// Retention on the server, days, 7-90 [default: 90].
+    /// How long the server keeps messages and files, days, 7-90 [default: 90].
     #[arg(long, value_name = "DAYS")]
     pub retention_days: Option<u32>,
-    /// File size limit, MB [default: 200].
+    /// Size limit of one file (attachment), MB [default: 200].
     #[arg(long, value_name = "MB")]
     pub max_file_mb: Option<u64>,
-    /// Web Push on or off [default: true].
+    /// Web Push notifications; false: the server never contacts any outside address [default: true].
     #[arg(long, value_name = "BOOL")]
     pub push: Option<bool>,
-    /// Trust `X-Forwarded-For` from a reverse proxy [default: false].
+    /// Take the client address for rate limiting from X-Forwarded-For; only behind a reverse proxy that sets it [default: false].
     #[arg(long, value_name = "BOOL")]
     pub trust_forwarded_for: Option<bool>,
-    /// Enable the M0 check endpoints (long request, test push).
+    /// Enable the setup check endpoints used by the /server/ page (long request, test push; admin code required).
     #[arg(long)]
     pub m0: bool,
-    /// Serve the web client from this folder instead of the embedded copy.
+    /// Serve the web client from this folder instead of the built-in copy (development).
     #[arg(long, value_name = "DIR")]
     pub web_dir: Option<PathBuf>,
-    /// Serve HTTPS with this certificate chain (PEM); needs --tls-key.
+    /// Serve HTTPS with this certificate chain (PEM, server certificate first); needs --tls-key.
     #[arg(long, value_name = "PEM", requires = "tls_key")]
     pub tls_cert: Option<PathBuf>,
-    /// Private key for --tls-cert (PEM).
+    /// Private key for --tls-cert (PEM: PKCS#8, PKCS#1 or SEC1).
     #[arg(long, value_name = "PEM", requires = "tls_cert")]
     pub tls_key: Option<PathBuf>,
     #[command(subcommand)]
@@ -76,18 +108,23 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Replace the administrator code and print the new one (server must be stopped).
+    /// Replace the administrator code and print the new one (stop the server first).
     ResetAdminCode,
-    /// Administrators (server must be stopped).
+    /// Manage administrators (stop the server first).
     #[command(subcommand)]
     Admin(AdminCommand),
+    /// Check that the server on this machine answers; exit code 0 if it does, 1 if not.
+    /// Reads the port from --port or <DIR>/config.toml; works while the server runs.
+    Healthcheck,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum AdminCommand {
-    /// Make a member an administrator.
+    /// List members with their userId, name and role.
+    List,
+    /// Make a member an administrator (userId from `fcd admin list`).
     Add {
-        /// The member's userId.
+        /// The member's userId (26 characters).
         user_id: String,
     },
 }
@@ -127,10 +164,64 @@ pub fn init_tracing() {
 
 /// Entry point used by `main`. Returns the process exit code.
 pub async fn main_with(cli: Cli) -> i32 {
+    if let Some(Command::Healthcheck) = cli.command {
+        let addr = match healthcheck::target(cli.data.as_deref(), &cli.overrides()) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("ошибка: {e}");
+                return 1;
+            }
+        };
+        return match healthcheck::check(addr).await {
+            Ok(version) => {
+                println!("fcd {version} отвечает на {addr}");
+                0
+            }
+            Err(e) => {
+                eprintln!("ошибка: {e}");
+                1
+            }
+        };
+    }
+
     let Some(data) = cli.data.clone() else {
         eprintln!("ошибка: укажите папку данных: fcd --data <DIR>");
         return 2;
     };
+
+    if let Some(Command::Admin(AdminCommand::List)) = &cli.command {
+        return match DataDir::open(&data, Overrides::default()) {
+            Ok((dir, _)) => {
+                let members = dir.list_members();
+                if members.is_empty() {
+                    println!("участников пока нет");
+                }
+                for m in members {
+                    let mut flags = Vec::new();
+                    if m.admin {
+                        flags.push("администратор");
+                    }
+                    if m.removed {
+                        flags.push("отключён");
+                    }
+                    if m.revoked {
+                        flags.push("ключ отозван");
+                    }
+                    let name = m.name.as_deref().unwrap_or("(без имени)");
+                    if flags.is_empty() {
+                        println!("{}  {name}", m.user_id);
+                    } else {
+                        println!("{}  {name}  [{}]", m.user_id, flags.join(", "));
+                    }
+                }
+                0
+            }
+            Err(e) => {
+                eprintln!("ошибка: {e}");
+                1
+            }
+        };
+    }
 
     if let Some(Command::Admin(AdminCommand::Add { user_id })) = &cli.command {
         return match DataDir::open(&data, Overrides::default()).and_then(|(mut dir, _)| dir.add_admin(user_id)) {
@@ -215,7 +306,7 @@ pub async fn main_with(cli: Cli) -> i32 {
     };
     app::spawn_maintenance(state.clone());
 
-    tracing::info!("fcd {}, папка данных {}", env!("CARGO_PKG_VERSION"), dir.path.display());
+    tracing::info!("fcd {}, папка данных {}", VERSION_LINE, dir.path.display());
     tracing::info!(
         "семья «{}», срок хранения {} дн., предел файла {} МБ, push {}",
         settings.family_name,
@@ -242,10 +333,17 @@ pub async fn main_with(cli: Cli) -> i32 {
     for url in browse_urls(scheme, local) {
         tracing::info!("откройте {url}");
     }
+    if tls.is_none() {
+        tracing::info!(
+            "приложению нужен HTTPS (без него работает только http://localhost на этом компьютере): \
+             обратный прокси (Caddy, nginx, роутер, NAS) или --tls-cert и --tls-key"
+        );
+    }
     if let Some(code) = &dir.new_admin_code {
         // The only time the code is logged (docs/PLAN-v2.md, section 5).
         tracing::info!("первый запуск: папка данных создана");
         tracing::info!("код администратора: {code}");
+        tracing::info!("дальше: откройте приложение, нажмите «Настроить для своей семьи» и введите этот код");
         tracing::info!("код показывается один раз; новый: fcd reset-admin-code --data <DIR> при остановленном сервере");
     }
 
@@ -311,7 +409,22 @@ async fn shutdown_signal() {
             Err(_) => std::future::pending::<()>().await,
         }
     };
-    #[cfg(not(unix))]
+    // Windows: closing the console window, logging off or shutting down.
+    #[cfg(windows)]
+    let term = async {
+        use tokio::signal::windows;
+        match (windows::ctrl_close(), windows::ctrl_shutdown(), windows::ctrl_logoff()) {
+            (Ok(mut close), Ok(mut shutdown), Ok(mut logoff)) => {
+                tokio::select! {
+                    _ = close.recv() => {}
+                    _ = shutdown.recv() => {}
+                    _ = logoff.recv() => {}
+                }
+            }
+            _ => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(any(unix, windows)))]
     let term = std::future::pending::<()>();
     tokio::select! {
         _ = ctrl_c => {}
@@ -319,20 +432,23 @@ async fn shutdown_signal() {
     }
 }
 
-/// Addresses to print for the owner. For `0.0.0.0` the LAN address is found
-/// with a connected UDP socket (no packet is sent).
+/// Addresses to print for the owner: the app and the check page `/server/`.
+/// For `0.0.0.0` the LAN address is found with a connected UDP socket (no
+/// packet is sent).
 fn browse_urls(scheme: &str, local: SocketAddr) -> Vec<String> {
     let port = local.port();
-    let mut out = Vec::new();
-    if local.ip().is_unspecified() {
-        out.push(format!("{scheme}://localhost:{port}/server/"));
-        if let Some(ip) = lan_ip() {
-            out.push(format!("{scheme}://{ip}:{port}/server/"));
-        }
+    let base = if local.ip().is_unspecified() {
+        lan_ip().map_or_else(
+            || format!("localhost:{port}"),
+            |ip| SocketAddr::new(ip, port).to_string(),
+        )
     } else {
-        out.push(format!("{scheme}://{local}/server/"));
-    }
-    out
+        local.to_string()
+    };
+    vec![
+        format!("{scheme}://{base}/ (приложение)"),
+        format!("{scheme}://{base}/server/ (проверка сервера)"),
+    ]
 }
 
 fn lan_ip() -> Option<IpAddr> {

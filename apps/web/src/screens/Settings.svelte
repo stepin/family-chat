@@ -12,12 +12,12 @@
   // phrase, storage and archive, security, family and server, diagnostics.
   const account = $derived(app.account!);
   const me = $derived(app.members.find((m) => m.isMe));
-  let serverVersion = $state<string | null>(null);
+  let server = $state<{ version: string; commit: string | null } | null>(null);
 
   onMount(() => {
     app.core
       .serverInfo(account.serverUrl)
-      .then((h) => (serverVersion = h.version))
+      .then((h) => (server = { version: h.version, commit: h.commit }))
       .catch(() => undefined);
   });
 </script>
@@ -72,7 +72,7 @@
     <h2 id="set-about">{t.settings.about}</h2>
     <p>{t.settings.aboutText}</p>
     <p class="muted small tabular">
-      {t.settings.version(__APP_VERSION__)}{#if serverVersion}<br />{t.settings.serverVersion(serverVersion)}{/if}
+      {t.settings.version(__APP_VERSION__, __APP_COMMIT__)}{#if server}<br />{t.settings.serverVersion(server.version, server.commit)}{/if}
     </p>
   </section>
 </Page>

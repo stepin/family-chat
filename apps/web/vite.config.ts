@@ -1,15 +1,35 @@
 import { defineConfig, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const pkg = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8')) as { version: string };
 
 /**
- * Content-Security-Policy (docs/PLAN.md 7.6), delivered in a <meta> tag in
- * M1 (fcd does not send it as a header yet). Only for the build: the dev
- * server injects inline styles. `connect-src https:` because the server
+ * Git commit shown next to the version (Settings, the diagnostics report):
+ * FCD_GIT_COMMIT (release builds, Docker), else `git rev-parse`, else empty.
+ * The same rule as server/build.rs, so client and server name the same commit.
+ */
+function gitCommit(): string {
+  const fromEnv = process.env['FCD_GIT_COMMIT'];
+  let c = fromEnv ?? '';
+  if (fromEnv === undefined) {
+    try {
+      c = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: import.meta.dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch {
+      c = '';
+    }
+  }
+  c = c.trim().slice(0, 12);
+  return /^[0-9a-f]+$/i.test(c) ? c : '';
+}
+
+/**
+ * Content-Security-Policy (docs/PLAN.md 7.6), delivered in a <meta> tag (and
+ * by fcd as a header, which adds `frame-ancestors`). Only for the build: the
+ * dev server injects inline styles. `connect-src https:` because the server
  * address can be typed by the administrator; 'self' covers plain-HTTP use on
  * the same origin. `frame-ancestors` cannot be set in <meta>. `media-src blob:`:
  * voice messages play from blob: URLs of app storage (M3). Keep in sync with
@@ -83,6 +103,7 @@ export default defineConfig({
   base: './',
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
+    __APP_COMMIT__: JSON.stringify(gitCommit()),
   },
   plugins: [
     svelte(),

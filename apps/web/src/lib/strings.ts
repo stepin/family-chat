@@ -1,4 +1,4 @@
-// Every string the interface shows. Russian only in M1; an English table can
+// Every string the interface shows. Russian only for now; an English table can
 // be added later with the same shape (`typeof ru`).
 
 import { formatBytes, formatDate, formatTime, plural } from './format.ts';
@@ -848,8 +848,8 @@ export const ru = {
     stickers: 'Стикеры',
     diagnostics: 'Диагностика',
     about: 'О приложении',
-    version: (v: string) => `Версия приложения ${v}`,
-    serverVersion: (v: string) => `Версия сервера ${v}`,
+    version: (v: string, commit = '') => `Версия приложения ${v}${commit ? ` (${commit})` : ''}`,
+    serverVersion: (v: string, commit: string | null = null) => `Версия сервера ${v}${commit ? ` (${commit})` : ''}`,
     aboutText: 'Семейный чат со сквозным шифрованием. Криптография не проходила независимый аудит.',
   },
 
@@ -938,6 +938,7 @@ export const ru = {
     checks: 'Проверки',
     deviceCheck: 'Проверить это устройство',
     serverCheck: 'Проверить сервер',
+    serverUnknown: 'Версия сервера неизвестна (нет связи)',
     outbox: (n: number) => `В очереди отправки: ${n}`,
   },
 

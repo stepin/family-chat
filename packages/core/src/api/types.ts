@@ -7,6 +7,8 @@ export interface Hello {
   readonly protocol: number;
   readonly server: string;
   readonly version: string;
+  /** Git commit of the server build (M6); null when unknown or from an older server. */
+  readonly commit: string | null;
   readonly serverId: string;
   readonly familyName: string;
   readonly retentionDays: number;

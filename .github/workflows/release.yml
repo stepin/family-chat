@@ -1,0 +1,175 @@
+name: Release
+
+# A version tag (v0.1.0) builds fcd for every target, writes SHA256SUMS,
+# creates a draft release with the archives, and pushes the multi-arch image
+# to GHCR. Run by hand (workflow_dispatch) it builds everything without
+# publishing: artefacts only, no release, no image push.
+# Only the built-in GITHUB_TOKEN is used.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FCD_GIT_COMMIT: ${{ github.sha }}
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter "@family-chat/web..." run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+          retention-days: 3
+
+  build:
+    needs: web
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rust-targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl,armv7-unknown-linux-musleabihf
+            targets: x86_64-unknown-linux-musl aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf
+            zig: true
+          - os: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            targets: aarch64-apple-darwin x86_64-apple-darwin
+            zig: false
+          - os: windows-latest
+            rust-targets: x86_64-pc-windows-msvc
+            targets: x86_64-pc-windows-msvc
+            zig: false
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+      - name: cargo-zigbuild and zig (Linux musl targets)
+        if: matrix.zig
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zig"
+          "$RUNNER_TEMP/zig/bin/pip" install cargo-zigbuild ziglang
+          echo "$RUNNER_TEMP/zig/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+      - name: Build and package
+        run: scripts/release.sh --skip-web --no-checksums --targets "${{ matrix.targets }}" --out dist/release
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      - name: Smoke test of the host build
+        run: |
+          set -euo pipefail
+          for a in dist/release/*; do
+            case "$a" in
+              *x86_64-unknown-linux-musl.tar.gz|*aarch64-apple-darwin.tar.gz) tar xzf "$a" -C "$RUNNER_TEMP" ;;
+              *x86_64-pc-windows-msvc.zip) (cd "$RUNNER_TEMP" && 7z x -y "$GITHUB_WORKSPACE/$a" >/dev/null) ;;
+            esac
+          done
+          bin="$(find "$RUNNER_TEMP" -maxdepth 2 -type f \( -name fcd -o -name fcd.exe \) | head -n 1)"
+          "$bin" --version
+          "$bin" --data "$RUNNER_TEMP/data" --listen 127.0.0.1 --port 18787 --push false > "$RUNNER_TEMP/fcd.log" 2>&1 &
+          pid=$!
+          for _ in $(seq 1 30); do "$bin" healthcheck --port 18787 && break; sleep 1; done
+          "$bin" healthcheck --port 18787
+          kill "$pid" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fcd-${{ matrix.os }}
+          path: dist/release/*
+          retention-days: 7
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fcd-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          python3 scripts/package.py sums dist
+          cat dist/SHA256SUMS
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          # The section of this version in CHANGELOG.md, without its heading.
+          awk -v v="$version" '
+            /^## \[/ { if (on) exit; if (index($0, "[" v "]")) { on = 1; next } }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          gh release create "$TAG" --draft --title "Family Chat $version" --notes-file notes.md dist/*
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version from Cargo.toml
+        id: version
+        run: echo "version=$(sed -n 's/^version = "\(.*\)"$/\1/p' server/Cargo.toml | head -n 1)" >> "$GITHUB_OUTPUT"
+      # Every compiling stage runs on the runner's platform and cross-compiles
+      # (Dockerfile, tonistiigi/xx): no QEMU emulation is needed.
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/fcd
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=sha
+      - uses: docker/login-action@v3
+        if: github.ref_type == 'tag'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: ${{ github.ref_type == 'tag' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            FCD_VERSION=${{ steps.version.outputs.version }}
+            FCD_GIT_COMMIT=${{ github.sha }}
+            SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

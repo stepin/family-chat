@@ -1,0 +1,19 @@
+[Unit]
+Description=Family Chat server (fcd)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=fcd
+Group=fcd
+ExecStart=/usr/local/bin/fcd --data /var/lib/family-chat --listen 127.0.0.1
+Restart=on-failure
+TimeoutStopSec=20
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/family-chat
+
+[Install]
+WantedBy=multi-user.target

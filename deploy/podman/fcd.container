@@ -1,0 +1,21 @@
+[Unit]
+Description=Family Chat server (fcd)
+
+[Container]
+Image=registry.example.org/family-chat/fcd:latest
+ContainerName=fcd
+PublishPort=127.0.0.1:8787:8787
+Volume=fcd-data:/data
+AutoUpdate=registry
+HealthCmd=["/fcd", "healthcheck", "--data", "/data"]
+HealthInterval=30s
+HealthTimeout=15s
+HealthStartPeriod=10s
+HealthRetries=3
+
+[Service]
+Restart=always
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

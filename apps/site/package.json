@@ -1,10 +1,23 @@
 {
   "name": "@family-chat/site",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "preview": "node serve.mjs dist 4180",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test test/site.test.mjs",
+    "test:e2e": "playwright test",
+    "screenshots": "playwright test -c playwright.screenshots.config.ts"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@family-chat/web": "workspace:*",
+    "@playwright/test": "^1.65.0",
+    "@types/node": "^24.19.2",
+    "marked": "^18.2.0",
+    "typescript": "^6.0.3"
   }
 }

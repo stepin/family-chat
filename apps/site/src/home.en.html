@@ -1,0 +1,81 @@
+<header>
+<h1>A family chat on your own server</h1>
+<p class="lead">Family Chat: your family's messages on a program that runs in your home. Messages are encrypted on the phone; the server stores only ciphertext.</p>
+<p>For one family, from two to twenty people. An administrator (usually one of the parents) runs the server, everybody else joins with an invitation link. No phone number and no app store: the app opens in the browser and installs on the phone's home screen. The app is in Russian for now.</p>
+<div class="actions">
+<a class="button" href="{{root}}en/install/">Install the server</a>
+<a class="button secondary" href="{{root}}en/family/">Family guide</a>
+</div>
+<p class="muted">Version {{version}}, an early one. The cryptography has not been independently audited, and the server has seen little testing on home routers and NAS devices so far.</p>
+</header>
+
+<section class="wide" aria-labelledby="look">
+<h2 id="look">What it looks like</h2>
+<div class="shots">
+<!--shot:chat-list|Chat list: a family group, direct chats and Saved messages|Chat list on a phone-->
+<!--shot:chat|A family group chat: messages, a reply and reactions|Group chat-->
+<!--shot:desktop|The app on a computer: chat list on the left, the open chat on the right|On a computer: two columns-->
+</div>
+<p class="muted">The screenshots are made automatically from a real server with invented data: the Sokolov family.</p>
+</section>
+
+<section aria-labelledby="what">
+<h2 id="what">What it does and does not do</h2>
+<div class="columns">
+<div>
+<h3>It does</h3>
+<ul class="yes">
+<li>Direct chats, groups and "Saved messages" for notes to yourself.</li>
+<li>Photos, files up to 200 MB (the administrator sets the limit), voice messages up to 10 minutes, places without loading a map.</li>
+<li>Replies, edits, delete for everyone, reactions, emoji, stickers, forwarding.</li>
+<li>Search through the history. It runs on the device; the query goes nowhere.</li>
+<li>Notifications about new messages (Web Push). On iPhone only for the app on the home screen.</li>
+<li>End-to-end encryption: text, files and group names are encrypted on the device.</li>
+<li>Several families (servers) in one app.</li>
+<li>Works on iPhone, Android and computers as a web app (PWA).</li>
+</ul>
+</div>
+<div>
+<h3>It does not do or promise</h3>
+<ul class="no">
+<li>No calls or video calls. No read receipts and no "typing…".</li>
+<li>The server keeps messages for at most 90 days (or less). Everything older lives only on devices and in archive files.</li>
+<li>Lost a phone without the 24 recovery words and without an archive: the older history is gone.</li>
+<li>Whoever runs the server sees who writes to whom and when (but not what). If the app is loaded from their server, they can technically replace it.</li>
+<li>No forward secrecy: a stolen device reveals what is on the server and its own archive.</li>
+<li>The server does not obtain an HTTPS certificate by itself: you need a reverse proxy, a router with HTTPS, or your own certificate files.</li>
+<li>One device gets notifications from one family only.</li>
+</ul>
+</div>
+</div>
+<p>In detail, what the server sees and what encryption does not protect: <a href="{{root}}en/security/">Security</a>.</p>
+</section>
+
+<section aria-labelledby="how">
+<h2 id="how">How it works</h2>
+<ol class="steps">
+<li><strong>A server at home.</strong> One program, <code>fcd</code>, and one data folder, no database. Any computer that runs around the clock will do: a mini PC, NAS, Raspberry Pi, home server or VPS. There are builds for Linux (x86_64, ARM64, ARMv7), macOS, Windows and a Docker image.</li>
+<li><strong>HTTPS.</strong> The browser requires a secure connection for encryption, notifications and installing the app. Usually a reverse proxy provides it (Caddy, nginx, a NAS, a router).</li>
+<li><strong>The family.</strong> The administrator opens the server address, enters the code from the server log, writes down the 24 recovery words and creates invitations. Each invitation works for one person for 7 days.</li>
+<li><strong>Chatting.</strong> A relative opens the link, installs the app, enters a name and writes. History lives on their device; the server passes on what is new and deletes it after 90 days.</li>
+</ol>
+</section>
+
+<section aria-labelledby="download">
+<h2 id="download">Download</h2>
+{{#repo}}
+<p>Ready-made <code>fcd</code> files for each system, checksums and the Docker image: <a href="{{releases}}">releases page</a>. How to pick a file and run it: <a href="{{root}}en/install/">Install</a>.</p>
+{{/repo}}
+{{^repo}}
+<p>Ready-made <code>fcd</code> files will appear on the releases page once the project is published. Until then the server is built from source: the commands are on the <a href="{{root}}en/install/">Install</a> page.</p>
+{{/repo}}
+</section>
+
+{{#app}}
+<section aria-labelledby="hosted">
+<h2 id="hosted">The app from the project address</h2>
+<p>Normally the app opens from your server's address: it is simpler, and the server and the app always have the same version. But then whoever runs the server can technically replace the app's code and steal the keys.</p>
+<p>If you do not want to trust the server administrator with that, open the same app from here: <a href="{{root}}app/">the Family Chat app</a>. It is built from the same source code. Sign in as usual: paste the whole invitation (it contains the server address), or the server address and your 24 words. Then the server sees only ciphertext, and you trust this site and those who publish it instead.</p>
+<p class="muted">An app from another address has its own browser storage: it does not see the history of the app from your server's address; move it with an archive file. Notifications in this setup have not been tested.</p>
+</section>
+{{/app}}

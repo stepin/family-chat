@@ -1,47 +1,95 @@
 # Family Chat
 
-Семейный чат со сквозным шифрованием. Сервер `fcd` (Rust) запускается дома, хранит только шифртекст не дольше 90
-дней и сам отдаёт веб-клиент (PWA) со своего адреса. План: [`docs/PLAN-v2.md`](docs/PLAN-v2.md) (поверх
-[`docs/PLAN.md`](docs/PLAN.md)), отложенное: [`TODOS.md`](TODOS.md).
+Семейный чат со сквозным шифрованием на своём сервере. Сервер `fcd` (один исполняемый файл на Rust, без базы
+данных) запускается дома, хранит только шифр и не дольше 90 дней, и сам отдаёт веб-приложение (PWA) для iPhone,
+Android и компьютера. Вход по приглашению, без номеров телефонов. История живёт на устройствах.
 
-Этап M1: администратор настраивает семью и приглашает родственников ссылкой, родственники переписываются в личных
-чатах с телефонов. Документы: API сервера [`docs/API.md`](docs/API.md), криптография
-[`docs/PROTOCOL.md`](docs/PROTOCOL.md), проверка сервера и HTTPS [`docs/M0v2.md`](docs/M0v2.md).
+*In English:* an end-to-end encrypted family chat on your own server. One Rust binary with the web app built in,
+no database, messages kept on the server for at most 90 days. The app is in Russian for now. Documentation in
+English: [installation](docs/en/ADMIN.md), [family guide](docs/en/FAMILY.md), [security](docs/en/SECURITY-MODEL.md),
+[FAQ](docs/en/FAQ.md).
 
-## Запуск
+## Статус
 
-```bash
-fcd --data /path/to/family-chat-data
+Версия 0.1, первая публичная. Сделано всё задуманное для первой версии: личные чаты и группы, файлы до 200 МБ,
+голосовые, место, реакции, ответы, правка, удаление, пересылка, поиск, стикеры, уведомления, несколько семей,
+архив переписки. Криптография собственная и **не проходила независимый аудит**. На роутерах, NAS и одноплатных
+компьютерах сервер пока проверялся мало. Формат папки данных и API могут меняться; сервер сам обновляет папку
+старой версии.
+
+## Быстрый старт
+
+Docker (образ будет опубликован вместе с первым выпуском):
+
+```sh
+docker run -d --name fcd --restart unless-stopped \
+  -p 127.0.0.1:8787:8787 -v fcd-data:/data \
+  registry.example.org/family-chat/fcd:latest
+docker logs fcd 2>&1 | grep 'код администратора'
 ```
 
-При первом запуске сервер печатает адрес и код администратора. Откройте адрес по HTTPS (обратный прокси, см.
-`docs/M0v2.md`), нажмите «Настроить для своей семьи» и введите код. Образ Docker собирается из корня: `Dockerfile`.
+Готовый файл для своей системы со страницы выпусков (https://code.example.org/family-chat/releases):
 
-## Структура
+```sh
+tar xzf fcd-<версия>-x86_64-unknown-linux-musl.tar.gz
+./fcd-<версия>-x86_64-unknown-linux-musl/fcd --data ./family-chat-data
+```
 
-```
-server              сервер fcd на Rust: API, хранение, очистка, Web Push, встроенный клиент
-packages/protocol   идентичность, шифрование, форматы событий
-packages/core       ядро клиента без DOM: API, локальная база, синхронизация, очередь отправки
-apps/web            веб-клиент (Svelte 5, PWA); страницы проверки /device/ и /server/
-apps/site           статичный сайт (заглушка до M6)
-```
+При первом запуске сервер печатает адрес и одноразовый код администратора. Приложению нужен HTTPS: поставьте перед
+сервером обратный прокси (Caddy, nginx, NAS) или дайте ему свои файлы сертификата. Затем откройте адрес, нажмите
+«Настроить для своей семьи» и введите код. Подробно: [установка сервера](docs/ADMIN.md).
+
+## Документация
+
+Источник документации один: Markdown в `docs/`. Тот же текст собирается в сайт проекта (`apps/site`).
+
+| Для кого | Документ |
+|---|---|
+| Администратор | [Установка сервера](docs/ADMIN.md): загрузка, Docker, Podman, systemd, HTTPS, обновление, резервная копия |
+| Семья | [Памятка для семьи](docs/FAMILY.md): приглашение, iPhone и Android, 24 слова, архив, несколько семей |
+| Все | [Безопасность](docs/SECURITY-MODEL.md): что видит сервер и от чего шифрование не защищает |
+| Все | [Вопросы и решения](docs/FAQ.md) |
+| Разработчики | [Протокол](docs/PROTOCOL.md), [API сервера](docs/API.md), [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Выпуск | [docs/RELEASING.md](docs/RELEASING.md), [CHANGELOG.md](CHANGELOG.md) |
+| Уязвимости | [SECURITY.md](SECURITY.md) |
+
+План проекта: [`docs/PLAN-v2.md`](docs/PLAN-v2.md) поверх [`docs/PLAN.md`](docs/PLAN.md), отложенное:
+[`TODOS.md`](TODOS.md).
 
 ## Разработка
 
-Нужны Node 22+, pnpm 11, Rust (stable).
+Нужны Node.js 22 или новее, pnpm 11 и Rust (stable).
 
-```bash
+```sh
 pnpm install
 pnpm typecheck
-pnpm test                 # модульные тесты всех пакетов
-pnpm build
+pnpm test                 # модульные тесты всех пакетов и сайта
+pnpm build                # протокол, ядро, веб-приложение, сайт
+cd server && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked && cd ..
 pnpm test:integration     # ядро против настоящего fcd
-pnpm test:e2e             # клиент в Chromium против настоящего fcd (Playwright)
+pnpm test:e2e             # приложение в Chromium против настоящего fcd (Playwright)
 pnpm test:e2e:fcd         # страница /server/ против fcd --m0
-cd server && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
+pnpm test:e2e:site        # сайт: доступность, клавиатура, 360 px, приложение в app/
+pnpm site:preview         # собранный сайт на http://127.0.0.1:4180/
 ```
 
-`pnpm test:e2e` сам собирает клиент и `fcd`; готовый бинарник можно передать через `FCD_BIN=/путь/к/fcd`.
+Тесты с `fcd` сами собирают приложение и сервер; готовый бинарник можно передать через `FCD_BIN=/путь/к/fcd`.
+Подробнее о сборке, тестах и изменениях протокола: [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Лицензия: MIT.
+## Устройство репозитория
+
+```
+server              сервер fcd на Rust: API, хранение, очистка, Web Push, встроенное приложение
+packages/protocol   идентичность, шифрование, форматы событий (TypeScript, без ввода-вывода)
+packages/core       ядро клиента без DOM: API, локальная база, синхронизация, очередь отправки
+apps/web            веб-приложение (Svelte 5, PWA); страницы проверки /device/ и /server/
+apps/site           сайт проекта: страницы из docs/, снимки экрана, приложение в app/
+docs                документация, протокол, API, тестовые векторы
+deploy              примеры: systemd, Podman Quadlet, Caddy, nginx
+scripts             сборка выпуска (release.sh)
+Dockerfile          образ сервера (scratch, несколько архитектур); compose.yaml рядом
+```
+
+## Лицензия
+
+MIT, текст в [LICENSE](LICENSE).

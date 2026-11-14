@@ -85,6 +85,27 @@ describe('sync engine', () => {
     expect(rt.sync.state.get().kind).toBe('connected');
   });
 
+  it('after a restart with nothing new it is connected at once: the first request does not wait', async () => {
+    const { server, b } = await pair();
+    b.rt.start();
+    await eventually(async () => (await b.ctx.db.accounts.get(b.row.id))?.initialSyncDone, 4000, 'initial sync');
+    await b.rt.stop();
+    runtimes.splice(runtimes.indexOf(b.rt), 1);
+
+    const urls: string[] = [];
+    const ctx = makeCtx(
+      { ...server, fetch: (u: string, init: RequestInit) => (urls.push(u), server.fetch(u, init)) } as unknown as FakeServer,
+      b.ctx.db,
+    );
+    const rt = new AccountRuntime(ctx, (await ctx.db.accounts.get(b.row.id))!);
+    runtimes.push(rt);
+    rt.start();
+    await eventually(() => rt.sync.state.get().kind === 'connected', 2000, 'connected without a long wait');
+    const ev = urls.filter((u) => u.includes('/v1/events'));
+    expect(ev[0]).not.toContain('wait=');
+    await eventually(() => urls.some((u) => u.includes('wait=25')), 2000, 'then long polls');
+  });
+
   it('skips events that fail verification and records them', async () => {
     const { server, a, b, chatId } = await pair();
     const good = await encodeFrom(a, server, b.row.userId, { seq: 1, body: 'ok' });

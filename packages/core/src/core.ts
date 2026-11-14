@@ -3,7 +3,7 @@
 // queries, so changes made by another tab or worker show up too.
 //
 // No DOM: it needs fetch, IndexedDB, WebCrypto and timers, all present in a
-// worker. In M1 it may run on the main thread.
+// worker. The web client runs it on the main thread.
 
 import { dmChatId, fingerprint, type AvatarRef, type IdentityKeys, type Location, type MsgRef, type PackSticker, type StickerRef } from '@family-chat/protocol';
 import { Dexie, liveQuery } from 'dexie';

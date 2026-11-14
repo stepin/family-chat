@@ -1,5 +1,5 @@
 // Application state shared by all screens: the core (one per page, on the
-// main thread in M1), the boot phase, the pending invitation, the update
+// main thread), the boot phase, the pending invitation, the update
 // banner and short notices.
 
 import {

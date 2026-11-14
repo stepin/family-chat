@@ -336,8 +336,11 @@
     align-items: flex-end;
   }
 
+  /* nowrap: the global .row utility (styles/app.css) wraps, which put the "⋯"
+     button on a line of its own under wide bubbles, an empty gap on phones. */
   .row {
     display: flex;
+    flex-wrap: nowrap;
     align-items: center;
     gap: var(--sp-1);
     max-width: 100%;
@@ -526,6 +529,7 @@
 
   .bubble {
     max-width: 100%;
+    min-width: 0;
     padding: var(--sp-2) var(--sp-3);
     border-radius: var(--r-l);
     background: var(--surface);

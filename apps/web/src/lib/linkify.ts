@@ -1,4 +1,4 @@
-// Message text is plain text in M1. It is rendered as text nodes; only links
+// Message text is plain text. It is rendered as text nodes; only links
 // with the schemes below become clickable. Nothing is ever inserted as HTML.
 
 export type Segment = { readonly kind: 'text'; readonly text: string } | { readonly kind: 'link'; readonly text: string; readonly href: string };

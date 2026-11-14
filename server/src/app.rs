@@ -222,7 +222,8 @@ async fn hello(State(st): State<Arc<AppState>>) -> Response {
     Json(json!({
         "protocol": PROTOCOL_VERSION,
         "server": "fcd",
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": crate::VERSION,
+            "commit": (!crate::GIT_COMMIT.is_empty()).then_some(crate::GIT_COMMIT),
         "serverId": st.server_id,
         "familyName": s.family_name,
         "retentionDays": s.retention_days,

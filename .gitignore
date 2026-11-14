@@ -10,3 +10,4 @@ playwright-report/
 .claude/worktrees/
 target/
 playwright-report-fcd/
+playwright-report-site/

@@ -2,6 +2,9 @@
 name = "fcd"
 version = "0.1.0"
 edition = "2024"
+description = "Family Chat server: end-to-end encrypted family chat on your own computer"
+license = "MIT"
+publish = false
 
 [dependencies]
 aes-gcm = "0.11.1"
@@ -15,10 +18,9 @@ http-body-util = "0.1.5"
 hyper = { version = "1.12.0", features = ["client", "http1"] }
 hyper-rustls = { version = "0.27.10", default-features = false, features = ["http1", "tls12", "ring", "webpki-roots"] }
 hyper-util = { version = "0.1.21", features = ["client-legacy", "http1", "tokio"] }
-libc = "0.2.191"
 mime_guess = "2.0.5"
 p256 = { version = "0.14.0", features = ["ecdh", "ecdsa"] }
-rust-embed = { version = "8.14.0", features = ["mime-guess"] }
+rust-embed = { version = "8.14.0", features = ["mime-guess", "deterministic-timestamps"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
@@ -30,6 +32,13 @@ toml = "1.2.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std", "ansi"] }
 webpki-roots = "1.0.12"
+
+# Free space on the data disk (the 507 check and the admin statistics).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.191"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

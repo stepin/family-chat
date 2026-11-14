@@ -909,7 +909,6 @@ async fn admin_stats() {
     assert_eq!(s["users"], 2);
     assert_eq!(s["chats"], 1);
     assert!(s["dataBytes"].as_u64().unwrap() > 0);
-    #[cfg(unix)]
     assert!(s["freeBytes"].as_u64().unwrap() > 0);
     assert_eq!(papa.get(&srv, "/v1/admin/stats").await.status, 403);
     let res = mama.send(&srv, "PATCH", "/v1/admin/stats", None).await;
@@ -1079,4 +1078,39 @@ async fn push_disabled_refuses_subscriptions() {
     let res = mama.send(&srv, "PUT", "/v1/me/push", Some(&sub)).await;
     assert_eq!(res.status, 409);
     assert_eq!(res.json()["error"], "push_disabled");
+}
+
+/// `fcd admin list` shows userId, name and role; `fcd admin add` makes a
+/// member an administrator (both with the server stopped).
+#[tokio::test]
+async fn admin_list_and_add_from_the_command_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path().to_path_buf();
+    let srv = start(&data, false, Overrides::default()).await;
+    let (mama, papa) = family(&srv).await;
+    srv.stop().await;
+
+    let run = |args: &[&str]| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_fcd"))
+            .args(args)
+            .args(["--data", data.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let list = run(&["admin", "list"]);
+    let line = |who: &str| list.lines().find(|l| l.contains(who)).unwrap_or_default().to_string();
+    assert!(line("Мама").starts_with(&mama.user.to_string()), "{list}");
+    assert!(line("Мама").contains("[администратор]"), "{list}");
+    assert!(line("Папа").starts_with(&papa.user.to_string()), "{list}");
+    assert!(!line("Папа").contains("администратор"), "{list}");
+
+    assert!(run(&["admin", "add", &papa.user.to_string()]).contains("теперь администратор"));
+    let list = run(&["admin", "list"]);
+    assert!(
+        list.lines()
+            .any(|l| l.contains("Папа") && l.contains("[администратор]")),
+        "{list}"
+    );
 }

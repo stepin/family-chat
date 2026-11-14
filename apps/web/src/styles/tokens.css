@@ -2,7 +2,7 @@
  * Design tokens (docs/PLAN.md 8.8). Colours only through these variables.
  * Light and dark follow the system. Contrast of text >= 4.5:1 and of large
  * text and icons >= 3:1 in both themes (docs/PLAN.md 8.7).
- * M1 uses the system font stack: nothing is downloaded.
+ * The system font stack: nothing is downloaded.
  */
 :root {
   color-scheme: light dark;

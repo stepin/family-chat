@@ -29,7 +29,7 @@ pub const LOCK_FILE: &str = "fcd.lock";
 pub const SERVER_FILE: &str = "server.json";
 pub const VAPID_FILE: &str = "vapid.json";
 pub const CONFIG_FILE: &str = "config.toml";
-/// Directories created now for the layout of section 6; filled from M1 on.
+/// Directories of the layout in docs/PLAN-v2.md, section 6.
 /// `packs/` (M5, sticker packs) is an addition: older builds ignore it.
 pub const DIRS: [&str; 7] = ["users", "invites", "chats", "log", "blobs", "packs", "tmp"];
 
@@ -222,6 +222,54 @@ impl DataDir {
     pub fn check_admin_code(&self, candidate: &str) -> bool {
         check_admin_code(&self.server.admin_code_hash, candidate)
     }
+
+    /// Members as stored in `users/` (for `fcd admin list`): userId, the
+    /// name from the signed profile, and the flags. Sorted by name.
+    pub fn list_members(&self) -> Vec<MemberLine> {
+        let mut out = Vec::new();
+        let Ok(rd) = fs::read_dir(self.path.join("users")) else {
+            return out;
+        };
+        for e in rd.flatten() {
+            let dir = e.path();
+            let Some(id) = e.file_name().to_str().and_then(crate::ids::UserId::parse) else {
+                continue;
+            };
+            let read = |f: &str| -> Option<crate::envelope::Envelope> {
+                serde_json::from_slice(&fs::read(dir.join(f)).ok()?).ok()
+            };
+            let Some(identity) = read("identity.json").and_then(|env| crate::envelope::verify_identity(&env).ok())
+            else {
+                continue;
+            };
+            if identity.user_id != id {
+                continue;
+            }
+            let name = read("profile.json")
+                .and_then(|env| crate::envelope::verify_profile(&env, &id, &identity.key).ok())
+                .map(|p| p.name);
+            let user_id = id.to_string();
+            out.push(MemberLine {
+                admin: self.server.admins.contains(&user_id),
+                removed: dir.join("removed").exists(),
+                revoked: dir.join("revoked.json").exists(),
+                user_id,
+                name,
+            });
+        }
+        out.sort_by(|a, b| (&a.name, &a.user_id).cmp(&(&b.name, &b.user_id)));
+        out
+    }
+}
+
+/// One line of `fcd admin list`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemberLine {
+    pub user_id: String,
+    pub name: Option<String>,
+    pub admin: bool,
+    pub removed: bool,
+    pub revoked: bool,
 }
 
 fn acquire_lock(dir: &Path) -> Result<File, OpenError> {

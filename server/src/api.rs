@@ -845,7 +845,8 @@ pub async fn stats(State(st): State<Arc<AppState>>, Admin(_): Admin) -> Result<R
         .map_err(|_| ApiError::internal("stats failed"))?;
     let v = st.store.read(|m| {
         json!({
-            "version": env!("CARGO_PKG_VERSION"),
+            "version": crate::VERSION,
+            "commit": (!crate::GIT_COMMIT.is_empty()).then_some(crate::GIT_COMMIT),
             "dataBytes": data_bytes,
             "freeBytes": space.map(|s| s.0),
             "totalBytes": space.map(|s| s.1),
