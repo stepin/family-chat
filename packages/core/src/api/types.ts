@@ -101,6 +101,8 @@ export interface ServerEvent {
   readonly epoch: number;
   readonly msgId: string;
   readonly body: Uint8Array;
+  /** Deleted for everyone on the server (M4): the body is empty, only the header is left. */
+  readonly deleted?: true;
 }
 
 /** A server notice (docs/API.md 7): unencrypted, written by the server itself. */
@@ -138,7 +140,9 @@ export type NoticeBody =
       readonly version: number;
       readonly epoch: number;
     }
-  | { readonly type: 'member_removed' | 'member_revoked'; readonly userId: string };
+  | { readonly type: 'member_removed' | 'member_revoked'; readonly userId: string }
+  /** An event was deleted for everyone on the server (M4). A hint only: local copies go away by the signed `delete` payload. */
+  | { readonly type: 'event_deleted'; readonly gseq: number; readonly senderId: string; readonly msgId: string; readonly by: string };
 
 export interface EventsPage {
   /** Encrypted events of members (`kind: "event"`). */

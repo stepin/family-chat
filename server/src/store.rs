@@ -180,11 +180,18 @@ pub struct Entry {
     pub day: i64,
     pub offset: u64,
     pub size: u32,
+    /// Deleted for everyone: the body on disk is zeros (eventlog.rs).
+    pub deleted: bool,
 }
 
 impl Entry {
+    /// Bytes of the body a response carries (none for a deleted record).
     pub fn body_len(&self) -> usize {
-        self.size as usize - 4 - eventlog::FIXED
+        if self.deleted {
+            0
+        } else {
+            self.size as usize - 4 - eventlog::FIXED
+        }
     }
 }
 
@@ -377,6 +384,10 @@ struct Shared {
     changes: watch::Sender<u64>,
     nonces: Mutex<HashMap<String, u64>>,
     blobs: BlobStore,
+    /// Body reads take it shared; an in-place overwrite of a record (delete
+    /// for everyone) takes it exclusively, so no reader sees a half-zeroed
+    /// record.
+    io: RwLock<()>,
 }
 
 type Job = Box<dyn FnOnce(&mut Writer) + Send>;
@@ -522,6 +533,11 @@ pub fn invite_hash(code: &str) -> String {
     hex(&Sha256::digest(code.trim().to_ascii_lowercase().as_bytes()))
 }
 
+/// `log/<day>.del`: the deleted records of that day (eventlog.rs).
+pub fn del_path(root: &Path, day: i64) -> PathBuf {
+    root.join("log").join(format!("{}.del", day_name(day)))
+}
+
 pub fn segment_path(root: &Path, day: i64) -> PathBuf {
     root.join("log").join(format!("{}.seg", day_name(day)))
 }
@@ -649,6 +665,7 @@ impl Store {
             changes,
             nonces: Mutex::new(HashMap::new()),
             blobs,
+            io: RwLock::new(()),
         });
         let (tx, rx) = mpsc::channel::<Job>();
         let mut writer = Writer {
@@ -730,11 +747,20 @@ impl Store {
     }
 
     /// Reads event bodies from the segments (blocking; call off the runtime).
-    /// An event whose segment was deleted meanwhile is left out.
-    pub fn read_bodies(path: &Path, entries: &[Entry]) -> Vec<(Entry, Vec<u8>)> {
+    /// An event whose segment was deleted meanwhile is left out. A deleted
+    /// record comes back with `deleted` set and an empty body, also when it
+    /// was deleted after the caller copied its entry.
+    pub fn read_bodies(&self, entries: &[Entry]) -> Vec<(Entry, Vec<u8>)> {
+        let path = &self.shared.path;
+        let _io = self.shared.io.read().unwrap_or_else(|e| e.into_inner());
         let mut out = Vec::with_capacity(entries.len());
         for e in entries {
+            if e.deleted {
+                out.push((*e, Vec::new()));
+                continue;
+            }
             match eventlog::read_body(&segment_path(path, e.day), e.offset, e.size, e.h.gseq) {
+                Ok(b) if eventlog::is_erased(&b) => out.push((Entry { deleted: true, ..*e }, Vec::new())),
                 Ok(b) => out.push((*e, b)),
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
                 Err(err) => tracing::error!("не удалось прочитать событие {}: {err}", e.h.gseq),
@@ -987,7 +1013,8 @@ fn load_log(root: &Path, mem: &mut Mem) -> Result<Option<OpenSegment>, String> {
     let mut open = None;
     for (i, &day) in days.iter().enumerate() {
         let path = segment_path(root, day);
-        let bytes = fs::read(&path).map_err(|e| format!("не удалось прочитать {}: {e}", path.display()))?;
+        let mut bytes = fs::read(&path).map_err(|e| format!("не удалось прочитать {}: {e}", path.display()))?;
+        let dels = apply_deletions(root, day, &mut bytes)?;
         let (found, valid) = eventlog::scan(&bytes);
         let newest = i + 1 == days.len();
         if valid < bytes.len() {
@@ -1014,20 +1041,25 @@ fn load_log(root: &Path, mem: &mut Mem) -> Result<Option<OpenSegment>, String> {
             }
         }
         for f in found {
+            let rec = &bytes[f.offset as usize..(f.offset + f.size as u64) as usize];
+            let mut deleted = false;
             if f.header.sender == NOTICE_SENDER {
-                let rec = &bytes[f.offset as usize..(f.offset + f.size as u64) as usize];
                 match eventlog::decode(rec).and_then(|(_, body)| Notice::parse(body)) {
                     Some(n) => {
                         mem.notices.insert(f.header.gseq, Arc::new(n));
                     }
                     None => tracing::warn!("{}: повреждено служебное событие {}", path.display(), f.header.gseq),
                 }
+            } else {
+                deleted = dels.contains(&f.header.gseq)
+                    || eventlog::decode(rec).is_some_and(|(_, body)| eventlog::is_erased(body));
             }
             entries.push(Entry {
                 h: f.header,
                 day,
                 offset: f.offset,
                 size: f.size,
+                deleted,
             });
         }
         if newest {
@@ -1057,6 +1089,55 @@ fn load_log(root: &Path, mem: &mut Mem) -> Result<Option<OpenSegment>, String> {
     mem.last_gseq = entries.last().map_or(0, |e| e.h.gseq);
     mem.log = entries;
     Ok(open)
+}
+
+/// Reads `log/<day>.del` and applies it to the segment bytes (and to the
+/// file when a record still had to be zeroed: an overwrite interrupted by a
+/// crash). A torn last entry is cut off. Returns the deleted `gseq`s.
+fn apply_deletions(root: &Path, day: i64, seg: &mut [u8]) -> Result<HashSet<u64>, String> {
+    let path = del_path(root, day);
+    let bytes = match fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashSet::new()),
+        Err(e) => return Err(format!("не удалось прочитать {}: {e}", path.display())),
+    };
+    let (dels, valid) = eventlog::scan_del(&bytes);
+    if valid < bytes.len() {
+        tracing::warn!("{}: оборванная запись в конце отброшена", path.display());
+        let f = fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .map_err(|e| format!("не удалось открыть {}: {e}", path.display()))?;
+        f.set_len(valid as u64)
+            .and_then(|_| f.sync_all())
+            .map_err(|e| format!("не удалось обрезать {}: {e}", path.display()))?;
+    }
+    let changed = eventlog::repair(seg, &dels);
+    if !changed.is_empty() {
+        let seg_path = segment_path(root, day);
+        tracing::warn!(
+            "{}: доделываю удаление {} записей, прерванное остановкой",
+            seg_path.display(),
+            changed.len()
+        );
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .open(&seg_path)
+            .map_err(|e| format!("не удалось открыть {}: {e}", seg_path.display()))?;
+        for d in &changed {
+            let rec = &seg[d.offset as usize..(d.offset + d.size as u64) as usize];
+            write_at(&mut f, d.offset, rec).map_err(|e| format!("не удалось записать {}: {e}", seg_path.display()))?;
+        }
+        f.sync_data()
+            .map_err(|e| format!("не удалось записать {}: {e}", seg_path.display()))?;
+    }
+    Ok(dels.into_iter().map(|d| d.gseq).collect())
+}
+
+fn write_at(f: &mut File, offset: u64, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::{Seek, SeekFrom};
+    f.seek(SeekFrom::Start(offset))?;
+    f.write_all(bytes)
 }
 
 // ---- writing ----
@@ -1570,6 +1651,7 @@ impl Writer {
                 day,
                 offset,
                 size: rec.len() as u32,
+                deleted: false,
             });
             match notice {
                 Some(n) => {
@@ -1735,6 +1817,113 @@ impl Writer {
             duplicate: false,
             chat,
         })
+    }
+
+    /// `DELETE /v1/chats/<id>/events/<gseq>` ("delete for everyone"):
+    /// allowed for the event's sender and for the group owner. The intent
+    /// goes to `log/<day>.del` first (fsync), then the body is zeroed in
+    /// place (fsync), then the index and a notice for the chat's members.
+    /// Deleting a deleted record succeeds again without a second notice.
+    /// Returns whether the record was already deleted.
+    pub fn delete_event(&mut self, chat_id: ChatId, gseq: u64, by: UserId, now: u64) -> Result<bool, ApiError> {
+        let server_id = self.shared.server_id.clone();
+        let (chat, entry) = {
+            let m = self.mem();
+            let chat = match m.chats.get(&chat_id) {
+                Some(c) if c.is_member(&by) => c.clone(),
+                Some(_) => return Err(ApiError::forbidden("not_member", "not a member of this chat")),
+                None if m.derive_direct(&server_id, &by, &chat_id).is_some() => {
+                    return Err(ApiError::not_found("event_not_found", "no such event in this chat"));
+                }
+                None => return Err(ApiError::not_found("chat_not_found", "no such chat")),
+            };
+            let entry = match m.entry(gseq) {
+                Some(e) if e.h.chat == chat_id && e.h.sender != NOTICE_SENDER => *e,
+                None if gseq >= 1 && gseq < m.oldest_gseq() => {
+                    return Err(ApiError::new(
+                        axum::http::StatusCode::GONE,
+                        "expired",
+                        "the event was already removed by the retention period",
+                    ));
+                }
+                _ => return Err(ApiError::not_found("event_not_found", "no such event in this chat")),
+            };
+            (chat, entry)
+        };
+        let owner = chat.kind == ChatKind::Group && chat.owner == Some(by);
+        if entry.h.sender != by && !owner {
+            return Err(ApiError::forbidden(
+                "not_author",
+                "only the sender or the group owner can delete this event",
+            ));
+        }
+        if entry.deleted {
+            return Ok(true);
+        }
+        // 1. The intent, durable before the segment changes.
+        let del = eventlog::DelEntry {
+            gseq,
+            offset: entry.offset,
+            size: entry.size,
+        };
+        let del_file = del_path(self.root(), entry.day);
+        let fresh = !del_file.exists();
+        let written = datadir::private_file_options()
+            .create(true)
+            .append(true)
+            .open(&del_file)
+            .and_then(|mut f| f.write_all(&del.encode()).and_then(|_| f.sync_data()));
+        written.map_err(|e| io_error("запись списка удалённых", e))?;
+        if fresh {
+            datadir::sync_dir(&self.root().join("log"));
+        }
+        // 2. Zero the body in place.
+        {
+            let _io = self.shared.io.write().unwrap_or_else(|e| e.into_inner());
+            let seg = segment_path(self.root(), entry.day);
+            let erased = (|| -> std::io::Result<()> {
+                let mut f = fs::OpenOptions::new().read(true).write(true).open(&seg)?;
+                let mut rec = vec![0u8; entry.size as usize];
+                {
+                    use std::io::{Read, Seek, SeekFrom};
+                    f.seek(SeekFrom::Start(entry.offset))?;
+                    f.read_exact(&mut rec)?;
+                }
+                if !eventlog::frame_matches(&rec, gseq) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "log record does not match the index",
+                    ));
+                }
+                eventlog::erase(&mut rec);
+                write_at(
+                    &mut f,
+                    entry.offset + eventlog::BODY_AT as u64,
+                    &rec[eventlog::BODY_AT..],
+                )?;
+                f.sync_data()
+            })();
+            // On failure the intent stays in `.del` and the next start
+            // finishes the overwrite; the record counts as deleted already.
+            if let Err(e) = erased {
+                tracing::error!("не удалось затереть событие {gseq}: {e}; будет доделано при запуске");
+            }
+            let mut m = self.mem_mut();
+            if let Ok(i) = m.log.binary_search_by_key(&gseq, |e| e.h.gseq) {
+                m.log[i].deleted = true;
+            }
+        }
+        tracing::info!("событие {gseq} удалено у всех");
+        // 3. Tell the members.
+        let n = Notice::event_deleted(&entry.h, &by, chat.unique_members());
+        if let Err(e) = self.write_notice(chat_id, chat.epoch, n, now) {
+            tracing::error!(
+                "не удалось записать служебное событие об удалении {gseq}: {}",
+                e.message
+            );
+            self.notify();
+        }
+        Ok(false)
     }
 
     /// `DELETE /v1/admin/users/<id>`: tokens stop working at once.
@@ -2021,6 +2210,140 @@ mod tests {
         );
     }
 
+    /// A direct chat between two users with id `[1; 16]` would need real
+    /// users; tests of `delete_event` use a hand-made group chat instead.
+    fn add_group(store: &Store, rt: &tokio::runtime::Runtime, owner: UserId, members: Vec<UserId>) {
+        let periods = members
+            .iter()
+            .map(|u| Period {
+                user_id: *u,
+                from: 0,
+                to: None,
+            })
+            .collect();
+        let chat = Chat {
+            id: ChatId([1; 16]),
+            kind: ChatKind::Group,
+            members,
+            created_at: 0,
+            epoch: 0,
+            owner: Some(owner),
+            version: 1,
+            periods,
+        };
+        rt.block_on(store.write(move |w| w.mem_mut().chats.insert(chat.id, chat)));
+    }
+
+    #[test]
+    fn retention_removes_segments_with_deleted_records() {
+        let rt = rt();
+        let tmp = tempfile::tempdir().unwrap();
+        fill(tmp.path());
+        let store = test_store(tmp.path(), 7);
+        let sender = UserId([2; 16]);
+        add_group(&store, &rt, sender, vec![sender]);
+        // gseq 1 is day 100 (expires), gseq 10 is day 109 (stays).
+        for g in [1u64, 10] {
+            let r = rt.block_on(store.write(move |w| w.delete_event(ChatId([1; 16]), g, sender, 115 * DAY)));
+            assert!(!r.unwrap(), "first deletion");
+        }
+        assert!(del_path(tmp.path(), 100).exists());
+        assert!(del_path(tmp.path(), 109).exists());
+        let now = 115 * DAY + DAY / 2;
+        let r = rt.block_on(store.write(move |w| w.retention(now)));
+        assert_eq!(r.events, 8);
+        assert!(!segment_path(tmp.path(), 100).exists());
+        assert!(!del_path(tmp.path(), 100).exists(), "the .del file goes with its day");
+        assert!(del_path(tmp.path(), 109).exists());
+        store.read(|m| {
+            assert!(m.entry(10).unwrap().deleted);
+            assert!(!m.entry(11).unwrap().deleted);
+        });
+        drop(store);
+        // After a restart the kept day still has its deletion.
+        let store = test_store(tmp.path(), 7);
+        store.read(|m| {
+            assert_eq!(m.oldest_gseq(), 9);
+            assert!(m.entry(10).unwrap().deleted);
+            // The notices of the deletions (day 115) are in the log too.
+            assert!(m.log.iter().any(|e| e.h.sender == NOTICE_SENDER));
+        });
+        let bodies = store.read_bodies(&store.read(|m| m.log.clone()));
+        let ten = bodies.iter().find(|(e, _)| e.h.gseq == 10).unwrap();
+        assert!(ten.0.deleted && ten.1.is_empty());
+        drop(rt);
+    }
+
+    /// The `.del` entry reached the disk but the overwrite of the segment was
+    /// cut short (half the body zeroed, the old CRC): the next start finishes
+    /// it instead of taking the record for a torn tail and losing what follows.
+    #[test]
+    fn restart_finishes_an_interrupted_deletion() {
+        let tmp = tempfile::tempdir().unwrap();
+        let day = 300i64;
+        write_segment(
+            tmp.path(),
+            day,
+            &[(1, 300 * DAY), (2, 300 * DAY + 1), (3, 300 * DAY + 2)],
+        );
+        let p = segment_path(tmp.path(), day);
+        let mut bytes = fs::read(&p).unwrap();
+        let found = eventlog::scan(&bytes).0;
+        let r = found[1];
+        // Torn overwrite: the first two body bytes are zeroed, nothing else.
+        let at = r.offset as usize + eventlog::BODY_AT;
+        bytes[at] = 0;
+        bytes[at + 1] = 0;
+        fs::write(&p, &bytes).unwrap();
+        assert_eq!(eventlog::scan(&bytes).0.len(), 1, "unrepaired, the scan would stop");
+        let del = eventlog::DelEntry {
+            gseq: 2,
+            offset: r.offset,
+            size: r.size,
+        };
+        // A torn second entry at the end of the .del file is dropped.
+        let mut dels = del.encode().to_vec();
+        dels.extend_from_slice(&[1, 2, 3]);
+        fs::write(del_path(tmp.path(), day), &dels).unwrap();
+
+        let store = test_store(tmp.path(), 90);
+        store.read(|m| {
+            assert_eq!(m.log.len(), 3);
+            assert_eq!(m.last_gseq, 3);
+            assert!(!m.entry(1).unwrap().deleted);
+            assert!(m.entry(2).unwrap().deleted);
+            assert!(!m.entry(3).unwrap().deleted);
+        });
+        let repaired = fs::read(&p).unwrap();
+        let (again, valid) = eventlog::scan(&repaired);
+        assert_eq!((again.len(), valid), (3, repaired.len()));
+        let rec = &repaired[r.offset as usize..(r.offset + r.size as u64) as usize];
+        assert!(eventlog::is_erased(eventlog::decode(rec).unwrap().1));
+        assert_eq!(fs::read(del_path(tmp.path(), day)).unwrap().len(), eventlog::DEL_ENTRY);
+        let bodies = store.read_bodies(&store.read(|m| m.log.clone()));
+        assert_eq!(bodies.len(), 3);
+        assert_eq!(bodies[0].1, b"body");
+        assert!(bodies[1].0.deleted && bodies[1].1.is_empty());
+    }
+
+    /// A segment copied without its `.del` file still shows zeroed records
+    /// as deleted.
+    #[test]
+    fn zeroed_body_without_del_file_counts_as_deleted() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_segment(tmp.path(), 310, &[(1, 310 * DAY), (2, 310 * DAY + 1)]);
+        let p = segment_path(tmp.path(), 310);
+        let mut bytes = fs::read(&p).unwrap();
+        let r = eventlog::scan(&bytes).0[0];
+        eventlog::erase(&mut bytes[r.offset as usize..(r.offset + r.size as u64) as usize]);
+        fs::write(&p, &bytes).unwrap();
+        let store = test_store(tmp.path(), 90);
+        store.read(|m| {
+            assert!(m.entry(1).unwrap().deleted);
+            assert!(!m.entry(2).unwrap().deleted);
+        });
+    }
+
     #[test]
     fn restart_drops_torn_tail_and_keeps_numbering() {
         let rt = rt();
@@ -2039,7 +2362,7 @@ mod tests {
         // The torn bytes were cut off, so the file ends at a record boundary.
         let cut = fs::read(&p).unwrap();
         assert_eq!(eventlog::scan(&cut).1, cut.len());
-        let bodies = Store::read_bodies(tmp.path(), &store.read(|m| m.log.clone()));
+        let bodies = store.read_bodies(&store.read(|m| m.log.clone()));
         assert_eq!(bodies.len(), 3);
         assert!(bodies.iter().all(|(_, b)| b == b"body"));
         drop(rt);

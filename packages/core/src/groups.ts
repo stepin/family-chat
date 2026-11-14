@@ -190,6 +190,8 @@ export class Groups {
         const row: NoticeRow = { accountId: acc, gseq: n.gseq, time: n.time, chatId: n.chatId, notice: n.notice };
         await db.notices.put(row);
         const b = n.notice;
+        // Delete for everyone: kept for the record; the signed `delete` payload does the work (apply.ts).
+        if (b.type === 'event_deleted') continue;
         if (b.type === 'member_removed' || b.type === 'member_revoked') {
           refreshDirectory = true;
           continue;

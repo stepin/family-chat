@@ -229,6 +229,17 @@ export class Transport {
     return { gseq: num(o, 'gseq'), time: num(o, 'time'), duplicate: bool(o, 'duplicate') };
   }
 
+  /** `DELETE /v1/chats/<id>/events/<gseq>` (M4): delete for everyone; repeating it succeeds too. */
+  async deleteEvent(token: string, chatId: string, gseq: number, signal?: AbortSignal): Promise<void> {
+    await this.#json({
+      method: 'DELETE',
+      path: `/v1/chats/${encodeURIComponent(chatId)}/events/${gseq}`,
+      template: '/v1/chats/{chatId}/events/{gseq}',
+      token,
+      signal,
+    });
+  }
+
   /** `GET /v1/events`: long poll when `wait` > 0. */
   async events(token: string, q: EventsQuery = {}, signal?: AbortSignal): Promise<EventsPage> {
     const wait = Math.min(Math.max(0, Math.floor(q.wait ?? 0)), MAX_WAIT_SECONDS);
@@ -815,6 +826,8 @@ function noticeBody(v: unknown): NoticeBody | undefined {
       case 'member_removed':
       case 'member_revoked':
         return { type: v.type, userId: str(v, 'userId') };
+      case 'event_deleted':
+        return { type: 'event_deleted', gseq: num(v, 'gseq'), senderId: str(v, 'senderId'), msgId: str(v, 'msgId'), by: str(v, 'by') };
       default:
         return undefined;
     }
@@ -825,9 +838,10 @@ function noticeBody(v: unknown): NoticeBody | undefined {
 
 function serverEvent(v: unknown): ServerEvent {
   const o = obj(v, 'event');
+  const deleted = o.deleted === true;
   let body: Uint8Array;
   try {
-    body = base64urlDecode(str(o, 'body'));
+    body = deleted ? new Uint8Array(0) : base64urlDecode(str(o, 'body'));
   } catch {
     throw unexpected('event body');
   }
@@ -840,6 +854,7 @@ function serverEvent(v: unknown): ServerEvent {
     epoch: num(o, 'epoch'),
     msgId: str(o, 'msgId'),
     body,
+    ...(deleted ? { deleted: true as const } : {}),
   };
 }
 

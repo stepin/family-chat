@@ -10,6 +10,29 @@
 //! `len` counts the bytes after itself, crc32 included. The CRC covers
 //! everything before it, `len` included. `msgId` (the `Idempotency-Key`)
 //! is stored so a repeat after a restart still returns the same `gseq`.
+//!
+//! ## Deleted ("delete for everyone") records
+//!
+//! A deleted record keeps its frame: the same `len` and header, the body
+//! overwritten with zero bytes of the same length and the crc32 computed
+//! again over the new bytes ([`erase`]). Offsets of later records do not
+//! move and a scan reads it like any other record. A real event body never
+//! consists of zeros only (it starts with `FC1`), so an all-zero body also
+//! marks a record as deleted ([`is_erased`]).
+//!
+//! The day file `log/<YYYY-MM-DD>.del` lists the deleted records of that
+//! day, one fixed entry each ([`DelEntry`]):
+//!
+//! ```text
+//! gseq u64 | offset u64 | size u32 | crc32 u32 (over the 20 bytes before it)
+//! ```
+//!
+//! The entry is written and fsynced before the segment is touched, so it is
+//! an intent record: at start the server applies every entry again
+//! ([`repair`]). An overwrite cut short by a crash (body half zeroed, old
+//! CRC) is finished then instead of being taken for a torn record. Erasing
+//! only rewrites the body and the CRC; `len` and `gseq`, which the repair
+//! checks, are never changed.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -134,6 +157,97 @@ pub fn read_body(path: &Path, offset: u64, size: u32, gseq: u64) -> std::io::Res
     }
 }
 
+/// Offset of the body inside a record (`len` field included).
+pub const BODY_AT: usize = 82;
+
+/// Whether a stored body is the zeroed body of a deleted record.
+pub fn is_erased(body: &[u8]) -> bool {
+    !body.is_empty() && body.iter().all(|b| *b == 0)
+}
+
+/// Overwrites the body of a complete record with zeros and stores a fresh
+/// crc32. The `len` field and the header stay as they are.
+pub fn erase(rec: &mut [u8]) {
+    let crc_at = rec.len() - 4;
+    rec[BODY_AT..crc_at].fill(0);
+    let crc = crc32(&rec[..crc_at]);
+    rec[crc_at..].copy_from_slice(&crc.to_be_bytes());
+}
+
+/// Checks the two header fields a deletion relies on without the CRC (which
+/// a torn overwrite breaks): the `len` field and `gseq`.
+pub fn frame_matches(rec: &[u8], gseq: u64) -> bool {
+    rec.len() >= 4 + MIN_LEN
+        && u32::from_be_bytes(arr(rec, 0)) as usize == rec.len() - 4
+        && u64::from_be_bytes(arr(rec, 4)) == gseq
+}
+
+/// One entry of a `.del` file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DelEntry {
+    pub gseq: u64,
+    pub offset: u64,
+    pub size: u32,
+}
+
+pub const DEL_ENTRY: usize = 8 + 8 + 4 + 4;
+
+impl DelEntry {
+    pub fn encode(&self) -> [u8; DEL_ENTRY] {
+        let mut out = [0u8; DEL_ENTRY];
+        out[0..8].copy_from_slice(&self.gseq.to_be_bytes());
+        out[8..16].copy_from_slice(&self.offset.to_be_bytes());
+        out[16..20].copy_from_slice(&self.size.to_be_bytes());
+        let crc = crc32(&out[..20]);
+        out[20..].copy_from_slice(&crc.to_be_bytes());
+        out
+    }
+}
+
+/// Reads a `.del` file up to its end or the first damaged entry (a torn
+/// append). Returns the entries and the length of the valid prefix.
+pub fn scan_del(bytes: &[u8]) -> (Vec<DelEntry>, usize) {
+    let mut out = Vec::new();
+    let mut pos = 0;
+    while bytes.len() - pos >= DEL_ENTRY {
+        let e = &bytes[pos..pos + DEL_ENTRY];
+        if crc32(&e[..20]) != u32::from_be_bytes(arr(e, 20)) {
+            break;
+        }
+        out.push(DelEntry {
+            gseq: u64::from_be_bytes(arr(e, 0)),
+            offset: u64::from_be_bytes(arr(e, 8)),
+            size: u32::from_be_bytes(arr(e, 16)),
+        });
+        pos += DEL_ENTRY;
+    }
+    (out, pos)
+}
+
+/// Applies the deletions in `dels` to a segment held in memory. Returns the
+/// entries whose record had to be changed (the caller writes those back).
+/// An entry that does not point at a record frame with its `gseq` is left
+/// alone.
+pub fn repair(seg: &mut [u8], dels: &[DelEntry]) -> Vec<DelEntry> {
+    let mut changed = Vec::new();
+    for d in dels {
+        let (start, size) = (d.offset as usize, d.size as usize);
+        if size < 4 + MIN_LEN || start.checked_add(size).is_none_or(|end| end > seg.len()) {
+            continue;
+        }
+        let rec = &mut seg[start..start + size];
+        if !frame_matches(rec, d.gseq) {
+            continue;
+        }
+        let before = rec.to_vec();
+        erase(rec);
+        if *rec != before[..] {
+            changed.push(*d);
+        }
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,5 +337,93 @@ mod tests {
         }
         // The complete segment keeps everything.
         assert_eq!(scan(&seg).0.len(), 4);
+    }
+
+    fn segment(n: u64) -> (Vec<u8>, Vec<Found>) {
+        let mut seg = Vec::new();
+        for g in 1..=n {
+            seg.extend(encode(&header(g), format!("FC1 body {g}").as_bytes()));
+        }
+        let found = scan(&seg).0;
+        (seg, found)
+    }
+
+    #[test]
+    fn erased_record_keeps_its_frame() {
+        let (mut seg, found) = segment(3);
+        let r = found[1];
+        let rec = &mut seg[r.offset as usize..(r.offset + r.size as u64) as usize];
+        erase(rec);
+        let (h, body) = decode(rec).expect("still a valid record");
+        assert_eq!(h, header(2));
+        assert!(is_erased(body));
+        assert_eq!(body.len(), "FC1 body 2".len());
+        let (again, valid) = scan(&seg);
+        assert_eq!((again.len(), valid), (3, seg.len()));
+        assert_eq!(again, found, "offsets do not move");
+        assert!(!is_erased(b"FC1"));
+        assert!(!is_erased(b""));
+    }
+
+    #[test]
+    fn del_file_codec_and_torn_tail() {
+        let a = DelEntry {
+            gseq: 7,
+            offset: 1234,
+            size: 99,
+        };
+        let b = DelEntry {
+            gseq: 9,
+            offset: 5678,
+            size: 101,
+        };
+        let mut bytes = a.encode().to_vec();
+        bytes.extend(b.encode());
+        assert_eq!(scan_del(&bytes), (vec![a, b], 2 * DEL_ENTRY));
+        for cut in DEL_ENTRY..bytes.len() {
+            assert_eq!(scan_del(&bytes[..cut]), (vec![a], DEL_ENTRY), "cut at {cut}");
+        }
+        let mut bad = bytes.clone();
+        bad[DEL_ENTRY + 3] ^= 1;
+        assert_eq!(scan_del(&bad).0, vec![a]);
+    }
+
+    /// An overwrite cut short at any byte (body partly zeroed, CRC old or
+    /// partly written) is finished by `repair`; without it the scan would
+    /// stop at that record.
+    #[test]
+    fn repair_finishes_a_torn_overwrite() {
+        let (seg, found) = segment(3);
+        let r = found[1];
+        let (start, end) = (r.offset as usize, (r.offset + r.size as u64) as usize);
+        let mut done = seg.clone();
+        erase(&mut done[start..end]);
+        let del = DelEntry {
+            gseq: 2,
+            offset: r.offset,
+            size: r.size,
+        };
+        for cut in start + BODY_AT..=end {
+            // The first bytes of the overwrite reached the disk, the rest did not.
+            let mut torn = seg.clone();
+            torn[start + BODY_AT..cut].copy_from_slice(&done[start + BODY_AT..cut]);
+            let changed = repair(&mut torn, &[del]);
+            assert_eq!(torn, done, "cut at {cut}");
+            assert_eq!(changed.len(), usize::from(cut != end), "cut at {cut}");
+            assert_eq!(scan(&torn).0.len(), 3);
+        }
+        // Applying it again changes nothing.
+        let mut twice = done.clone();
+        assert!(repair(&mut twice, &[del]).is_empty());
+        // An entry that points elsewhere is ignored.
+        let mut other = seg.clone();
+        let wrong = DelEntry { gseq: 3, ..del };
+        assert!(repair(&mut other, &[wrong]).is_empty());
+        assert_eq!(other, seg);
+        let past = DelEntry {
+            offset: seg.len() as u64,
+            ..del
+        };
+        assert!(repair(&mut other, &[past]).is_empty());
     }
 }

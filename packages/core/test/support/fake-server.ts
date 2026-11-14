@@ -53,6 +53,8 @@ interface Ev {
   /** Server notice (kind "notice") instead of a member event, with its recipients. */
   notice?: Record<string, unknown>;
   to?: string[];
+  /** Deleted for everyone (M4): served with an empty body and `deleted: true`. */
+  deleted?: boolean;
 }
 
 export interface FakeServerOptions {
@@ -99,6 +101,8 @@ export class FakeServer {
   readonly blobs = new Map<string, { owner: string; createdAt: number; parts: Map<number, Uint8Array> }>();
   readonly maxBlobBytes: number;
   readonly log: Ev[] = [];
+  /** DELETE /v1/chats/<id>/events/<gseq> requests that passed the checks (M4). */
+  readonly deleteRequests: { chatId: string; gseq: number; by: string }[] = [];
   readonly nonces = new Set<string>();
   readonly idem = new Map<string, Ev>();
   oldestGseq = 1;
@@ -305,7 +309,8 @@ export class FakeServer {
 
   #evJson(e: Ev) {
     if (e.notice) return { kind: 'notice', gseq: e.gseq, time: e.time, chatId: e.chatId, notice: e.notice };
-    const { notice: _n, to: _t, ...rest } = e;
+    const { notice: _n, to: _t, deleted, ...rest } = e;
+    if (deleted) return { kind: 'event', ...rest, body: '', deleted: true };
     return { kind: 'event', ...rest, body: base64urlEncode(e.body) };
   }
 
@@ -506,6 +511,26 @@ export class FakeServer {
     if (m === 'GET' && p === '/v1/chats') {
       const chats = [...this.chats].filter(([, c]) => c.members.includes(a.userId)).map(([chatId, c]) => this.#chatJson(chatId, c));
       return { status: 200, body: { chats } };
+    }
+    const delEv = /^\/v1\/chats\/([^/]+)\/events\/(\d+)$/.exec(p);
+    if (delEv && m === 'DELETE') {
+      const chatId = decodeURIComponent(delEv[1]!);
+      const gseq = Number(delEv[2]);
+      const chat = this.chats.get(chatId);
+      if (!chat) return err(404, 'chat_not_found');
+      if (!chat.members.includes(a.userId)) return err(403, 'not_member');
+      const e = this.log.find((x) => x.gseq === gseq && x.chatId === chatId && !x.notice);
+      if (!e) return err(gseq < this.oldestGseq ? 410 : 404, gseq < this.oldestGseq ? 'expired' : 'event_not_found');
+      if (e.senderId !== a.userId && !(chat.kind === 'group' && chat.owner === a.userId)) return err(403, 'not_author');
+      this.deleteRequests.push({ chatId, gseq, by: a.userId });
+      if (!e.deleted) {
+        e.deleted = true;
+        e.body = new Uint8Array(0);
+        const to = [...new Set(chat.members)];
+        this.appendNotice(chatId, { type: 'event_deleted', gseq, senderId: e.senderId, msgId: e.msgId, by: a.userId }, to);
+        this.#wake();
+      }
+      return { status: 204 };
     }
     const chatEv = /^\/v1\/chats\/([^/]+)\/events$/.exec(p);
     if (chatEv) {

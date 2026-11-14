@@ -6,6 +6,7 @@
 
 use serde_json::{Map, Value, json};
 
+use crate::eventlog::Header;
 use crate::ids::UserId;
 use crate::store::Chat;
 
@@ -107,6 +108,21 @@ impl Notice {
     /// (identity revoked); sent to the group owner.
     pub fn member_event(kind: &str, user: &UserId, to: Vec<UserId>) -> Notice {
         Notice::new(json!({ "type": kind, "userId": user }), to)
+    }
+
+    /// An event was deleted for everyone; sent to the chat's members (the
+    /// one who deleted it included, for their other devices).
+    pub fn event_deleted(h: &Header, by: &UserId, to: Vec<UserId>) -> Notice {
+        Notice::new(
+            json!({
+                "type": "event_deleted",
+                "gseq": h.gseq,
+                "senderId": h.sender,
+                "msgId": h.msg,
+                "by": by,
+            }),
+            to,
+        )
     }
 }
 

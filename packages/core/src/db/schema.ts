@@ -18,9 +18,10 @@ import type {
   SignedEnvelope,
 } from '@family-chat/protocol';
 import type { NoticeBody, ServerEvent } from '../api/types.ts';
+import { messageWords } from '../search.ts';
 
 export const DEFAULT_DB_NAME = 'family-chat';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 export type AccountStatus = 'active' | 'login-invalid' | 'removed';
 
@@ -162,8 +163,18 @@ export interface EventRow {
   body: Uint8Array;
 }
 
-/** 'service': an entry derived from group states or server notices (no sender, no text). */
-export type MessageKind = 'msg' | 'update-required' | 'service';
+/**
+ * 'service': an entry derived from group states or server notices (no sender, no text).
+ * 'deleted' (M4): deleted for everyone; shown as a quiet "message deleted" line (no text, no files).
+ */
+export type MessageKind = 'msg' | 'update-required' | 'service' | 'deleted';
+
+/** Reactions on a message (M4): every emoji with the users who placed it, in a deterministic order. */
+export interface ReactionAgg {
+  readonly emoji: string;
+  /** Sorted userIds. */
+  readonly users: readonly string[];
+}
 
 /** What a service entry in a group says (rendered by the UI). */
 export type ServiceEntry =
@@ -197,6 +208,69 @@ export interface MessageRow {
   location?: Location;
   fwd?: true;
   service?: ServiceEntry;
+  // ---- version 3 (M4) ----
+  /** Normalized search words (search.ts); multiEntry index. Empty for anything but a msg. */
+  words?: string[];
+  /** The edit in force (the newest valid one by gseq). */
+  edited?: { gseq: number; time: number };
+  /** Aggregated reactions (absent: none). */
+  reactions?: ReactionAgg[];
+}
+
+/** Payload of a queued control event (M4): edit, delete for everyone or reaction. */
+export type OutboxControl =
+  | { readonly kind: 'edit'; readonly target: MsgRef; readonly body: string }
+  | {
+      readonly kind: 'delete';
+      readonly target: MsgRef;
+      readonly targetDev: string;
+      readonly targetSeq: number;
+      /** Server record of the target, deleted on the server after the event is accepted. */
+      readonly targetGseq: number | null;
+      /** My uploads of the target, removed from the server afterwards. */
+      readonly blobIds: readonly string[];
+      /** The event is on the server; only the server clean-up is left. */
+      readonly posted?: boolean;
+    }
+  | { readonly kind: 'react'; readonly target: MsgRef; readonly emoji: string; readonly on: boolean };
+
+/** A verified control event (M4): kept so the derived message can be recomputed in any arrival order. */
+export interface ControlRow {
+  accountId: string;
+  /** Author of the control event and its id. */
+  senderId: string;
+  msgId: string;
+  chatId: string;
+  gseq: number;
+  time: number;
+  epoch: number;
+  kind: 'edit' | 'delete' | 'react';
+  /** `${author}/${id}` of the target message. */
+  target: string;
+  body?: string;
+  emoji?: string;
+  on?: boolean;
+}
+
+/**
+ * A deleted message (M4): `everyone` by a valid signed delete, `local` ("delete for me"),
+ * `server` (only the server's zeroed record is known: a placeholder that never hides a
+ * readable original).
+ */
+export interface TombstoneRow {
+  accountId: string;
+  /** Author and id of the deleted message. */
+  senderId: string;
+  msgId: string;
+  chatId: string;
+  reason: 'everyone' | 'local' | 'server';
+  /** Who deleted it (the author, the group owner, me for local). */
+  by: string;
+  /** Local time of the deletion. */
+  at: number;
+  /** Server order and time of the deleted message, when known (to place the quiet line). */
+  gseq?: number;
+  time?: number;
 }
 
 export type OutboxStatus = 'pending' | 'failed';
@@ -222,6 +296,9 @@ export interface OutboxRow {
   attachments?: Attachment[];
   location?: Location;
   fwd?: true;
+  // ---- version 3 (M4) ----
+  /** A control event instead of a message (not shown as a message of its own). */
+  control?: OutboxControl;
 }
 
 /** Next `seq` of this device in a chat. */
@@ -445,6 +522,8 @@ export class CoreDb extends Dexie {
   blobs!: Table<BlobRow, [string, string]>;
   fileChunks!: Table<FileChunkRow, [string, number]>;
   avatars!: Table<AvatarRow, [string, string]>;
+  controls!: Table<ControlRow, [string, string, string]>;
+  tombstones!: Table<TombstoneRow, [string, string, string]>;
 
   constructor(name: string = DEFAULT_DB_NAME, deps: DbDeps = {}) {
     super(name, deps.indexedDB ? { indexedDB: deps.indexedDB, IDBKeyRange: deps.IDBKeyRange } : undefined);
@@ -488,6 +567,22 @@ export class CoreDb extends Dexie {
             a.oldest ??= null;
             a.revoked ??= false;
             a.limits ??= null;
+          });
+      });
+    // Version 3 (M4): edits, deletions, reactions and the search index. Only additions:
+    // the messages store gains the multiEntry index `*words`, filled here for old rows.
+    this.version(3)
+      .stores({
+        messages: '[accountId+senderId+msgId], [accountId+chatId+gseq], accountId, *words',
+        controls: '[accountId+senderId+msgId], [accountId+target], [accountId+chatId]',
+        tombstones: '[accountId+senderId+msgId], [accountId+chatId]',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('messages')
+          .toCollection()
+          .modify((m: MessageRow) => {
+            m.words = messageWords(m);
           });
       });
   }

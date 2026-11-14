@@ -117,6 +117,7 @@
     const last = c.lastMessage;
     if (!last) return c.kind === 'self' ? t.list.selfChatEmpty : t.list.emptyChat;
     if (last.kind === 'update-required') return t.list.updateRequired;
+    if (last.kind === 'deleted') return t.list.deleted;
     if (last.kind === 'service') return t.list.groupChanged;
     const media =
       last.media === 'voice' ? t.list.voice : last.media === 'location' ? t.list.location : last.media === 'image' ? t.list.photo : last.media === 'file' ? t.list.file : null;
@@ -162,6 +163,9 @@
 <section class="screen" aria-labelledby="list-title">
   <header class="screen-header">
     <h1 id="list-title" class="family">{account.familyName}</h1>
+    <button class="icon-btn" type="button" aria-label={t.search.open} onclick={() => nav.push({ name: 'search' })} data-testid="open-search">
+      <Icon name="search" />
+    </button>
     {#if !removed}
       <button class="icon-btn" type="button" aria-label={t.list.newChat} onclick={() => nav.push({ name: 'new-chat' })}>
         <Icon name="plus" />

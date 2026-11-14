@@ -113,6 +113,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/me/push", put(api::put_push).delete(api::delete_push))
         .route("/v1/chats", get(api::chats).post(groups::create))
         .route("/v1/chats/{id}/events", post(api::post_event).get(api::chat_events))
+        .route("/v1/chats/{id}/events/{gseq}", delete(api::delete_event))
         .route("/v1/chats/{id}/state", put(groups::change))
         .route("/v1/chats/{id}/state/{version}", get(groups::get_state))
         .route("/v1/chats/{id}/leave", post(groups::leave))

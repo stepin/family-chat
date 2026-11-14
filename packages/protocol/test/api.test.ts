@@ -58,6 +58,7 @@ describe('public API', () => {
         'parseEnvelope',
         'parsePayload',
         'parseSealedGroupKey',
+        'payloadCommon',
         'phraseToSeed',
         'randomBytes',
         'readArchive',

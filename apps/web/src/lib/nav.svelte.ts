@@ -11,7 +11,15 @@ export type Route =
   | { readonly name: 'restore' }
   | { readonly name: 'revoke-phrase' }
   | { readonly name: 'list' }
-  | { readonly name: 'chat'; readonly accountId: string; readonly chatId: string; readonly focus?: boolean }
+  | {
+      readonly name: 'chat';
+      readonly accountId: string;
+      readonly chatId: string;
+      readonly focus?: boolean;
+      /** Open at this message and mark it briefly (a search result). */
+      readonly jump?: { readonly senderId: string; readonly msgId: string; readonly gseq: number };
+    }
+  | { readonly name: 'search' }
   | { readonly name: 'new-chat' }
   | { readonly name: 'new-group'; readonly members?: readonly string[]; readonly title?: string }
   | { readonly name: 'chat-info'; readonly accountId: string; readonly chatId: string }
@@ -62,8 +70,8 @@ class Nav {
   }
 
   /** Opens a chat: replaces an open chat instead of stacking chats. */
-  openChat(accountId: string, chatId: string, focus = false): void {
-    const route: Route = { name: 'chat', accountId, chatId, focus };
+  openChat(accountId: string, chatId: string, focus = false, jump?: { senderId: string; msgId: string; gseq: number }): void {
+    const route: Route = { name: 'chat', accountId, chatId, focus, ...(jump ? { jump } : {}) };
     const top = this.top;
     if (top.name === 'chat' || top.name === 'new-chat' || top.name === 'new-group') this.replace(route);
     else if (this.stack.length > 1) {

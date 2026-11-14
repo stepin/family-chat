@@ -33,9 +33,10 @@ import type {
   PushSubscriptionInput,
   ServerStats,
 } from './api/types.ts';
-import { commitEvents, decodeEvents } from './apply.ts';
+import { commitEvents, decodeEvents, deleteLocally } from './apply.ts';
 import { exportArchive, importArchive, toReadableStream, type ArchiveSource, type ExportOptions, type ImportResult } from './archive.ts';
 import { prepareUploads, type AttachmentInput } from './attachments.ts';
+import { checkMessageText as checkText } from './outbox.ts';
 import { fetchAvatar, removeAvatar, setAvatar } from './avatars.ts';
 import type { FileStorePreference, OpfsDirectory } from './files.ts';
 import {
@@ -63,8 +64,9 @@ import {
 } from './db/schema.ts';
 import { CoreError } from './errors.ts';
 import { inviteLink } from './invite.ts';
-import { byQueueOrder, cancelMessage, enqueueMessage, retryMessage } from './outbox.ts';
-import { newMessageId } from '@family-chat/protocol';
+import { byQueueOrder, cancelMessage, enqueueControl, enqueueMessage, retryMessage } from './outbox.ts';
+import { base64urlDecode, newMessageId } from '@family-chat/protocol';
+import { countFrom, searchMessages, textMatches, queryWords, type SearchHit } from './search.ts';
 import { handlePush, registerPush, unregisterPush, type PushNotice } from './push.ts';
 import type { ConnectionState } from './sync.ts';
 import type { BackoffOptions } from './util/backoff.ts';
@@ -212,6 +214,32 @@ export interface ChatView {
   loadOlder(): Promise<boolean>;
   /** Marks everything shown as read (unread counter to zero). */
   markRead(): Promise<void>;
+  /**
+   * Makes sure the message with this gseq is in `messages` (loads older
+   * messages from the local database as needed). False when it is not on
+   * this device.
+   */
+  reveal(gseq: number): Promise<boolean>;
+}
+
+/** Result of the global search (M4): messages on this device plus chats and contacts by name. */
+export interface GlobalSearchResult {
+  /** Normalized query words, for highlighting. */
+  readonly words: readonly string[];
+  /** Chats whose name matches. */
+  readonly chats: readonly ChatSummary[];
+  /** Family members without a chat on this device yet whose name matches. */
+  readonly contacts: readonly { readonly accountId: string; readonly userId: string; readonly name: string }[];
+  /** Matching messages, newest first (at most `limit`). */
+  readonly messages: readonly SearchHit[];
+  /** Number of matching messages. */
+  readonly total: number;
+}
+
+/** Result of the search inside one chat: every match, newest first. */
+export interface ChatSearchResult {
+  readonly words: readonly string[];
+  readonly hits: readonly SearchHit[];
 }
 
 export interface CreatedInvite extends NewInvite {
@@ -604,7 +632,184 @@ export class FamilyChatCore {
         return after > local || page.more;
       },
       markRead: () => this.markRead(accountId, chatId),
+      reveal: async (gseq: number) => {
+        if (!(await db.messages.where('[accountId+chatId+gseq]').equals([accountId, chatId, gseq]).first())) return false;
+        const need = await countFrom(db, accountId, chatId, gseq);
+        if (need > limit) {
+          limit = Math.ceil(need / MESSAGES_PAGE) * MESSAGES_PAGE + MESSAGES_PAGE;
+          reload.update((n) => n + 1);
+        }
+        return true;
+      },
     };
+  }
+
+  // ---- M4: edit, delete, reactions, forward, search ----
+
+  /** Changes the text (or caption) of my message. A message still on the device is changed in place. */
+  async editMessage(accountId: string, chatId: string, msgId: string, text: string): Promise<void> {
+    const rt = await this.#runtime(accountId);
+    const me = rt.session.userId;
+    const queued = await this.db.outbox.get([accountId, msgId]);
+    if (queued && !queued.control) {
+      const hasContent = (queued.attachments?.length ?? 0) > 0 || !!queued.location;
+      if (!hasContent || text.length > 0) checkText(text);
+      await this.db.outbox.update([accountId, msgId], { body: text });
+      return;
+    }
+    const m = await this.db.messages.get([accountId, me, msgId]);
+    if (!m || m.kind !== 'msg' || m.chatId !== chatId) throw new CoreError('not-allowed', 'only my own messages can be edited');
+    const hasContent = (m.attachments?.length ?? 0) > 0 || !!m.location;
+    if (!hasContent || text.length > 0) checkText(text);
+    if (text === m.body) return;
+    await enqueueControl(rt, chatId, { kind: 'edit', target: { author: me, id: msgId }, body: text });
+    rt.outbox.kick();
+  }
+
+  /**
+   * Deletes a message for everyone: my own message, or any message in a group
+   * I own. The encrypted delete goes first, then the server copy and my
+   * uploads of it are removed. A message still on the device is cancelled.
+   */
+  async deleteForEveryone(accountId: string, chatId: string, senderId: string, msgId: string): Promise<void> {
+    const rt = await this.#runtime(accountId);
+    const me = rt.session.userId;
+    if (senderId === me) {
+      const queued = await this.db.outbox.get([accountId, msgId]);
+      if (queued && !queued.control) {
+        await this.cancel(accountId, msgId);
+        return;
+      }
+    }
+    const m = await this.db.messages.get([accountId, senderId, msgId]);
+    if (!m || m.chatId !== chatId || (m.kind !== 'msg' && m.kind !== 'update-required')) {
+      throw new CoreError('not-allowed', 'no such message');
+    }
+    if (senderId !== me) {
+      const g = await this.db.groups.get([accountId, chatId]);
+      if (!g?.state || g.state.owner !== me) throw new CoreError('not-allowed', 'only the author or the group owner can delete it for everyone');
+    }
+    const blobIds =
+      senderId === me
+        ? (await this.db.blobs.where('[accountId+msgId]').equals([accountId, msgId]).toArray())
+            .filter((b) => b.direction === 'up' && b.senderId === me)
+            .map((b) => b.blobId)
+        : [];
+    await enqueueControl(rt, chatId, {
+      kind: 'delete',
+      target: { author: senderId, id: msgId },
+      targetDev: m.devId,
+      targetSeq: m.seq ?? 0,
+      targetGseq: m.gseq,
+      blobIds,
+    });
+    rt.outbox.kick();
+  }
+
+  /** Deletes a message on this device only (with its files); others keep it. */
+  async deleteForMe(accountId: string, chatId: string, senderId: string, msgId: string): Promise<void> {
+    const rt = await this.#runtime(accountId);
+    const m = await this.db.messages.get([accountId, senderId, msgId]);
+    if (!m || m.chatId !== chatId) {
+      if (senderId === rt.session.userId && (await this.db.outbox.get([accountId, msgId]))) return this.cancel(accountId, msgId);
+      throw new CoreError('not-allowed', 'no such message');
+    }
+    await deleteLocally(this.#ctx, accountId, rt.session.userId, senderId, msgId);
+  }
+
+  /** Places (`on: true`) or removes my reaction on a message. Several different emoji per person are allowed. */
+  async react(accountId: string, chatId: string, senderId: string, msgId: string, emoji: string, on: boolean): Promise<void> {
+    const rt = await this.#runtime(accountId);
+    const m = await this.db.messages.get([accountId, senderId, msgId]);
+    if (!m || m.chatId !== chatId || m.kind !== 'msg') throw new CoreError('not-allowed', 'no such message');
+    // Taps that cancel each other before anything was sent never reach the server.
+    const me = rt.session.userId;
+    const queued = (await this.db.outbox.where('[accountId+chatId]').equals([accountId, chatId]).toArray()).filter(
+      (o) => o.control?.kind === 'react' && o.control.target.author === senderId && o.control.target.id === msgId && o.control.emoji === emoji,
+    );
+    const untouched = queued.filter((o) => o.status === 'pending' && o.attempts === 0);
+    if (untouched.length === queued.length) {
+      await this.db.outbox.bulkDelete(untouched.map((o): [string, string] => [accountId, o.msgId]));
+      const placed = !!m.reactions?.some((r) => r.emoji === emoji && r.users.includes(me));
+      if (placed === on) return;
+    }
+    await enqueueControl(rt, chatId, { kind: 'react', target: { author: senderId, id: msgId }, emoji, on });
+    rt.outbox.kick();
+  }
+
+  /**
+   * Forwards a message (text, place, files, voice) to other chats, marked
+   * "forwarded" without the original author. Every file is encrypted again
+   * under a new key and uploaded for each destination. Files that are not on
+   * this device: CoreError `not-downloaded` (its message lists the blob ids),
+   * nothing is sent. Returns the new message ids.
+   */
+  async forwardMessage(accountId: string, chatId: string, senderId: string, msgId: string, toChatIds: readonly string[]): Promise<string[]> {
+    const rt = await this.#runtime(accountId);
+    const m = await this.db.messages.get([accountId, senderId, msgId]);
+    if (!m || m.chatId !== chatId || m.kind !== 'msg') throw new CoreError('not-allowed', 'no such message');
+    const atts = m.attachments ?? [];
+    const missing: string[] = [];
+    for (const a of atts) {
+      const b = await this.db.blobs.get([accountId, a.blob.id]);
+      const local = !!b?.storage && (b.status === 'done' || (b.direction === 'up' && b.status !== 'cancelled' && b.status !== 'failed'));
+      if (!local) missing.push(a.blob.id);
+    }
+    if (missing.length > 0) throw new CoreError('not-downloaded', missing.join(','));
+    const ids: string[] = [];
+    for (const to of toChatIds) {
+      const attachments: AttachmentInput[] = [];
+      for (const a of atts) {
+        attachments.push({
+          data: await rt.transfers.blob(a.blob.id),
+          name: a.name,
+          mime: a.mime,
+          kind: a.kind,
+          ...(a.w !== undefined ? { width: a.w } : {}),
+          ...(a.h !== undefined ? { height: a.h } : {}),
+          ...(a.thumb ? { thumb: base64urlDecode(a.thumb) } : {}),
+          ...(a.dur !== undefined ? { durationMs: a.dur } : {}),
+          ...(a.peaks ? { peaks: a.peaks } : {}),
+        });
+      }
+      ids.push(
+        await this.sendMessage(accountId, to, {
+          ...(m.body ? { text: m.body } : {}),
+          ...(attachments.length > 0 ? { attachments } : {}),
+          ...(m.location ? { location: m.location } : {}),
+          fwd: true,
+        }),
+      );
+    }
+    return ids;
+  }
+
+  /**
+   * Searches the messages stored on this device (nothing goes to the
+   * server), and chat and contact names. Words match by prefix, all words
+   * must match, case and ё/е do not matter.
+   */
+  async search(text: string, options: { accountId?: string; limit?: number } = {}): Promise<GlobalSearchResult> {
+    const words = queryWords(text);
+    if (words.length === 0) return { words, chats: [], contacts: [], messages: [], total: 0 };
+    const limit = options.limit ?? 100;
+    const result = await searchMessages(this.db, { text, ...(options.accountId ? { accountId: options.accountId } : {}), limit });
+    const summaries = (await chatSummaries(this.db)).filter((c) => !options.accountId || c.accountId === options.accountId);
+    const chats = summaries.filter((c) => c.title !== null && textMatches(c.title, words));
+    const withChat = new Set(summaries.filter((c) => c.peerId).map((c) => `${c.accountId}/${c.peerId}`));
+    const accounts = await this.db.accounts.toArray();
+    const mine = new Set(accounts.map((a) => `${a.id}/${a.userId}`));
+    const contacts = (await this.db.users.toArray())
+      .filter((u) => (!options.accountId || u.accountId === options.accountId) && u.name && !u.revoked)
+      .filter((u) => !mine.has(`${u.accountId}/${u.userId}`) && !withChat.has(`${u.accountId}/${u.userId}`) && textMatches(u.name!, words))
+      .map((u) => ({ accountId: u.accountId, userId: u.userId, name: u.name! }));
+    return { words, chats, contacts, messages: result.hits, total: result.total };
+  }
+
+  /** Every message of one chat that matches, newest first (search inside a chat). */
+  async searchChat(accountId: string, chatId: string, text: string): Promise<ChatSearchResult> {
+    const r = await searchMessages(this.db, { text, accountId, chatId });
+    return { words: r.words, hits: r.hits };
   }
 
   async markRead(accountId: string, chatId: string): Promise<void> {
@@ -626,8 +831,11 @@ export class FamilyChatCore {
   /** Sends a failed message again (failed attachment uploads are restarted). */
   async retry(accountId: string, msgId: string): Promise<void> {
     const rt = await this.#runtime(accountId);
-    await retryMessage(rt, msgId);
+    // Uploads first: a send pass between the two steps must not see the
+    // message pending while its upload is still marked failed (it would fail
+    // the message again at once).
     await rt.transfers.retryUploads(msgId);
+    await retryMessage(rt, msgId);
     rt.outbox.kick();
   }
 
@@ -1015,7 +1223,10 @@ export class FamilyChatCore {
     const user = new Map(users.map((u) => [`${u.accountId}/${u.userId}`, u]));
     const draft = new Map(drafts.map((d) => [`${d.accountId}/${d.chatId}`, d.text]));
     const pending = new Map<string, number>();
-    for (const o of outbox) pending.set(`${o.accountId}/${o.chatId}`, (pending.get(`${o.accountId}/${o.chatId}`) ?? 0) + 1);
+    for (const o of outbox) {
+      if (o.control) continue;
+      pending.set(`${o.accountId}/${o.chatId}`, (pending.get(`${o.accountId}/${o.chatId}`) ?? 0) + 1);
+    }
     const items: (ChatListItem & { sortKey: number })[] = [];
     for (const c of chats) {
       const a = acc.get(c.accountId);

@@ -10,6 +10,10 @@
 //
 // Import replays the events through the same decode-and-apply path as sync
 // (signatures and keys are checked again) and skips what is already known.
+// Edits and reactions are events too, so they replay into the same state.
+// Deleted messages (M4) travel as tombstones (`everyone` and `local`), written
+// before the events: their own events are no longer on this device, and the
+// tombstone keeps a copy from another source from coming back.
 // Records are processed as they are read: neither side holds the whole
 // archive in memory.
 
@@ -29,10 +33,10 @@ import {
   type SignedEnvelope,
 } from '@family-chat/protocol';
 import type { NoticeBody, ServerEvent, ServerNotice } from './api/types.ts';
-import { commitEvents, decodeEvents, type AccountRuntimeLike } from './apply.ts';
+import { commitEvents, decodeEvents, importTombstones, type AccountRuntimeLike } from './apply.ts';
 import { fileKey } from './attachments.ts';
 import type { CoreContext } from './context.ts';
-import type { AccountRow, ChatKind } from './db/schema.ts';
+import type { AccountRow, ChatKind, TombstoneRow } from './db/schema.ts';
 import { CoreError } from './errors.ts';
 import { FILE_CHUNK } from './files.ts';
 
@@ -46,6 +50,7 @@ const R_NOTICE = 7;
 const R_EVENT = 8;
 const R_FILE = 9;
 const R_FILE_CHUNK = 10;
+const R_TOMBSTONE = 11;
 
 const ENC = new TextEncoder();
 const DEC = new TextDecoder();
@@ -107,6 +112,13 @@ export async function* exportArchive(ctx: CoreContext, keys: IdentityKeys, optio
     }
     for (const c of await db.chats.where('accountId').equals(a.id).toArray()) {
       yield* emit(R_CHAT, json({ serverId: sid, chatId: c.chatId, kind: c.kind, peerId: c.peerId, readGseq: c.readGseq }));
+    }
+    for (const t of await db.tombstones.where('[accountId+chatId]').between([a.id, ''], [a.id, '\uffff']).toArray()) {
+      if (t.reason === 'server') continue; // a placeholder; the zeroed record comes from the server again
+      yield* emit(
+        R_TOMBSTONE,
+        json({ serverId: sid, chatId: t.chatId, senderId: t.senderId, msgId: t.msgId, reason: t.reason, by: t.by, at: t.at, gseq: t.gseq ?? null, time: t.time ?? null }),
+      );
     }
     const states = (await db.groupStates.where('[accountId+chatId+version]').between([a.id, '', 0], [a.id, '￿', Infinity]).toArray()).sort(
       (x, y) => (x.chatId === y.chatId ? x.version - y.version : x.chatId < y.chatId ? -1 : 1),
@@ -386,6 +398,14 @@ class ImportState {
       }
       case R_FILE:
         return this.#file(parse(r.data));
+      case R_TOMBSTONE: {
+        const t = parse<Omit<TombstoneRow, 'accountId' | 'gseq' | 'time'> & { serverId: string; gseq: number | null; time: number | null }>(r.data);
+        if (t.reason !== 'everyone' && t.reason !== 'local') return;
+        const a = this.#account(t.serverId);
+        const { serverId: _sid, gseq, time, ...row } = t;
+        await importTombstones(this.host.ctx, a.id, this.keys.userId, [{ ...row, ...(typeof gseq === 'number' && typeof time === 'number' ? { gseq, time } : {}) }]);
+        return;
+      }
       default:
         return; // A record type from a newer client: skipped.
     }

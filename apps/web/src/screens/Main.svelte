@@ -20,6 +20,7 @@
   const MyProfile = lazy(() => import('./MyProfile.svelte'));
   const Storage = lazy(() => import('./Storage.svelte'));
   const Security = lazy(() => import('./Security.svelte'));
+  const SearchScreen = lazy(() => import('./SearchScreen.svelte'));
 
   // One column below 900 px (a stack of screens over the chat list), two
   // columns from 900 px: the list and the open screen (docs/PLAN.md 8.2).
@@ -34,9 +35,11 @@
   {#if app.wide || top.name !== 'list'}
     <div class="content-pane">
       {#if top.name === 'chat'}
-        {#key `${top.accountId}/${top.chatId}`}
-          <Chat accountId={top.accountId} chatId={top.chatId} focus={top.focus ?? false} />
+        {#key `${top.accountId}/${top.chatId}/${top.jump?.msgId ?? ''}`}
+          <Chat accountId={top.accountId} chatId={top.chatId} focus={top.focus ?? false} jump={top.jump ?? null} />
         {/key}
+      {:else if top.name === 'search'}
+        {#await SearchScreen() then { default: C }}<C />{/await}
       {:else if top.name === 'new-chat'}
         {#await NewChat() then { default: C }}<C />{/await}
       {:else if top.name === 'new-group'}

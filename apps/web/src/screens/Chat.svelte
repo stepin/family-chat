@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { isCoreError, type GroupView, type MessageView } from '@family-chat/core';
+  import { isCoreError, type GroupView, type MessageView, type ReactionView } from '@family-chat/core';
+  import type { MessageAction } from '../components/MessageMenu.svelte';
+  import { lazy } from '../lib/lazy.ts';
+  import { copyText } from '../lib/clipboard.ts';
   import Avatar from '../components/Avatar.svelte';
   import Composer from '../components/Composer.svelte';
   import Icon from '../components/Icon.svelte';
@@ -25,7 +28,18 @@
   // and avatar on others' messages; service lines of groups; send statuses
   // with retry and cancel; attachments with preview, upload progress and the
   // image viewer; older messages on scrolling up; the composer at the bottom.
-  let { accountId, chatId, focus = false }: { accountId: string; chatId: string; focus?: boolean } = $props();
+  let {
+    accountId,
+    chatId,
+    focus = false,
+    jump = null,
+  }: {
+    accountId: string;
+    chatId: string;
+    focus?: boolean;
+    /** Open at this message (a search result) and mark it briefly. */
+    jump?: { readonly senderId: string; readonly msgId: string; readonly gseq: number } | null;
+  } = $props();
 
   // svelte-ignore state_referenced_locally
   const view = app.core.chat(accountId, chatId);
@@ -56,6 +70,26 @@
   const loadPreview = () => import('../components/AttachPreview.svelte');
   const loadViewer = () => import('../components/ImageViewer.svelte');
   const loadLocation = () => import('../components/LocationSheet.svelte');
+  // M4: the emoji picker (with its data), forwarding and the delete and "who reacted" dialogs.
+  const loadPicker = () => import('../components/EmojiPicker.svelte');
+  const loadForward = () => import('../components/ForwardSheet.svelte');
+  const loadDialogs = () => import('../components/MessageDialogs.svelte');
+  const loadMenu = lazy(() => import('../components/MessageMenu.svelte'));
+  const loadSearch = lazy(() => import('../components/ChatSearchBar.svelte'));
+  // The message menu and what it leads to.
+  let menuFor = $state.raw<{ message: MessageView; anchor: DOMRect } | null>(null);
+  /** The message of the open menu (kept after the menu closes, for the chosen action). */
+  let menuTarget: MessageView | null = null;
+  let replyTo = $state.raw<MessageView | null>(null);
+  let editing = $state.raw<MessageView | null>(null);
+  let pickerFor = $state.raw<{ kind: 'composer' } | { kind: 'react'; key: string } | null>(null);
+  let forwardKey = $state<string | null>(null);
+  let dialogFor = $state.raw<{ kind: 'delete'; key: string } | { kind: 'who'; key: string; emoji: string } | null>(null);
+  let highlightKey = $state<string | null>(null);
+  let highlightTimer: ReturnType<typeof setTimeout> | undefined;
+  // Search inside this chat.
+  let searchOpen = $state(false);
+  let searchButton: HTMLButtonElement | undefined = $state();
 
   const account = $derived(app.accounts.find((a) => a.id === accountId) ?? null);
   const summary = $derived(app.chatList.find((c) => c.accountId === accountId && c.chatId === chatId) ?? null);
@@ -98,6 +132,137 @@
     return null;
   });
   const showComposer = $derived(kind !== 'group' || (groupLoaded && group !== null));
+  const byKey = $derived(new Map(messages.map((m) => [m.key, m])));
+  const forwardMessage = $derived(forwardKey ? (byKey.get(forwardKey) ?? null) : null);
+  const isOwner = $derived(kind === 'group' && !!group?.isOwner);
+
+  function canDeleteForAll(m: MessageView): boolean {
+    if (m.kind !== 'msg' && m.kind !== 'update-required') return false;
+    if (removed) return false;
+    if (kind === 'group' && !group?.member) return false;
+    return m.outgoing || isOwner;
+  }
+
+  function menuActions(m: MessageView): MessageAction[] {
+    if (m.kind === 'deleted') return ['delete'];
+    const out: MessageAction[] = [];
+    if (!blocked && showComposer) out.push('reply');
+    if (m.body.trim().length > 0) out.push('copy');
+    if (!removed) out.push('forward');
+    if (m.outgoing && m.kind === 'msg' && !blocked) out.push('edit');
+    out.push('delete');
+    return out;
+  }
+
+  function quoteFor(m: MessageView): { name: string; text: string } {
+    const first = m.attachments?.[0];
+    const body = m.body.replace(/\s+/g, ' ').trim();
+    const text =
+      body ||
+      (m.location ? t.msg.place : first?.kind === 'image' ? t.msg.photo : first?.kind === 'voice' ? t.msg.voice : (first?.name ?? t.msg.file));
+    return { name: m.outgoing ? t.msg.youName : nameOf(m.senderId), text };
+  }
+
+  function nameOrYou(id: string): string {
+    return id === account?.userId ? t.msg.youName : nameOf(id);
+  }
+
+  function openMenu(m: MessageView, anchor: DOMRect): void {
+    menuTarget = m;
+    menuFor = { message: m, anchor };
+  }
+
+  async function onAction(m: MessageView, a: MessageAction): Promise<void> {
+    if (a === 'reply') {
+      editing = null;
+      replyTo = m;
+      await tick();
+      composer?.focus();
+    } else if (a === 'copy') {
+      app.notify((await copyText(m.body)) ? t.msg.copied : t.common.copyFailed);
+    } else if (a === 'forward') {
+      forwardKey = m.key;
+    } else if (a === 'edit') {
+      replyTo = null;
+      editing = m;
+    } else if (a === 'delete') {
+      dialogFor = { kind: 'delete', key: m.key };
+    }
+  }
+
+  async function react(m: MessageView, emoji: string, on: boolean): Promise<void> {
+    try {
+      await app.core.react(accountId, chatId, m.senderId, m.msgId, emoji, on);
+    } catch (e) {
+      app.notify(t.msg.failed);
+      app.log('warn', 'chat', 'reaction failed', e);
+    }
+  }
+
+  function toggleReaction(m: MessageView, emoji: string): void {
+    const mine = m.reactions?.some((r) => r.emoji === emoji && r.mine) ?? false;
+    void react(m, emoji, !mine);
+  }
+
+  async function saveEdit(text: string): Promise<boolean> {
+    const m = editing;
+    if (!m) return false;
+    try {
+      await app.core.editMessage(accountId, chatId, m.msgId, text);
+      editing = null;
+      return true;
+    } catch (e) {
+      app.notify(isCoreError(e, 'invalid-input') ? t.msg.editEmpty : t.msg.failed);
+      app.log('warn', 'chat', 'edit failed', e);
+      return false;
+    }
+  }
+
+  async function deleteMessage(m: MessageView, forAll: boolean): Promise<void> {
+    try {
+      if (forAll) await app.core.deleteForEveryone(accountId, chatId, m.senderId, m.msgId);
+      else await app.core.deleteForMe(accountId, chatId, m.senderId, m.msgId);
+      if (replyTo?.key === m.key) replyTo = null;
+      if (editing?.key === m.key) editing = null;
+    } catch (e) {
+      app.notify(t.msg.failed);
+      app.log('warn', 'chat', 'delete failed', e);
+    }
+  }
+
+  function showWho(m: MessageView, r: ReactionView): void {
+    dialogFor = { kind: 'who', key: m.key, emoji: r.emoji };
+  }
+
+  function mark(key: string): void {
+    clearTimeout(highlightTimer);
+    highlightKey = key;
+    highlightTimer = setTimeout(() => (highlightKey = null), 2500);
+  }
+
+  /** Scrolls to a message (loading older ones from this device if needed) and marks it. */
+  async function jumpTo(senderId: string, msgId: string, gseq: number | null): Promise<boolean> {
+    const key = `${senderId}/${msgId}`;
+    if (!byKey.has(key)) {
+      if (gseq === null || !(await view.reveal(gseq))) {
+        app.notify(t.search.notLoaded);
+        return false;
+      }
+      for (let i = 0; i < 40 && !byKey.has(key); i++) await new Promise((r) => setTimeout(r, 25));
+    }
+    await tick();
+    const el = feedEl?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
+    if (!el) return false;
+    el.scrollIntoView({ block: 'center' });
+    mark(key);
+    return true;
+  }
+
+  function onQuote(m: MessageView): void {
+    const q = m.replyTo;
+    if (q?.available) void jumpTo(q.author, q.id, q.gseq);
+  }
+
   const bigUpload = $derived(
     messages.some((m) => m.outgoing && m.status === 'on-device' && m.upload && m.upload.total > 4 * 1024 * 1024 && m.upload.done < m.upload.total),
   );
@@ -154,7 +319,16 @@
     if (!wasLoaded || stick) scrollToBottom();
     stickToBottom = false;
     markReadIfVisible();
-    if (!wasLoaded) checkTop();
+    if (!wasLoaded) {
+      if (jump) void jumpTo(jump.senderId, jump.msgId, jump.gseq);
+      else checkTop();
+    }
+  }
+
+  async function closeSearch(): Promise<void> {
+    searchOpen = false;
+    await tick();
+    searchButton?.focus();
   }
 
   /** The observer does not fire again while the top stays visible: short chats are checked here. */
@@ -207,6 +381,7 @@
     }
     if (!app.hello) void app.refreshHello();
     return () => {
+      clearTimeout(highlightTimer);
       unsub();
       groupUnsub();
       clearTimeout(groupTimer);
@@ -224,13 +399,24 @@
     }
   }
 
+  /** The reply of the next message (and it is used up). */
+  function takeReply(): { author: string; id: string } | undefined {
+    const r = replyTo;
+    replyTo = null;
+    return r ? { author: r.senderId, id: r.msgId } : undefined;
+  }
+
   async function send(text: string): Promise<boolean> {
+    const reply = replyTo;
     try {
       stickToBottom = true;
-      await app.core.send(accountId, chatId, text);
+      const r = takeReply();
+      if (r) await app.core.sendMessage(accountId, chatId, { text, reply: r });
+      else await app.core.send(accountId, chatId, text);
       afterFirstSend();
       return true;
     } catch (e) {
+      replyTo = reply;
       app.notify(errorText(e));
       app.log('warn', 'chat', 'queueing a message failed', e);
       return false;
@@ -254,7 +440,8 @@
       const attachments = [];
       for (const f of pending) attachments.push(await prepareAttachment(f, { original }));
       stickToBottom = true;
-      await app.core.sendMessage(accountId, chatId, { text: caption.trim(), attachments });
+      const reply = takeReply();
+      await app.core.sendMessage(accountId, chatId, { text: caption.trim(), attachments, ...(reply ? { reply } : {}) });
       composer?.clear();
       closePreview();
       afterFirstSend();
@@ -272,7 +459,9 @@
     if (blocked) return false;
     try {
       stickToBottom = true;
+      const reply = takeReply();
       await app.core.sendMessage(accountId, chatId, {
+        ...(reply ? { reply } : {}),
         attachments: [
           { data: rec.blob, name: voiceFileName(rec.mime, Date.now()), mime: rec.mime, kind: 'voice', durationMs: rec.durationMs, peaks: rec.peaks },
         ],
@@ -291,7 +480,8 @@
   async function sendPlace(place: Place): Promise<boolean> {
     try {
       stickToBottom = true;
-      await app.core.sendMessage(accountId, chatId, { location: place });
+      const reply = takeReply();
+      await app.core.sendMessage(accountId, chatId, { location: place, ...(reply ? { reply } : {}) });
       afterFirstSend();
       return true;
     } catch (e) {
@@ -345,7 +535,8 @@
   }
 
   function onKeydown(e: KeyboardEvent): void {
-    if (e.key === 'Escape' && !e.defaultPrevented && !app.wide && viewerIndex === null && pending.length === 0 && !locating) nav.back();
+    const overlay = viewerIndex !== null || pending.length > 0 || locating || menuFor || pickerFor || forwardKey || dialogFor || searchOpen;
+    if (e.key === 'Escape' && !e.defaultPrevented && !app.wide && !overlay) nav.back();
   }
 
   // Drag and drop of files onto the chat (desktop).
@@ -411,7 +602,16 @@
         {#if subtitle}<span class="subtitle">{subtitle}</span>{/if}
       </span>
     </span>
+    <button bind:this={searchButton} class="icon-btn" type="button" aria-label={t.search.inChat} aria-expanded={searchOpen} onclick={() => (searchOpen ? closeSearch() : (searchOpen = true))} data-testid="chat-search-button">
+      <Icon name="search" />
+    </button>
   </header>
+
+  {#if searchOpen}
+    {#await loadSearch() then { default: ChatSearchBar }}
+      <ChatSearchBar {accountId} {chatId} onjump={(sender, id, gseq) => void jumpTo(sender, id, gseq)} onclose={closeSearch} />
+    {/await}
+  {/if}
 
   {#if kind === 'group' && group}
     {#if group.frozen}
@@ -473,7 +673,7 @@
           </li>
         {:else}
           {@const author = authorOf(entry.message)}
-          <li>
+          <li data-key={entry.key}>
             <span class="visually-hidden">
               {entry.message.outgoing ? t.chat.outgoing : t.chat.incoming(kind === 'group' ? nameOf(entry.message.senderId) : title)}:
             </span>
@@ -486,6 +686,12 @@
               onretry={retry}
               oncancel={cancel}
               onopen={openViewer}
+              nameOf={nameOrYou}
+              onmenu={openMenu}
+              onreact={removed || (kind === 'group' && group !== null && !group.member) ? undefined : (m, emoji, on) => void react(m, emoji, on)}
+              onquote={onQuote}
+              onwho={showWho}
+              highlight={highlightKey === entry.key}
             />
           </li>
         {/if}
@@ -522,6 +728,12 @@
       onfiles={onFiles}
       onvoice={sendVoice}
       onlocation={() => (locating = true)}
+      reply={replyTo ? quoteFor(replyTo) : null}
+      oncancelreply={() => (replyTo = null)}
+      editing={editing ? { key: editing.key, body: editing.body, allowEmpty: (editing.attachments?.length ?? 0) > 0 || !!editing.location } : null}
+      onedit={saveEdit}
+      oncanceledit={() => (editing = null)}
+      onemoji={() => (pickerFor = { kind: 'composer' })}
     />
   {/if}
 
@@ -554,6 +766,77 @@
   {#await loadLocation() then { default: LocationSheet }}
     <LocationSheet onsend={sendPlace} oncancel={() => (locating = false)} />
   {/await}
+{/if}
+
+{#if menuFor}
+  {#await loadMenu() then { default: MessageMenu }}
+    {@const m = menuFor?.message}
+    <MessageMenu
+      actions={m ? menuActions(m) : []}
+      reactions={m?.kind === 'msg' && !removed && !(kind === 'group' && group !== null && !group.member)}
+      mine={(m?.reactions ?? []).filter((r) => r.mine).map((r) => r.emoji)}
+      anchor={menuFor?.anchor ?? null}
+      onaction={(a) => {
+        if (menuTarget) void onAction(menuTarget, a);
+      }}
+      onreact={(emoji) => {
+        if (menuTarget) toggleReaction(menuTarget, emoji);
+      }}
+      onmore={() => {
+        if (menuTarget) pickerFor = { kind: 'react', key: menuTarget.key };
+      }}
+      onclose={() => (menuFor = null)}
+    />
+  {/await}
+{/if}
+
+{#if pickerFor}
+  {@const target = pickerFor}
+  {#await loadPicker()}
+    <p class="visually-hidden" role="status">{t.emoji.loading}</p>
+  {:then { default: EmojiPicker }}
+    <EmojiPicker
+      title={target.kind === 'react' ? t.msg.reactions : t.emoji.title}
+      onpick={(emoji) => {
+        if (target.kind === 'composer') composer?.insert(emoji);
+        else {
+          const m = byKey.get(target.key);
+          if (m) toggleReaction(m, emoji);
+        }
+      }}
+      onclose={() => (pickerFor = null)}
+    />
+  {/await}
+{/if}
+
+{#if forwardMessage}
+  {#await loadForward() then { default: ForwardSheet }}
+    <ForwardSheet {accountId} {chatId} message={forwardMessage} onclose={() => (forwardKey = null)} />
+  {/await}
+{/if}
+
+{#if dialogFor}
+  {@const d = dialogFor}
+  {@const target = d ? byKey.get(d.key) : undefined}
+  {#if d && target}
+    {#await loadDialogs() then { default: MessageDialogs }}
+      {#if d.kind === 'delete'}
+        <MessageDialogs
+          kind="delete"
+          forAll={canDeleteForAll(target)}
+          onconfirm={(forAll) => void deleteMessage(target, forAll)}
+          onclose={() => (dialogFor = null)}
+        />
+      {:else}
+        <MessageDialogs
+          kind="who"
+          emoji={d.emoji}
+          names={(target.reactions ?? []).find((r) => r.emoji === d.emoji)?.users.map(nameOrYou) ?? []}
+          onclose={() => (dialogFor = null)}
+        />
+      {/if}
+    {/await}
+  {/if}
 {/if}
 
 <style>

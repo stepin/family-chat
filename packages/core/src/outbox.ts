@@ -9,8 +9,11 @@
 // Server time and order come from the POST answer.
 
 import {
+  encodeDeletePayload,
+  encodeEditPayload,
   encodeEvent,
   encodeMsgPayload,
+  encodeReactPayload,
   MAX_BODY_BYTES,
   newMessageId,
   type Attachment,
@@ -21,7 +24,7 @@ import {
 import { ApiError, isApiError, isTransient } from './api/errors.ts';
 import { commitSent, outboxPayload, type AccountRuntimeLike } from './apply.ts';
 import { describeError } from './db/diagnostics.ts';
-import type { OutboxRow } from './db/schema.ts';
+import type { OutboxControl, OutboxRow } from './db/schema.ts';
 import { CoreError, isCoreError } from './errors.ts';
 import { backoffDelay } from './util/backoff.ts';
 import { Waker } from './util/clock.ts';
@@ -108,6 +111,63 @@ export async function enqueueMessage(
   return msgId;
 }
 
+/**
+ * Puts a control event (edit, delete for everyone, reaction) into the outbox.
+ * It goes out in queue order like a message. Returns its event id.
+ */
+export async function enqueueControl(rt: AccountRuntimeLike, chatId: string, control: OutboxControl): Promise<string> {
+  if (control.kind === 'edit' && ENCODER.encode(control.body).length > MAX_BODY_BYTES) {
+    throw new CoreError('invalid-input', `message is longer than ${MAX_BODY_BYTES} bytes`);
+  }
+  const { ctx, session } = rt;
+  const { db } = ctx;
+  const acc = session.accountId;
+  const chat = await db.chats.get([acc, chatId]);
+  if (!chat) throw new CoreError('unknown-chat');
+  if (chat.kind === 'group') {
+    const g = await db.groups.get([acc, chatId]);
+    if (!g?.member) throw new CoreError('not-member');
+  }
+  const msgId = newMessageId();
+  await db.transaction('rw', [db.counters, db.outbox], async () => {
+    const counter = await db.counters.get([acc, chatId]);
+    const seq = counter?.nextSeq ?? 1;
+    await db.counters.put({ accountId: acc, chatId, nextSeq: seq + 1 });
+    const now = ctx.clock.now();
+    await db.outbox.add({
+      accountId: acc,
+      msgId,
+      chatId,
+      devId: session.devId,
+      seq,
+      body: '',
+      reply: null,
+      status: 'pending',
+      attempts: 0,
+      nextAttemptAt: now,
+      createdAt: now,
+      error: null,
+      control,
+    });
+  });
+  return msgId;
+}
+
+/** Encodes the payload of an outbox row: a message or a control event. */
+function encodeRow(row: OutboxRow): Uint8Array {
+  const c = row.control;
+  const common = { id: row.msgId, dev: row.devId, seq: row.seq };
+  if (!c) return encodeMsgPayload({ ...outboxPayload(row), ...(row.fwd ? { fwd: true } : {}) });
+  switch (c.kind) {
+    case 'edit':
+      return encodeEditPayload({ ...common, target: c.target, body: c.body });
+    case 'delete':
+      return encodeDeletePayload({ ...common, target: c.target, targetDev: c.targetDev, targetSeq: c.targetSeq });
+    case 'react':
+      return encodeReactPayload({ ...common, target: c.target, emoji: c.emoji, on: c.on });
+  }
+}
+
 /** Upload state of an outbox row's attachments: all done, still running, or one failed. */
 async function uploadState(rt: AccountRuntimeLike, row: OutboxRow): Promise<'ready' | 'waiting' | 'failed'> {
   if (!row.attachments || row.attachments.length === 0) return 'ready';
@@ -189,14 +249,15 @@ export class OutboxSender {
       const uploads = await uploadState(this.rt, fresh);
       if (uploads === 'waiting') continue;
       try {
+        if (fresh.control?.kind === 'delete' && fresh.control.posted) {
+          await this.#serverCleanup(fresh, fresh.control);
+          continue;
+        }
         if (uploads === 'failed') throw new CoreError('invalid-input', 'attachment upload failed');
         const chat = await db.chats.get([acc, fresh.chatId]);
         if (!chat) throw new CoreError('unknown-chat');
         const author = await ctx.keys(session.userId);
-        const payload = encodeMsgPayload({
-          ...outboxPayload(fresh),
-          ...(fresh.fwd ? { fwd: true } : {}),
-        });
+        const payload = encodeRow(fresh);
         let res;
         let body: Uint8Array;
         let epoch = 0;
@@ -247,6 +308,34 @@ export class OutboxSender {
       }
     }
     return Infinity;
+  }
+
+  /**
+   * After a delete event is on the server: the target's record is zeroed on
+   * the server and my uploads of it are removed. Gone already counts as done.
+   */
+  async #serverCleanup(row: OutboxRow, c: Extract<OutboxControl, { kind: 'delete' }>): Promise<void> {
+    const { ctx, session } = this.rt;
+    const acc = session.accountId;
+    if (c.targetGseq !== null) {
+      const gseq = c.targetGseq;
+      try {
+        await session.call((t) => session.transport.deleteEvent(t, row.chatId, gseq));
+      } catch (e) {
+        if (isTransient(e) || isCoreError(e)) throw e;
+        // Removed by retention, never stored, or not mine to delete (a former owner): nothing more to do.
+        void ctx.diag.info('outbox', `server copy of event ${gseq} not deleted: ${describeError(e)}`, acc);
+      }
+    }
+    for (const blobId of c.blobIds) {
+      try {
+        await session.call((t) => session.transport.deleteBlob(t, blobId));
+      } catch (e) {
+        if (isTransient(e) || isCoreError(e)) throw e;
+        if (!isApiError(e, 'blob_not_found')) void ctx.diag.info('outbox', `attachment ${blobId} not deleted: ${describeError(e)}`, acc);
+      }
+    }
+    await ctx.db.outbox.delete([acc, row.msgId]);
   }
 
   async #keysFor(chat: { kind: string; peerId: string; chatId: string }): Promise<ChatKeys> {

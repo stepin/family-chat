@@ -526,7 +526,7 @@ fn notice_json(e: &Entry, n: &crate::notice::Notice) -> Value {
 }
 
 fn event_json(e: &Entry, body: &[u8]) -> Value {
-    json!({
+    let mut v = json!({
         "kind": "event",
         "gseq": e.h.gseq,
         "time": e.h.time,
@@ -535,19 +535,23 @@ fn event_json(e: &Entry, body: &[u8]) -> Value {
         "devId": e.h.dev,
         "epoch": e.h.epoch,
         "msgId": e.h.msg,
-        "body": b64_encode(body),
-    })
+        "body": if e.deleted { String::new() } else { b64_encode(body) },
+    });
+    if e.deleted {
+        v["deleted"] = json!(true);
+    }
+    v
 }
 
 async fn page_json(store: &Store, page: Page, oldest: (u64, Option<u64>)) -> Result<Response, ApiError> {
-    let path = store.path().to_path_buf();
+    let reader = store.clone();
     let to_read: Vec<Entry> = page
         .events
         .iter()
         .filter(|e| e.h.sender != NOTICE_SENDER)
         .copied()
         .collect();
-    let bodies = tokio::task::spawn_blocking(move || Store::read_bodies(&path, &to_read))
+    let bodies = tokio::task::spawn_blocking(move || reader.read_bodies(&to_read))
         .await
         .map_err(|_| ApiError::internal("reading events failed"))?;
     let mut bodies = bodies.into_iter().peekable();
@@ -700,6 +704,22 @@ pub async fn chat_events(
         ))
     })?;
     page_json(&st.store, page, oldest).await
+}
+
+/// `DELETE /v1/chats/<id>/events/<gseq>`: delete for everyone.
+pub async fn delete_event(
+    State(st): State<Arc<AppState>>,
+    Auth(c): Auth,
+    UrlPath((chat, gseq)): UrlPath<(String, String)>,
+) -> Result<Response, ApiError> {
+    let chat = parse_chat(&chat)?;
+    let gseq = parse_decimal(&gseq)
+        .filter(|g| *g >= 1)
+        .ok_or_else(|| ApiError::bad_request("bad gseq"))?;
+    st.store
+        .write(move |w| w.delete_event(chat, gseq, c.user, now_ms()))
+        .await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 // ---- admin ----

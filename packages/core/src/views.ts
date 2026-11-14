@@ -48,6 +48,32 @@ export interface AttachmentView {
   readonly error: string | null;
 }
 
+/** A reaction chip under a message (M4). */
+export interface ReactionView {
+  readonly emoji: string;
+  readonly count: number;
+  /** I placed this reaction (shown highlighted; a tap removes it). */
+  readonly mine: boolean;
+  /** Who placed it (sorted userIds). */
+  readonly users: readonly string[];
+}
+
+/** The quoted message above a reply (M4). */
+export interface ReplyPreview {
+  readonly author: string;
+  readonly id: string;
+  /** False when the original is not on this device or was deleted: show "message unavailable". */
+  readonly available: boolean;
+  /** Text of the original (may be empty when it only carries media). */
+  readonly body: string;
+  /** What the original carries besides text. */
+  readonly media: LastMedia | null;
+  /** Name of the first attachment (files). */
+  readonly fileName: string | null;
+  /** Server order of the original, for jumping to it. */
+  readonly gseq: number | null;
+}
+
 /** "on-device": in the outbox; "on-server": accepted by the server; "failed": needs retry or cancel. */
 export type MessageStatus = 'on-device' | 'on-server' | 'failed';
 
@@ -78,6 +104,16 @@ export interface MessageView {
   readonly service?: ServiceEntry | null;
   /** Upload progress of an outgoing message with attachments (bytes), while it is on the device. */
   readonly upload?: { readonly done: number; readonly total: number } | null;
+  // ---- M4 ----
+  /** The text was edited by its author ("изменено"). */
+  readonly edited?: boolean;
+  /** Reaction chips, in a stable order. */
+  readonly reactions?: readonly ReactionView[];
+  /** The quoted original when this is a reply. */
+  readonly replyTo?: ReplyPreview | null;
+  /** Device and seq of the original event (needed to delete it for everyone). */
+  readonly devId?: string;
+  readonly seq?: number | null;
 }
 
 export interface ChatSummary {
@@ -235,9 +271,11 @@ export async function chatMessages(db: CoreDb, accountId: string, chatId: string
     .limit(limit)
     .toArray();
   rows.reverse();
-  const pending = (await db.outbox.where('[accountId+chatId]').equals([accountId, chatId]).toArray()).sort(
+  const queued = (await db.outbox.where('[accountId+chatId]').equals([accountId, chatId]).toArray()).sort(
     (a, b) => a.createdAt - b.createdAt || a.seq - b.seq,
   );
+  const pending = queued.filter((o) => !o.control);
+  const controls = queued.filter((o) => o.control && !(o.control.kind === 'delete' && o.control.posted));
   const blobIds = new Set<string>();
   for (const m of rows) for (const a of m.attachments ?? []) blobIds.add(a.blob.id);
   for (const o of pending) for (const a of o.attachments ?? []) blobIds.add(a.blob.id);
@@ -246,6 +284,7 @@ export async function chatMessages(db: CoreDb, accountId: string, chatId: string
     const found = await db.blobs.bulkGet([...blobIds].map((id): [string, string] => [accountId, id]));
     for (const b of found) if (b) blobs.set(b.blobId, b);
   }
+  const replies = await replyPreviews(db, accountId, [...rows.map((m) => m.reply), ...pending.map((o) => o.reply)]);
   const out: MessageView[] = rows.map((m) => ({
     key: `${m.senderId}/${m.msgId}`,
     accountId,
@@ -265,8 +304,72 @@ export async function chatMessages(db: CoreDb, accountId: string, chatId: string
     fwd: m.fwd === true,
     service: m.service ?? null,
     upload: null,
+    edited: !!m.edited,
+    reactions: reactionViews(m.reactions, me),
+    replyTo: m.reply ? (replies.get(`${m.reply.author}/${m.reply.id}`) ?? null) : null,
+    devId: m.devId,
+    seq: m.seq,
   }));
-  for (const o of pending) out.push(outboxView(o, me, blobs));
+  for (const o of pending) out.push({ ...outboxView(o, me, blobs), replyTo: o.reply ? (replies.get(`${o.reply.author}/${o.reply.id}`) ?? null) : null });
+  return controls.length > 0 ? overlayControls(out, controls, me) : out;
+}
+
+function reactionViews(list: MessageRow['reactions'], me: string): ReactionView[] {
+  return (list ?? []).map((r) => ({ emoji: r.emoji, count: r.users.length, mine: r.users.includes(me), users: r.users }));
+}
+
+/** What the queued (not yet sent) edits, deletions and reactions will do: shown at once. */
+function overlayControls(list: MessageView[], controls: readonly OutboxRow[], me: string): MessageView[] {
+  const index = new Map(list.map((m, i) => [m.key, i]));
+  const out = [...list];
+  for (const o of controls) {
+    const c = o.control!;
+    const i = index.get(`${c.target.author}/${c.target.id}`);
+    if (i === undefined) continue;
+    const m = out[i]!;
+    if (m.kind !== 'msg') continue;
+    if (c.kind === 'edit') out[i] = { ...m, body: c.body, edited: true };
+    else if (c.kind === 'delete') {
+      out[i] = { ...m, kind: 'deleted', body: '', attachments: [], location: null, reactions: [], replyTo: null, edited: false };
+    } else {
+      const reactions = [...(m.reactions ?? [])];
+      const at = reactions.findIndex((r) => r.emoji === c.emoji);
+      const cur = at >= 0 ? reactions[at]! : undefined;
+      const users = new Set(cur?.users ?? []);
+      if (c.on) users.add(me);
+      else users.delete(me);
+      const next: ReactionView = { emoji: c.emoji, count: users.size, mine: c.on, users: [...users].sort() };
+      if (at >= 0) {
+        if (next.count === 0) reactions.splice(at, 1);
+        else reactions[at] = next;
+      } else if (next.count > 0) reactions.push(next);
+      out[i] = { ...m, reactions };
+    }
+  }
+  return out;
+}
+
+/** Previews of quoted messages, by `${author}/${id}`. */
+async function replyPreviews(db: CoreDb, accountId: string, refs: readonly (MsgRef | null)[]): Promise<Map<string, ReplyPreview>> {
+  const wanted = new Map<string, MsgRef>();
+  for (const r of refs) if (r) wanted.set(`${r.author}/${r.id}`, r);
+  const out = new Map<string, ReplyPreview>();
+  if (wanted.size === 0) return out;
+  const list = [...wanted.values()];
+  const found = await db.messages.bulkGet(list.map((r): [string, string, string] => [accountId, r.author, r.id]));
+  list.forEach((r, i) => {
+    const m = found[i];
+    const ok = !!m && m.kind === 'msg';
+    out.set(`${r.author}/${r.id}`, {
+      author: r.author,
+      id: r.id,
+      available: ok,
+      body: ok ? m.body : '',
+      media: ok ? (m.attachments?.[0]?.kind ?? (m.location ? 'location' : null)) : null,
+      fileName: ok ? (m.attachments?.[0]?.name ?? null) : null,
+      gseq: ok ? m.gseq : null,
+    });
+  });
   return out;
 }
 
@@ -314,7 +417,10 @@ export async function chatSummaries(db: CoreDb): Promise<ChatSummary[]> {
   const group = new Map(groups.map((g) => [`${g.accountId}/${g.chatId}`, g]));
   const draft = new Map(drafts.map((d) => [`${d.accountId}/${d.chatId}`, d.text]));
   const pending = new Map<string, number>();
-  for (const o of outbox) pending.set(`${o.accountId}/${o.chatId}`, (pending.get(`${o.accountId}/${o.chatId}`) ?? 0) + 1);
+  for (const o of outbox) {
+    if (o.control) continue;
+    pending.set(`${o.accountId}/${o.chatId}`, (pending.get(`${o.accountId}/${o.chatId}`) ?? 0) + 1);
+  }
   const items: (ChatSummary & { sortKey: number })[] = [];
   for (const c of chats) {
     const a = acc.get(c.accountId);

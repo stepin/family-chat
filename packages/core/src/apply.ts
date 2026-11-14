@@ -12,21 +12,53 @@
 // events, the derived messages, the chat summaries, the seq tracking,
 // attachment rows and (for sync) the cursor, so a crash never leaves a cursor
 // ahead of its messages. Duplicates are dropped by (sender, message id).
+//
+// Edits, deletions and reactions (M4) are stored as control rows and the
+// target message is recomputed from all of them (`recompute`), so the result
+// does not depend on the order in which events arrive:
+// - delete: valid from the target's author or from an owner of the group in
+//   an accepted state of the delete event's epoch. Final: the message becomes
+//   a quiet "deleted" row (no text, no files, no reactions), its event and
+//   the edit and reaction events about it are dropped from this device, its
+//   attachments are removed. A delete that arrives before its target leaves a
+//   tombstone, and the target is turned into the deleted row on arrival.
+// - edit: valid only from the target's author; the edit with the highest
+//   gseq wins (the server's order). No time window (the plans name none).
+// - react: one value per (target, sender, emoji), the highest gseq wins;
+//   emoji are listed by the gseq of their oldest reaction still on.
+// - The server's zeroed record of a deleted event ("deleted": true) is not
+//   proof of anything: it only puts a "deleted" placeholder where nothing is
+//   known, and never hides a readable message. Only the signed payload does.
 
 import {
   decodeEvent,
   isProtocolError,
+  payloadCommon,
   type Attachment,
   type DecodedPayload,
   type Identity,
   type MsgPayload,
+  type MsgRef,
 } from '@family-chat/protocol';
+import { Dexie } from 'dexie';
 import { isTransient } from './api/errors.ts';
 import type { PostEventResult, ServerEvent } from './api/types.ts';
 import { CoreError, isCoreError } from './errors.ts';
 import type { CoreContext } from './context.ts';
 import { describeError } from './db/diagnostics.ts';
-import type { BlobRow, ChatKind, ChatRow, MessageRow, OutboxRow, RetentionGap } from './db/schema.ts';
+import type {
+  BlobRow,
+  ChatKind,
+  ChatRow,
+  ControlRow,
+  MessageRow,
+  OutboxRow,
+  ReactionAgg,
+  RetentionGap,
+  TombstoneRow,
+} from './db/schema.ts';
+import { fileKey } from './attachments.ts';
+import { messageWords } from './search.ts';
 import type { Directory } from './directory.ts';
 import type { Groups } from './groups.ts';
 import type { Session } from './session.ts';
@@ -45,6 +77,8 @@ export interface Applicable {
   readonly time: number;
   readonly body: Uint8Array;
   readonly payload: DecodedPayload;
+  /** The server's zeroed record of an event deleted for everyone: no payload, header only. */
+  readonly serverDeleted?: boolean;
 }
 
 export interface AccountRuntimeLike {
@@ -116,6 +150,26 @@ async function decodeAll(rt: AccountRuntimeLike, events: readonly ServerEvent[],
   let reconciled = false;
   for (const ev of events) {
     const where = `event gseq=${ev.gseq} chat=${ev.chatId} sender=${ev.senderId}`;
+    if (ev.deleted) {
+      const peerId = await directory.peerForChat(ev.chatId);
+      const known = peerId || (await db.groups.get([acc, ev.chatId]));
+      if (!known) continue;
+      out.push({
+        chatId: ev.chatId,
+        chatKind: peerId ? (peerId === me ? 'self' : 'dm') : 'group',
+        peerId: peerId ?? '',
+        senderId: ev.senderId,
+        msgId: ev.msgId,
+        devId: ev.devId,
+        epoch: ev.epoch,
+        gseq: ev.gseq,
+        time: ev.time,
+        body: ev.body,
+        payload: { kind: 'ignore', t: '', id: ev.msgId },
+        serverDeleted: true,
+      });
+      continue;
+    }
     try {
       const sender = await directory.user(ev.senderId);
       if (sender?.revoked && ev.time > sender.revoked.revokedAt) {
@@ -231,7 +285,35 @@ export interface CommitResult {
   readonly attachments: boolean;
 }
 
-const COMMIT_TABLES = (db: CoreContext['db']) => [db.events, db.messages, db.chats, db.seqTrack, db.accounts, db.blobs];
+/** Work collected inside a commit transaction and done after it. */
+export interface CommitFlags {
+  attachments: boolean;
+  /** Local attachment files of deleted messages, removed after the transaction. */
+  files: { storage: 'opfs' | 'idb'; key: string }[];
+}
+
+export const COMMIT_TABLES = (db: CoreContext['db']) => [
+  db.events,
+  db.messages,
+  db.chats,
+  db.seqTrack,
+  db.accounts,
+  db.blobs,
+  db.controls,
+  db.tombstones,
+  db.groupStates,
+];
+
+/** Removes the local files of deleted messages (outside any transaction; failures are ignored). */
+export async function removeFiles(ctx: CoreContext, files: CommitFlags['files']): Promise<void> {
+  for (const f of files) {
+    try {
+      await (await ctx.files.of(f.storage)).delete(f.key);
+    } catch {
+      // Already gone or storage closed.
+    }
+  }
+}
 
 /** Stores verified events (and the cursor) in one transaction. */
 export async function commitEvents(
@@ -245,7 +327,7 @@ export async function commitEvents(
   const gaps: string[] = [];
   let added = 0;
   const auto = (await db.settings.get(SETTING_AUTO_DOWNLOAD))?.value !== false;
-  const flags = { attachments: false };
+  const flags: CommitFlags = { attachments: false, files: [] };
   await db.transaction('rw', COMMIT_TABLES(db), async () => {
     for (const item of items) {
       if (await applyOne(ctx, accountId, myUserId, item, gaps, auto, flags)) added++;
@@ -261,6 +343,7 @@ export async function commitEvents(
     if (Object.keys(patch).length > 0) await db.accounts.update(accountId, patch);
   });
   for (const g of gaps) void ctx.diag.warn('gap', g, accountId);
+  await removeFiles(ctx, flags.files);
   return { added, gaps, attachments: flags.attachments };
 }
 
@@ -280,7 +363,25 @@ export function outboxPayload(row: OutboxRow): MsgPayload {
   };
 }
 
-/** Records a message the server accepted: removes the outbox row, stores event and message. */
+/** The payload of an outbox row (a message or a control event), exactly as it is encoded for sending. */
+export function outboxParsed(row: OutboxRow): DecodedPayload {
+  const c = row.control;
+  const common = { v: 1 as const, id: row.msgId, dev: row.devId, seq: row.seq };
+  if (!c) return { kind: 'msg', msg: outboxPayload(row) };
+  switch (c.kind) {
+    case 'edit':
+      return { kind: 'edit', edit: { ...common, t: 'edit', target: c.target, body: c.body } };
+    case 'delete':
+      return { kind: 'delete', delete: { ...common, t: 'delete', target: c.target, targetDev: c.targetDev, targetSeq: c.targetSeq } };
+    case 'react':
+      return { kind: 'react', react: { ...common, t: 'react', target: c.target, emoji: c.emoji, on: c.on } };
+  }
+}
+
+/**
+ * Records an event the server accepted: removes the outbox row (a posted
+ * delete stays for its server clean-up), stores the event and its effect.
+ */
 export async function commitSent(
   ctx: CoreContext,
   accountId: string,
@@ -293,9 +394,13 @@ export async function commitSent(
 ): Promise<void> {
   const { db } = ctx;
   const gaps: string[] = [];
-  const flags = { attachments: false };
+  const flags: CommitFlags = { attachments: false, files: [] };
   await db.transaction('rw', [...COMMIT_TABLES(db), db.outbox], async () => {
-    await db.outbox.delete([accountId, row.msgId]);
+    if (row.control?.kind === 'delete') {
+      await db.outbox.update([accountId, row.msgId], { control: { ...row.control, posted: true }, status: 'pending', attempts: 0, error: null });
+    } else {
+      await db.outbox.delete([accountId, row.msgId]);
+    }
     await applyOne(
       ctx,
       accountId,
@@ -311,13 +416,14 @@ export async function commitSent(
         gseq: res.gseq,
         time: res.time,
         body,
-        payload: { kind: 'msg', msg: outboxPayload(row) },
+        payload: outboxParsed(row),
       },
       gaps,
       false,
       flags,
     );
   });
+  await removeFiles(ctx, flags.files);
 }
 
 function blobRow(acc: string, item: Applicable, a: Attachment, auto: boolean, now: number): BlobRow {
@@ -345,6 +451,29 @@ function blobRow(acc: string, item: Applicable, a: Attachment, auto: boolean, no
   };
 }
 
+const refKey = (r: MsgRef): string => `${r.author}/${r.id}`;
+
+function controlOf(item: Applicable): Omit<ControlRow, 'accountId'> | undefined {
+  const p = item.payload;
+  const base = { senderId: item.senderId, msgId: item.msgId, chatId: item.chatId, gseq: item.gseq, time: item.time, epoch: item.epoch };
+  if (p.kind === 'edit') return { ...base, kind: 'edit', target: refKey(p.edit.target), body: p.edit.body };
+  if (p.kind === 'delete') return { ...base, kind: 'delete', target: refKey(p.delete.target) };
+  if (p.kind === 'react') return { ...base, kind: 'react', target: refKey(p.react.target), emoji: p.react.emoji, on: p.react.on };
+  return undefined;
+}
+
+function lastOf(m: MessageRow): NonNullable<ChatRow['last']> {
+  return {
+    senderId: m.senderId,
+    msgId: m.msgId,
+    kind: m.kind,
+    body: m.body,
+    gseq: m.gseq,
+    time: m.time,
+    ...(m.attachments?.[0] ? { media: m.attachments[0].kind } : m.location ? { media: 'location' as const } : {}),
+  };
+}
+
 /** Must run inside a transaction over COMMIT_TABLES. Returns false for a duplicate. */
 async function applyOne(
   ctx: CoreContext,
@@ -353,10 +482,45 @@ async function applyOne(
   item: Applicable,
   gaps: string[],
   auto: boolean,
-  flags: { attachments: boolean },
+  flags: CommitFlags,
 ): Promise<boolean> {
   const { db } = ctx;
+  if (item.serverDeleted) {
+    await applyServerDeleted(ctx, acc, item);
+    return false;
+  }
   if (await db.events.get([acc, item.senderId, item.msgId])) return false;
+
+  const p = item.payload;
+  const common = payloadCommon(p);
+  const dev = common.dev;
+  const seq = common.seq;
+  if (dev !== undefined && seq !== undefined) {
+    const key: [string, string, string, string] = [acc, item.chatId, item.senderId, dev];
+    const t = await db.seqTrack.get(key);
+    if (!t) {
+      await db.seqTrack.put({ accountId: acc, chatId: item.chatId, senderId: item.senderId, devId: dev, lastSeq: seq });
+    } else if (seq > t.lastSeq) {
+      // A delete names the seq of the event it removed: that gap is not a loss.
+      const covered = p.kind === 'delete' && p.delete.targetDev === dev && p.delete.targetSeq === t.lastSeq + 1 ? 1 : 0;
+      if (seq > t.lastSeq + 1 + covered) {
+        gaps.push(
+          `${seq - t.lastSeq - 1 - covered} event(s) missing from device ${dev} of ${item.senderId} in chat ${item.chatId} (seq ${t.lastSeq + 1 + covered}..${seq - 1})`,
+        );
+      }
+      await db.seqTrack.put({ ...t, lastSeq: seq });
+    }
+  }
+
+  // A message deleted on this device (for everyone or for me) never comes back: for
+  // everyone it shows as the quiet "deleted" line in its place, for me not at all.
+  const tomb = await db.tombstones.get([acc, item.senderId, item.msgId]);
+  if (tomb && tomb.reason !== 'server' && p.kind !== 'edit' && p.kind !== 'delete' && p.kind !== 'react') {
+    if (tomb.reason === 'everyone') await putDeletedRow(ctx, acc, { ...tomb, gseq: item.gseq, time: item.time }, item.devId);
+    return false;
+  }
+  if (tomb?.reason === 'server') await db.tombstones.delete([acc, item.senderId, item.msgId]);
+
   await db.events.put({
     accountId: acc,
     senderId: item.senderId,
@@ -369,24 +533,6 @@ async function applyOne(
     body: item.body,
   });
 
-  const p = item.payload;
-  const dev = p.kind === 'msg' ? p.msg.dev : p.dev;
-  const seq = p.kind === 'msg' ? p.msg.seq : p.seq;
-  if (dev !== undefined && seq !== undefined) {
-    const key: [string, string, string, string] = [acc, item.chatId, item.senderId, dev];
-    const t = await db.seqTrack.get(key);
-    if (!t) {
-      await db.seqTrack.put({ accountId: acc, chatId: item.chatId, senderId: item.senderId, devId: dev, lastSeq: seq });
-    } else if (seq > t.lastSeq) {
-      if (seq > t.lastSeq + 1) {
-        gaps.push(
-          `${seq - t.lastSeq - 1} event(s) missing from device ${dev} of ${item.senderId} in chat ${item.chatId} (seq ${t.lastSeq + 1}..${seq - 1})`,
-        );
-      }
-      await db.seqTrack.put({ ...t, lastSeq: seq });
-    }
-  }
-
   const chat: ChatRow = (await db.chats.get([acc, item.chatId])) ?? {
     accountId: acc,
     chatId: item.chatId,
@@ -398,7 +544,16 @@ async function applyOne(
     unread: 0,
   };
 
-  if (p.kind !== 'ignore') {
+  const control = controlOf(item);
+  if (control) {
+    await db.controls.put({ accountId: acc, ...control });
+    await db.chats.put(chat);
+    const [author, id] = control.target.split('/') as [string, string];
+    await recompute(ctx, acc, me, author, id, flags);
+    return true;
+  }
+
+  if (p.kind === 'msg' || p.kind === 'update-required') {
     const msg = p.kind === 'msg' ? p.msg : undefined;
     const message: MessageRow = {
       accountId: acc,
@@ -416,6 +571,7 @@ async function applyOne(
       ...(msg?.location ? { location: msg.location } : {}),
       ...(msg?.fwd ? { fwd: true as const } : {}),
     };
+    message.words = messageWords(message);
     await db.messages.put(message);
     if (msg?.attachments) {
       const now = ctx.clock.now();
@@ -426,19 +582,223 @@ async function applyOne(
         flags.attachments = true;
       }
     }
-    if (!chat.last || item.gseq > chat.last.gseq) {
-      chat.last = {
-        senderId: message.senderId,
-        msgId: message.msgId,
-        kind: message.kind,
-        body: message.body,
-        gseq: message.gseq,
-        time: message.time,
-        ...(msg?.attachments?.[0] ? { media: msg.attachments[0].kind } : msg?.location ? { media: 'location' as const } : {}),
-      };
-    }
+    if (!chat.last || item.gseq > chat.last.gseq) chat.last = lastOf(message);
     if (item.senderId !== me && item.gseq > chat.readGseq) chat.unread += 1;
+    await db.chats.put(chat);
+    // Edits, reactions or a delete that came before the message.
+    if (msg) await recompute(ctx, acc, me, item.senderId, item.msgId, flags);
+    return true;
   }
   await db.chats.put(chat);
   return true;
+}
+
+/** The server's zeroed record: a placeholder where nothing is known about the message. */
+async function applyServerDeleted(ctx: CoreContext, acc: string, item: Applicable): Promise<void> {
+  const { db } = ctx;
+  const key: [string, string, string] = [acc, item.senderId, item.msgId];
+  if ((await db.events.get(key)) || (await db.messages.get(key))) return;
+  const tomb = await db.tombstones.get(key);
+  if (tomb?.reason === 'local') return;
+  const row: TombstoneRow = tomb ?? { accountId: acc, senderId: item.senderId, msgId: item.msgId, chatId: item.chatId, reason: 'server', by: '', at: ctx.clock.now() };
+  if (!tomb) await db.tombstones.put({ ...row, gseq: item.gseq, time: item.time });
+  await putDeletedRow(ctx, acc, { ...row, gseq: item.gseq, time: item.time }, item.devId);
+}
+
+/** The quiet "deleted" line in place of a message (when there is no row yet). */
+async function putDeletedRow(ctx: CoreContext, acc: string, t: TombstoneRow, devId: string): Promise<void> {
+  const { db } = ctx;
+  if (t.gseq === undefined || t.time === undefined) return;
+  if (await db.messages.get([acc, t.senderId, t.msgId])) return;
+  const row: MessageRow = {
+    accountId: acc,
+    chatId: t.chatId,
+    senderId: t.senderId,
+    msgId: t.msgId,
+    devId,
+    seq: null,
+    gseq: t.gseq,
+    time: t.time,
+    kind: 'deleted',
+    body: '',
+    reply: null,
+    words: [],
+  };
+  await db.messages.put(row);
+  if (t.gseq !== undefined && (t.reason === 'everyone' || t.reason === 'server')) {
+    const prev = await db.tombstones.get([acc, t.senderId, t.msgId]);
+    if (prev && prev.gseq === undefined) await db.tombstones.put({ ...prev, gseq: t.gseq, time: t.time });
+  }
+  const chat = await db.chats.get([acc, t.chatId]);
+  if (chat && (!chat.last || t.gseq > chat.last.gseq)) await db.chats.put({ ...chat, last: lastOf(row) });
+}
+
+/** Owners of a group in the accepted states of one epoch. */
+async function ownersOf(ctx: CoreContext, acc: string, chatId: string, epoch: number): Promise<Set<string>> {
+  const states = await ctx.db.groupStates.where('[accountId+chatId]').equals([acc, chatId]).toArray();
+  return new Set(states.filter((s) => s.epoch === epoch).map((s) => s.state.owner));
+}
+
+/** The reactions in force: one value per (sender, emoji), the highest gseq wins. */
+export function aggregateReactions(controls: readonly Pick<ControlRow, 'kind' | 'senderId' | 'gseq' | 'emoji' | 'on'>[]): ReactionAgg[] {
+  const latest = new Map<string, { sender: string; emoji: string; gseq: number; on: boolean }>();
+  for (const c of controls) {
+    if (c.kind !== 'react' || c.emoji === undefined) continue;
+    const k = `${c.senderId}\u0000${c.emoji}`;
+    const cur = latest.get(k);
+    if (!cur || c.gseq > cur.gseq) latest.set(k, { sender: c.senderId, emoji: c.emoji, gseq: c.gseq, on: c.on === true });
+  }
+  const byEmoji = new Map<string, { users: string[]; first: number }>();
+  for (const v of latest.values()) {
+    if (!v.on) continue;
+    const e = byEmoji.get(v.emoji) ?? { users: [], first: Infinity };
+    e.users.push(v.sender);
+    e.first = Math.min(e.first, v.gseq);
+    byEmoji.set(v.emoji, e);
+  }
+  return [...byEmoji.entries()]
+    .sort((a, b) => a[1].first - b[1].first || (a[0] < b[0] ? -1 : 1))
+    .map(([emoji, e]) => ({ emoji, users: e.users.sort() }));
+}
+
+/**
+ * Recomputes one message from its original event and all control events and
+ * tombstones about it. Runs inside a transaction over COMMIT_TABLES.
+ */
+export async function recompute(ctx: CoreContext, acc: string, me: string, author: string, id: string, flags: CommitFlags): Promise<void> {
+  const { db } = ctx;
+  const key: [string, string, string] = [acc, author, id];
+  const controls = await db.controls.where('[accountId+target]').equals([acc, `${author}/${id}`]).toArray();
+  let tomb: TombstoneRow | undefined = await db.tombstones.get(key);
+  if (!tomb || tomb.reason === 'server') {
+    for (const d of controls.filter((c) => c.kind === 'delete').sort((a, b) => a.gseq - b.gseq)) {
+      const chat = await db.chats.get([acc, d.chatId]);
+      const allowed = d.senderId === author || (chat?.kind === 'group' && (await ownersOf(ctx, acc, d.chatId, d.epoch)).has(d.senderId));
+      if (!allowed) continue;
+      tomb = { ...(tomb ?? {}), accountId: acc, senderId: author, msgId: id, chatId: d.chatId, reason: 'everyone', by: d.senderId, at: ctx.clock.now() };
+      await db.tombstones.put(tomb);
+      break;
+    }
+  }
+  const msg = await db.messages.get(key);
+  if (tomb && tomb.reason !== 'server') {
+    if (msg && tomb.gseq === undefined) {
+      tomb = { ...tomb, gseq: msg.gseq, time: msg.time };
+      await db.tombstones.put(tomb);
+    }
+    await eraseMessage(ctx, acc, me, author, id, msg, tomb, controls, flags);
+    if (!msg && tomb.reason === 'everyone') await putDeletedRow(ctx, acc, tomb, '');
+    return;
+  }
+  if (!msg || msg.kind !== 'msg') return;
+  const edit = controls.filter((c) => c.kind === 'edit' && c.senderId === author).sort((a, b) => b.gseq - a.gseq)[0];
+  const next: MessageRow = { ...msg };
+  if (edit && edit.body !== undefined) {
+    next.body = edit.body;
+    next.edited = { gseq: edit.gseq, time: edit.time };
+  }
+  const reactions = aggregateReactions(controls);
+  if (reactions.length > 0) next.reactions = reactions;
+  else delete next.reactions;
+  next.words = messageWords(next);
+  await db.messages.put(next);
+  const chat = await db.chats.get([acc, msg.chatId]);
+  if (chat?.last && chat.last.senderId === author && chat.last.msgId === id && chat.last.body !== next.body) {
+    await db.chats.put({ ...chat, last: { ...chat.last, body: next.body } });
+  }
+}
+
+/** Applies a tombstone: the message becomes a quiet "deleted" row (for everyone) or disappears (for me). */
+async function eraseMessage(
+  ctx: CoreContext,
+  acc: string,
+  me: string,
+  author: string,
+  id: string,
+  msg: MessageRow | undefined,
+  tomb: TombstoneRow,
+  controls: readonly ControlRow[],
+  flags: CommitFlags,
+): Promise<void> {
+  const { db } = ctx;
+  // The text of the message and of its edits leaves this device; reactions go too.
+  await db.events.delete([acc, author, id]);
+  for (const c of controls) {
+    if (c.kind === 'delete') continue;
+    await db.events.delete([acc, c.senderId, c.msgId]);
+    await db.controls.delete([acc, c.senderId, c.msgId]);
+  }
+  for (const b of await db.blobs.where('[accountId+msgId]').equals([acc, id]).toArray()) {
+    if (b.senderId !== author) continue;
+    if (b.storage) flags.files.push({ storage: b.storage, key: fileKey(acc, b.blobId) });
+    await db.blobs.delete([acc, b.blobId]);
+  }
+  if (!msg) return;
+  if (msg.kind === 'deleted' && tomb.reason === 'everyone') return;
+  const chat = await db.chats.get([acc, msg.chatId]);
+  if (tomb.reason === 'local') {
+    await db.messages.delete([acc, author, id]);
+  } else {
+    await db.messages.put({
+      accountId: acc,
+      chatId: msg.chatId,
+      senderId: author,
+      msgId: id,
+      devId: msg.devId,
+      seq: msg.seq,
+      gseq: msg.gseq,
+      time: msg.time,
+      kind: 'deleted',
+      body: '',
+      reply: null,
+      words: [],
+    });
+  }
+  if (!chat) return;
+  const next: ChatRow = { ...chat };
+  if (msg.kind !== 'deleted' && author !== me && msg.gseq > chat.readGseq && chat.unread > 0) next.unread -= 1;
+  if (chat.last && chat.last.senderId === author && chat.last.msgId === id) {
+    const newest = await db.messages
+      .where('[accountId+chatId+gseq]')
+      .between([acc, msg.chatId, Dexie.minKey], [acc, msg.chatId, Dexie.maxKey])
+      .last();
+    next.last = newest ? lastOf(newest) : null;
+  }
+  await db.chats.put(next);
+}
+
+/**
+ * "Delete for me": the message disappears from this device only (with its
+ * attachment files); the server and other devices keep it.
+ */
+export async function deleteLocally(ctx: CoreContext, acc: string, me: string, author: string, id: string): Promise<void> {
+  const { db } = ctx;
+  const flags: CommitFlags = { attachments: false, files: [] };
+  await db.transaction('rw', COMMIT_TABLES(db), async () => {
+    const msg = await db.messages.get([acc, author, id]);
+    if (!msg) return;
+    // Also for a message already deleted for everyone: the quiet line goes away too.
+    const tomb: TombstoneRow = { accountId: acc, senderId: author, msgId: id, chatId: msg.chatId, reason: 'local', by: me, at: ctx.clock.now(), gseq: msg.gseq, time: msg.time };
+    await db.tombstones.put(tomb);
+    const controls = await db.controls.where('[accountId+target]').equals([acc, `${author}/${id}`]).toArray();
+    await eraseMessage(ctx, acc, me, author, id, msg, tomb, controls, flags);
+  });
+  await removeFiles(ctx, flags.files);
+}
+
+/** Stores tombstones (`everyone`, `local`) from an archive and applies them to messages already here. */
+export async function importTombstones(ctx: CoreContext, acc: string, me: string, rows: readonly Omit<TombstoneRow, 'accountId'>[]): Promise<void> {
+  const { db } = ctx;
+  const flags: CommitFlags = { attachments: false, files: [] };
+  await db.transaction('rw', COMMIT_TABLES(db), async () => {
+    for (const r of rows) {
+      const existing = await db.tombstones.get([acc, r.senderId, r.msgId]);
+      // Local beats everyone beats server: the strongest deletion wins.
+      const rank = { server: 0, everyone: 1, local: 2 } as const;
+      if (existing && rank[existing.reason] >= rank[r.reason]) continue;
+      await db.tombstones.put({ ...r, accountId: acc });
+      await recompute(ctx, acc, me, r.senderId, r.msgId, flags);
+    }
+  });
+  await removeFiles(ctx, flags.files);
 }

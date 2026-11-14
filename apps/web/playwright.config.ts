@@ -18,7 +18,8 @@ export const MEDIA_ARGS =
 export default defineConfig({
   testDir: './e2e',
   // The 200 MB round trip is slow: it runs with `pnpm test:e2e:big` (playwright.big.config.ts).
-  testIgnore: ['**/*.big.spec.ts'],
+  // The search measurement on 50 000 messages runs with `pnpm test:e2e:perf` (playwright.perf.config.ts).
+  testIgnore: ['**/*.big.spec.ts', '**/*.perf.spec.ts'],
   timeout: 120_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

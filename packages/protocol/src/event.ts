@@ -21,7 +21,7 @@ import type { Identity } from './envelope.ts';
 import { malformed, ProtocolError } from './errors.ts';
 import { checkContextString } from './json.ts';
 import { sha256Bytes, sign, verify, type IdentityKeys } from './keys.ts';
-import { decodePayload, type DecodedPayload } from './payload.ts';
+import { decodePayload, payloadCommon, type DecodedPayload } from './payload.ts';
 
 export const EVENT_MAGIC = utf8('FC1');
 export const EVENT_FORMAT = 0x01;
@@ -142,7 +142,7 @@ export async function encodeEventWithNonce(input: EncodeEventInput, nonce: Uint8
   } catch (e) {
     throw new ProtocolError('invalid-argument', `payload is invalid: ${(e as Error).message}`);
   }
-  const msgId = base32DecodeExact(decoded.kind === 'msg' ? decoded.msg.id : decoded.id, MESSAGE_ID_BYTES, 'id');
+  const msgId = base32DecodeExact(payloadCommon(decoded).id, MESSAGE_ID_BYTES, 'id');
   const senderId = base32DecodeExact(input.author.userId, USER_ID_BYTES, 'author userId');
 
   const sig = sign(eventSigningInput(input, msgId, senderId, payload), input.author.signSecret);
@@ -238,7 +238,7 @@ export async function decodeEvent(body: Uint8Array, input: DecodeEventInput): Pr
 
   const payload = decodePayload(payloadBytes);
   const msgId = base32Encode(msgIdBytes);
-  const payloadId = payload.kind === 'msg' ? payload.msg.id : payload.id;
+  const payloadId = payloadCommon(payload).id;
   if (payloadId !== msgId) throw malformed('event: payload id differs from the header message id');
   return { senderId, msgId, epoch: input.chat.epoch, payload, payloadBytes };
 }

@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:fcd": "playwright test -c playwright.fcd.config.ts",
-    "test:e2e:big": "playwright test -c playwright.big.config.ts"
+    "test:e2e:big": "playwright test -c playwright.big.config.ts",
+    "test:e2e:perf": "playwright test -c playwright.perf.config.ts"
   },
   "dependencies": {
     "@family-chat/core": "workspace:*",

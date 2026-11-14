@@ -47,7 +47,11 @@ export type CoreErrorCode =
   /** An attachment is not on the server any more (deleted or expired). */
   | 'gone'
   /** Not enough storage space on this device (copying or downloading a file). */
-  | 'no-space';
+  | 'no-space'
+  /** M4: forwarding needs the attachment files on this device (download them first). */
+  | 'not-downloaded'
+  /** M4: the message cannot be changed this way (not mine, deleted, not a message). */
+  | 'not-allowed';
 
 export class CoreError extends Error {
   override readonly name = 'CoreError';

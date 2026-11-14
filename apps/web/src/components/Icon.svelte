@@ -27,7 +27,14 @@
     | 'lock'
     | 'play'
     | 'pause'
-    | 'pin';
+    | 'pin'
+    | 'reply'
+    | 'edit'
+    | 'search'
+    | 'smile'
+    | 'more'
+    | 'up'
+    | 'down';
 
   // 24x24 outline paths (stroke = currentColor).
   const PATHS: Record<IconName, string> = {
@@ -61,6 +68,13 @@
     play: 'M8 5v14l11-7z',
     pause: 'M9 5v14M15 5v14',
     pin: 'M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+    reply: 'M10 7L4 12l6 5M4 12h9a7 7 0 0 1 7 7',
+    edit: 'M4 20h4L19 9l-4-4L4 16v4zM13 7l4 4',
+    search: 'M10.5 17.5a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20.5 20.5l-5-5',
+    smile: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM8 14.5c1 1.3 2.4 2 4 2s3-.7 4-2M9 9.5h.01M15 9.5h.01',
+    more: 'M5 12h.01M12 12h.01M19 12h.01',
+    up: 'M6 15l6-6 6 6',
+    down: 'M6 9l6 6 6-6',
   };
 </script>
 

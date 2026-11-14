@@ -15,7 +15,7 @@ import { MAX_EVENT_BYTES } from '../src/constants.ts';
 import { deriveDmKeys, dmChatId } from '../src/dm.ts';
 import { createIdentityEnvelope, verifyIdentityEnvelope, type Identity } from '../src/envelope.ts';
 import { deriveIdentityKeys, sign, type IdentityKeys } from '../src/keys.ts';
-import { encodeMsgPayload } from '../src/payload.ts';
+import { encodeDeletePayload, encodeEditPayload, encodeMsgPayload, encodeReactPayload } from '../src/payload.ts';
 import { newDevId, newMessageId } from '../src/random.ts';
 import { asyncErrorCode, hex, loadVector, unhex } from './helpers.ts';
 
@@ -123,6 +123,20 @@ describe('event round trip', () => {
     const payload = utf8(JSON.stringify({ v: 1, t: 'poll', id, dev: newDevId(), seq: 3, crit: true }));
     const e = await decodeAs(await encodeEvent({ ...live, author: alice, payload }));
     expect(e.payload).toMatchObject({ kind: 'update-required', t: 'poll', id });
+  });
+
+  it('delivers edit, delete and react as typed payloads (M4)', async () => {
+    const dev = newDevId();
+    const target = { author: alice.userId, id: newMessageId() };
+    const edit = encodeEditPayload({ id: newMessageId(), dev, seq: 2, target, body: 'новый текст' });
+    const del = encodeDeletePayload({ id: newMessageId(), dev, seq: 3, target, targetDev: dev, targetSeq: 1 });
+    const react = encodeReactPayload({ id: newMessageId(), dev, seq: 4, target, emoji: '❤️', on: true });
+    const e1 = await decodeAs(await encodeEvent({ ...live, author: alice, payload: edit }));
+    expect(e1.payload).toMatchObject({ kind: 'edit', edit: { target, body: 'новый текст', seq: 2 } });
+    const e2 = await decodeAs(await encodeEvent({ ...live, author: alice, payload: del }));
+    expect(e2.payload).toMatchObject({ kind: 'delete', delete: { target, targetDev: dev, targetSeq: 1 } });
+    const e3 = await decodeAs(await encodeEvent({ ...live, author: alice, payload: react }));
+    expect(e3.payload).toMatchObject({ kind: 'react', react: { target, emoji: '❤️', on: true } });
   });
 
   it('reports a sender that differs from the server header', async () => {

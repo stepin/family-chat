@@ -17,6 +17,12 @@
     onfiles,
     onvoice,
     onlocation,
+    reply = null,
+    oncancelreply,
+    editing = null,
+    onedit,
+    oncanceledit,
+    onemoji,
   }: {
     accountId: string;
     chatId: string;
@@ -28,7 +34,20 @@
     onvoice?: ((rec: VoiceRecording) => Promise<boolean>) | undefined;
     /** "Место" in the attachment menu. */
     onlocation?: (() => void) | undefined;
+    /** Replying to a message: the quote bar above the field (M4). */
+    reply?: { readonly name: string; readonly text: string } | null;
+    oncancelreply?: (() => void) | undefined;
+    /** Editing my message (M4): the field holds its text; sending saves the change. */
+    editing?: { readonly key: string; readonly body: string; readonly allowEmpty: boolean } | null;
+    onedit?: ((text: string) => Promise<boolean>) | undefined;
+    oncanceledit?: (() => void) | undefined;
+    /** The emoji button: opens the picker (the chosen emoji comes back through `insert`). */
+    onemoji?: (() => void) | undefined;
   } = $props();
+  /** The text typed before editing started; it comes back afterwards. */
+  let stash: string | null = null;
+  let editingKey: string | null = null;
+  let caret: { start: number; end: number } | null = null;
   let recording = $state(false);
 
   const MAX_BYTES = 16 * 1024;
@@ -53,6 +72,49 @@
     saveDraft();
     queueMicrotask(resize);
   }
+
+  /** Inserts text at the caret (the emoji picker), keeping the draft. */
+  export function insert(value: string): void {
+    const at = caret ?? { start: text.length, end: text.length };
+    text = text.slice(0, at.start) + value + text.slice(at.end);
+    const pos = at.start + value.length;
+    caret = { start: pos, end: pos };
+    queueMicrotask(() => {
+      field?.focus();
+      field?.setSelectionRange(pos, pos);
+      resize();
+    });
+    if (!editing) onInput();
+  }
+
+  /** Puts the focus into the field (after choosing "Ответить"). */
+  export function focus(): void {
+    field?.focus();
+  }
+
+  function rememberCaret(): void {
+    if (field) caret = { start: field.selectionStart ?? text.length, end: field.selectionEnd ?? text.length };
+  }
+
+  // Entering and leaving edit mode.
+  $effect(() => {
+    const e = editing;
+    if (e && editingKey !== e.key) {
+      if (editingKey === null) stash = text;
+      editingKey = e.key;
+      text = e.body;
+      queueMicrotask(() => {
+        resize();
+        field?.focus();
+        field?.setSelectionRange(text.length, text.length);
+      });
+    } else if (!e && editingKey !== null) {
+      editingKey = null;
+      text = stash ?? '';
+      stash = null;
+      queueMicrotask(resize);
+    }
+  });
 
   function pick(input: HTMLInputElement | undefined): void {
     menuOpen = false;
@@ -84,13 +146,16 @@
 
   function saveDraft(): void {
     clearTimeout(saveTimer);
+    // While editing, the field holds the old message, not a draft.
+    if (editingKey !== null) return;
     void app.core.setDraft(accountId, chatId, text).catch(() => undefined);
   }
 
   function onInput(): void {
     resize();
+    rememberCaret();
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveDraft, 400);
+    if (editingKey === null) saveTimer = setTimeout(saveDraft, 400);
   }
 
   function resize(): void {
@@ -101,6 +166,14 @@
 
   function send(): Promise<void> {
     const value = text.trim();
+    if (editing && onedit) {
+      if ((value.length === 0 && !editing.allowEmpty) || tooLong) return chain;
+      const edited = value;
+      chain = chain.then(async () => {
+        await onedit(edited).catch(() => false);
+      });
+      return chain;
+    }
     if (value.length === 0 || tooLong) return chain;
     clearTimeout(saveTimer);
     const before = text;
@@ -119,6 +192,14 @@
   }
 
   function onKeydown(e: KeyboardEvent): void {
+    if (e.key === 'Escape' && (editing || reply)) {
+      // Leaves edit mode or the reply first (and does not close the chat).
+      e.preventDefault();
+      e.stopPropagation();
+      if (editing) oncanceledit?.();
+      else oncancelreply?.();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey && !coarse && !e.isComposing) {
       e.preventDefault();
       void send();
@@ -167,8 +248,21 @@
 <input bind:this={photoInput} class="visually-hidden" type="file" accept="image/*" multiple tabindex="-1" aria-hidden="true" onchange={onPicked} data-testid="photo-input" />
 <input bind:this={cameraInput} class="visually-hidden" type="file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true" onchange={onPicked} />
 <input bind:this={fileInput} class="visually-hidden" type="file" multiple tabindex="-1" aria-hidden="true" onchange={onPicked} data-testid="file-input" />
+{#if editing}
+  <div class="bar" role="status" data-testid="edit-bar">
+    <span class="bar-icon"><Icon name="edit" size={18} /></span>
+    <span class="bar-text"><strong>{t.msg.editBar}</strong></span>
+    <button class="icon-btn" type="button" aria-label={t.msg.cancelEdit} onclick={() => oncanceledit?.()}><Icon name="close" size={20} /></button>
+  </div>
+{:else if reply}
+  <div class="bar" data-testid="reply-bar">
+    <span class="bar-icon"><Icon name="reply" size={18} /></span>
+    <span class="bar-text"><strong>{t.msg.replyBar(reply.name)}</strong><span class="bar-quote">{reply.text}</span></span>
+    <button class="icon-btn" type="button" aria-label={t.msg.cancelReply} onclick={() => oncancelreply?.()}><Icon name="close" size={20} /></button>
+  </div>
+{/if}
 <div class="composer">
-  {#if onfiles}
+  {#if onfiles && !editing}
     <button
       bind:this={attachBtn}
       class="attach"
@@ -193,11 +287,33 @@
     aria-invalid={tooLong ? 'true' : undefined}
     oninput={onInput}
     onkeydown={onKeydown}
+    onkeyup={rememberCaret}
+    onclick={rememberCaret}
+    onselect={rememberCaret}
     onpaste={onPaste}
-    onblur={saveDraft}
+    onblur={() => {
+      rememberCaret();
+      saveDraft();
+    }}
   ></textarea>
+  {#if onemoji}
+    <button class="emoji-btn" type="button" aria-label={t.emoji.button} aria-haspopup="dialog" onclick={() => onemoji?.()} data-testid="emoji-button">
+      <Icon name="smile" />
+    </button>
+  {/if}
   {#if !coarse}<span id="composer-hint-{chatId}" class="visually-hidden">{t.chat.sendHintDesktop}</span>{/if}
-  {#if onvoice && (text.trim().length === 0 || recording)}
+  {#if editing}
+    <button
+      class="send"
+      type="button"
+      aria-label={t.msg.saveEdit}
+      disabled={(text.trim().length === 0 && !editing.allowEmpty) || tooLong}
+      onclick={send}
+      data-testid="save-edit"
+    >
+      <Icon name="check" />
+    </button>
+  {:else if onvoice && (text.trim().length === 0 || recording)}
     <VoiceRecorder onrecorded={onvoice} onactive={(a) => (recording = a)} />
   {:else}
     <button
@@ -262,6 +378,56 @@
 
   .attach:hover,
   .attach[aria-expanded='true'] {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-4);
+    border-top: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .bar-icon {
+    display: inline-flex;
+    color: var(--accent);
+  }
+
+  .bar-text {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-left: var(--sp-2);
+    border-left: 3px solid var(--accent);
+    font-size: var(--text-s);
+  }
+
+  .bar-quote {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+  }
+
+  .emoji-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: var(--touch);
+    height: var(--touch);
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  .emoji-btn:hover {
     background: var(--surface-2);
     color: var(--text);
   }

@@ -84,25 +84,28 @@ describe('msg (M2 fields)', () => {
 });
 
 describe('edit, delete, react', () => {
-  it('encode with fixed field order; parsePayload types them; decodePayload ignores them', () => {
+  it('encode with fixed field order; parsePayload and decodePayload type them', () => {
     const e = encodeEditPayload({ id, dev, seq: 2, target, body: 'fixed' });
     expect(text(e)).toBe(
       `{"v":1,"t":"edit","id":"${id}","dev":"${dev}","seq":2,"target":{"author":"${author}","id":"${target.id}"},"body":"fixed"}`,
     );
     expect(parsePayload(e)).toEqual({ kind: 'edit', edit: { v: 1, t: 'edit', id, dev, seq: 2, target, body: 'fixed' } });
-    expect(decodePayload(e)).toEqual({ kind: 'ignore', t: 'edit', id, dev, seq: 2 });
+    expect(decodePayload(e)).toEqual(parsePayload(e));
     expect(parsePayload(encodeEditPayload({ id, dev, seq: 2, target, body: '' })).kind).toBe('edit');
 
     const d = encodeDeletePayload({ id, dev, seq: 3, target, targetDev: dev, targetSeq: 1 });
     expect(Object.keys(JSON.parse(text(d)))).toEqual(['v', 't', 'id', 'dev', 'seq', 'target', 'targetDev', 'targetSeq']);
     expect(parsePayload(d)).toMatchObject({ kind: 'delete', delete: { targetDev: dev, targetSeq: 1 } });
-    expect(decodePayload(d).kind).toBe('ignore');
+    expect(decodePayload(d)).toEqual({
+      kind: 'delete',
+      delete: { v: 1, t: 'delete', id, dev, seq: 3, target, targetDev: dev, targetSeq: 1 },
+    });
 
     const r = encodeReactPayload({ id, dev, seq: 4, target, emoji: '👍🏽', on: true });
     expect(Object.keys(JSON.parse(text(r)))).toEqual(['v', 't', 'id', 'dev', 'seq', 'target', 'emoji', 'on']);
     expect(parsePayload(r)).toMatchObject({ kind: 'react', react: { emoji: '👍🏽', on: true } });
     expect(parsePayload(encodeReactPayload({ id, dev, seq: 4, target, emoji: '👨‍👩‍👧', on: false })).kind).toBe('react');
-    expect(decodePayload(r)).toEqual({ kind: 'ignore', t: 'react', id, dev, seq: 4 });
+    expect(decodePayload(r)).toEqual({ kind: 'react', react: { v: 1, t: 'react', id, dev, seq: 4, target, emoji: '👍🏽', on: true } });
   });
 
   it('parsePayload still reports unknown kinds', () => {

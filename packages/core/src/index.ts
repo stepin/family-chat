@@ -1,4 +1,4 @@
-// @family-chat/core: the client core (stage M2; no UI, no DOM).
+// @family-chat/core: the client core (stage M4; no UI, no DOM).
 // API client, local database, session and identity, sync engine, outbox,
 // directory, groups, attachments, avatars, revocation, archive,
 // administration, push, and the facade for the UI.
@@ -20,6 +20,8 @@ export type {
   CreatedInvite,
   OutgoingMessage,
   AvatarView,
+  GlobalSearchResult,
+  ChatSearchResult,
 } from './core.ts';
 export type {
   ChatSummary,
@@ -28,7 +30,11 @@ export type {
   AttachmentView,
   AttachmentStatus,
   TransferView,
+  ReactionView,
+  ReplyPreview,
 } from './views.ts';
+export { normalize, tokenize, snippet, textMatches, queryWords, searchMessages, messageWords } from './search.ts';
+export type { SearchHit, Snippet, SearchQuery, SearchResult } from './search.ts';
 export type { AttachmentInput } from './attachments.ts';
 export type { ExportOptions, ImportResult, ArchiveSource } from './archive.ts';
 export { SETTING_AUTO_DOWNLOAD, AUTO_DOWNLOAD_MAX_BYTES } from './apply.ts';
@@ -86,6 +92,10 @@ export type {
   GroupOp,
   BlobRow,
   BlobStatus,
+  ReactionAgg,
+  ControlRow,
+  TombstoneRow,
+  OutboxControl,
 } from './db/schema.ts';
 export { MAX_DIAGNOSTICS } from './db/diagnostics.ts';
 

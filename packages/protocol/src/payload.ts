@@ -2,9 +2,9 @@
 // Implemented kinds (version 1): msg, edit, delete, react. Unknown kinds (or unknown versions)
 // marked "crit": true decode to "update the app"; other unknown kinds decode to "ignore".
 //
-// decodePayload (used by decodeEvent) keeps the M1 view: only `msg` is delivered as a message,
-// edit/delete/react are validated strictly and then reported as "ignore" until the client
-// implements them (M4). parsePayload gives the full typed form of every implemented kind.
+// decodePayload (used by decodeEvent) and parsePayload give the same typed form of every
+// implemented kind (since M4 the client acts on edit/delete/react; until M3 decodePayload
+// reported them as "ignore").
 
 import { utf8, type Bytes } from './bytes.ts';
 import { checkAttachmentInput, validateAttachment, type Attachment } from './attachment.ts';
@@ -93,20 +93,18 @@ interface UnknownKind {
   readonly seq?: number;
 }
 
-export type DecodedPayload =
-  | { readonly kind: 'msg'; readonly msg: MsgPayload }
-  /** Unknown critical kind: show "update the app to see this message". */
-  | ({ readonly kind: 'update-required' } & UnknownKind)
-  /** Unknown non-critical kind, or a known kind without client logic yet: skip (dev/seq still count). */
-  | ({ readonly kind: 'ignore' } & UnknownKind);
-
 export type ParsedPayload =
   | { readonly kind: 'msg'; readonly msg: MsgPayload }
   | { readonly kind: 'edit'; readonly edit: EditPayload }
   | { readonly kind: 'delete'; readonly delete: DeletePayload }
   | { readonly kind: 'react'; readonly react: ReactPayload }
+  /** Unknown critical kind: show "update the app to see this message". */
   | ({ readonly kind: 'update-required' } & UnknownKind)
+  /** Unknown non-critical kind (or unknown version): skip (dev/seq still count). */
   | ({ readonly kind: 'ignore' } & UnknownKind);
+
+/** What decodeEvent delivers: the same as ParsedPayload. */
+export type DecodedPayload = ParsedPayload;
 
 export interface MsgInput {
   readonly id: string;
@@ -297,22 +295,32 @@ export function parsePayload(bytes: Uint8Array): ParsedPayload {
   return { kind: crit === true ? 'update-required' : 'ignore', t, id, ...extra };
 }
 
-/**
- * Decode payload bytes into the view the M1/M2 client acts on: `msg`, `update-required` or
- * `ignore`. edit/delete/react are validated like in parsePayload and reported as `ignore`.
- */
-export function decodePayload(bytes: Uint8Array): DecodedPayload {
-  const p = parsePayload(bytes);
+/** Common fields of any parsed payload: `id` always, `dev` and `seq` when they are well formed. */
+export function payloadCommon(p: ParsedPayload): { id: string; dev?: string; seq?: number } {
   switch (p.kind) {
     case 'msg':
-    case 'update-required':
-    case 'ignore':
-      return p;
+      return { id: p.msg.id, dev: p.msg.dev, seq: p.msg.seq };
+    case 'edit':
+      return { id: p.edit.id, dev: p.edit.dev, seq: p.edit.seq };
+    case 'delete':
+      return { id: p.delete.id, dev: p.delete.dev, seq: p.delete.seq };
+    case 'react':
+      return { id: p.react.id, dev: p.react.dev, seq: p.react.seq };
     default: {
-      const c = p.kind === 'edit' ? p.edit : p.kind === 'delete' ? p.delete : p.react;
-      return { kind: 'ignore', t: c.t, id: c.id, dev: c.dev, seq: c.seq };
+      const out: { id: string; dev?: string; seq?: number } = { id: p.id };
+      if (p.dev !== undefined) out.dev = p.dev;
+      if (p.seq !== undefined) out.seq = p.seq;
+      return out;
     }
   }
+}
+
+/**
+ * Decode payload bytes into the form the client acts on: `msg`, `edit`, `delete`, `react`,
+ * `update-required` or `ignore` (see parsePayload).
+ */
+export function decodePayload(bytes: Uint8Array): DecodedPayload {
+  return parsePayload(bytes);
 }
 
 function commonIn(o: JsonObject, kind: string): { dev: string; seq: number } {
