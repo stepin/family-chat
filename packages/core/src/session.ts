@@ -81,6 +81,7 @@ export class Session {
       return await fn(token);
     } catch (e) {
       if (isApiError(e, 'removed')) throw await this.#markRemoved();
+      if (isApiError(e, 'revoked')) throw await this.markRevoked();
       if (!isApiError(e, 'unauthorized')) throw e;
     }
     const fresh = await this.#reloginShared(token);
@@ -88,6 +89,7 @@ export class Session {
       return await fn(fresh);
     } catch (e) {
       if (isApiError(e, 'removed')) throw await this.#markRemoved();
+      if (isApiError(e, 'revoked')) throw await this.markRevoked();
       throw e;
     }
   }
@@ -144,6 +146,7 @@ export class Session {
       return issued.token;
     } catch (e) {
       if (isApiError(e, 'removed')) throw await this.#markRemoved();
+      if (isApiError(e, 'revoked')) throw await this.markRevoked();
       if (isTransient(e) || !(e instanceof ApiError)) throw e;
       void this.ctx.diag.error('auth', `re-login failed: ${describeError(e)}`, this.accountId);
       await this.#setStatus('login-invalid');
@@ -157,6 +160,17 @@ export class Session {
     }
     await this.#setStatus('removed');
     return new CoreError('removed');
+  }
+
+  /**
+   * My identity is revoked (403 `revoked`, or after revoking it myself): the account
+   * becomes 'removed' with the `revoked` flag; the local history stays readable.
+   */
+  async markRevoked(): Promise<CoreError> {
+    if (this.#status.get() !== 'removed') void this.ctx.diag.warn('auth', 'identity revoked (403 revoked)', this.accountId);
+    this.#status.set('removed');
+    await this.ctx.db.accounts.update(this.accountId, { status: 'removed', revoked: true });
+    return new CoreError('revoked');
   }
 
   async #setStatus(status: AccountStatus): Promise<void> {

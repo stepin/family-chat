@@ -10,6 +10,12 @@
   import ServerDetails from './ServerDetails.svelte';
   import Invites from './Invites.svelte';
   import Diagnostics from './Diagnostics.svelte';
+  import NewGroup from './NewGroup.svelte';
+  import ChatInfo from './ChatInfo.svelte';
+  import Contact from './Contact.svelte';
+  import MyProfile from './MyProfile.svelte';
+  import Storage from './Storage.svelte';
+  import Security from './Security.svelte';
 
   // One column below 900 px (a stack of screens over the chat list), two
   // columns from 900 px: the list and the open screen (docs/PLAN.md 8.2).
@@ -29,6 +35,22 @@
         {/key}
       {:else if top.name === 'new-chat'}
         <NewChat />
+      {:else if top.name === 'new-group'}
+        <NewGroup members={top.members ?? []} title={top.title ?? ''} />
+      {:else if top.name === 'chat-info'}
+        {#key `${top.accountId}/${top.chatId}`}
+          <ChatInfo accountId={top.accountId} chatId={top.chatId} />
+        {/key}
+      {:else if top.name === 'contact'}
+        {#key `${top.accountId}/${top.userId}`}
+          <Contact accountId={top.accountId} userId={top.userId} />
+        {/key}
+      {:else if top.name === 'profile'}
+        <MyProfile />
+      {:else if top.name === 'storage'}
+        <Storage />
+      {:else if top.name === 'security'}
+        <Security />
       {:else if top.name === 'settings'}
         <Settings />
       {:else if top.name === 'phrase'}

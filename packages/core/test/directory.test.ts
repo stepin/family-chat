@@ -50,7 +50,8 @@ describe('directory', () => {
     const k2 = await b.directory.chatKeys(rowA.userId);
     expect(k1.encKey).toEqual(k2.encKey);
     expect(await a.directory.chatKeys(rowB.userId)).toBe(k1); // cached
-    expect(() => a.directory.chatIdFor(rowA.userId)).toThrow();
+    // The chat with oneself (M2).
+    expect(a.directory.chatIdFor(rowA.userId)).toBe(a.directory.selfChatId());
     await expect(a.directory.chatKeys('aaaaaaaaaaaaaaaaaaaaaaaaaa')).rejects.toSatisfy((e) => isCoreError(e, 'unknown-user'));
     expect((await a.directory.myIdentity()).userId).toBe(rowA.userId);
   });

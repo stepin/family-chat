@@ -6,8 +6,10 @@ import {
   createCore,
   DbVersionError,
   type AccountView,
-  type ChatListItem,
+  type ChatSummary,
   type ConnectionState,
+  type Hello,
+  type TransferView,
   type FamilyChatCore,
   type Member,
   type OutboxItem,
@@ -53,8 +55,15 @@ class AppState {
   /** Window is at least 900 px wide: two columns. */
   wide = $state(false);
   platform: PlatformInfo = $state.raw({ os: 'other', inApp: false, standalone: false, iosSafari: false });
-  chats: ChatListItem[] = $state.raw([]);
+  /** All chats: "Избранное" first, then groups and direct chats by time. */
+  chatList: ChatSummary[] = $state.raw([]);
   chatsLoaded = $state(false);
+  /** Uploads and downloads in the queue, active or failed. */
+  transfers: TransferView[] = $state.raw([]);
+  /** `/v1/hello` of the shown account's server (limits), once fetched. */
+  hello: Hello | null = $state.raw(null);
+  /** `navigator.storage.persisted()`; null while unknown. */
+  persisted: boolean | null = $state(null);
   outbox: OutboxItem[] = $state.raw([]);
   connection: Record<string, ConnectionState> = $state.raw({});
   /** Family members of the shown account. */
@@ -99,10 +108,11 @@ class AppState {
       this.accounts = list;
       this.#watchMembers();
     });
-    follow(core.chats, (list) => {
-      this.chats = list;
+    follow(core.chatList, (list) => {
+      this.chatList = list;
       this.chatsLoaded = true;
     });
+    follow(core.transfers, (list) => (this.transfers = list));
     follow(core.outbox, (list) => (this.outbox = list));
     core.connection.subscribe((c) => (this.connection = c));
     this.#watchMembers();
@@ -121,12 +131,37 @@ class AppState {
     this.members = [];
     this.membersLoaded = false;
     this.flagsLoaded = false;
+    this.hello = null;
     if (!id) return;
+    void this.refreshHello();
+    void this.refreshPersisted();
     this.#membersUnsub = follow(this.core.members(id), (list) => {
       this.members = list;
       this.membersLoaded = true;
     });
     void this.#loadFlags();
+  }
+
+  /** Fetches the server's limits (file size, retention) for the shown account. */
+  async refreshHello(): Promise<Hello | null> {
+    const account = this.account;
+    if (!account) return null;
+    try {
+      const h = await this.core.serverInfo(account.serverUrl);
+      if (this.account?.id === account.id) this.hello = h;
+      return h;
+    } catch (e) {
+      this.log('info', 'hello', 'server info not fetched', e);
+      return null;
+    }
+  }
+
+  async refreshPersisted(): Promise<void> {
+    try {
+      this.persisted = navigator.storage?.persisted ? await navigator.storage.persisted() : null;
+    } catch {
+      this.persisted = null;
+    }
   }
 
   async #loadFlags(): Promise<void> {
@@ -144,6 +179,17 @@ class AppState {
   async setFlag(name: keyof Flags, value = true): Promise<void> {
     const userId = this.account?.userId;
     this.flags = { ...this.flags, [name]: value };
+    if (userId) await this.core.setSetting(`ui.${name}.${userId}`, value);
+  }
+
+  /** A per-identity interface value (timestamps of the archive reminder and similar). */
+  async getValue<T>(name: string): Promise<T | undefined> {
+    const userId = this.account?.userId;
+    return userId ? this.core.getSetting<T>(`ui.${name}.${userId}`) : undefined;
+  }
+
+  async setValue(name: string, value: unknown): Promise<void> {
+    const userId = this.account?.userId;
     if (userId) await this.core.setSetting(`ui.${name}.${userId}`, value);
   }
 

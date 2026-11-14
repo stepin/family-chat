@@ -333,6 +333,481 @@ for (const c of neg.phrases) {
 // The positive event must decode with the same decoder.
 eq(decodeEvent(unhex(ev.bodyHex), { ...ev.inputs }, ['alice', 'bob']), 'ok', 'positive event decodes');
 
+// =====================================================================================
+// M2: HPKE, groups, sealed keys, attachments, archive, revocation, avatar, payloads.
+// Everything below again uses node:crypto only. What node:crypto cannot do is noted inline:
+// - Ed25519 strictness: OpenSSL verification is not checked here for the small-order and
+//   non-canonical rejections the package adds (covered by the package's own tests).
+// - X25519 low-order rejection in HPKE: OpenSSL returns an error for an all-zero result,
+//   which the code below treats like the package does.
+// =====================================================================================
+
+// ---- HPKE (RFC 9180) from HMAC-SHA-256, X25519 and AES-GCM ----
+const hmac = (key, data) => crypto.createHmac('sha256', key).update(data).digest();
+const i2osp = (n, len) => {
+  const b = Buffer.alloc(len);
+  for (let i = len - 1; i >= 0 && n > 0; i--) {
+    b[i] = n & 0xff;
+    n = Math.floor(n / 256);
+  }
+  return b;
+};
+const hkdfExtract = (salt, ikm) => hmac(salt.length ? salt : Buffer.alloc(32), ikm);
+function hkdfExpand(prk, info, len) {
+  let t = Buffer.alloc(0);
+  let out = Buffer.alloc(0);
+  for (let c = 1; out.length < len; c++) {
+    t = hmac(prk, cat(t, info, [c]));
+    out = cat(out, t);
+  }
+  return out.subarray(0, len);
+}
+const KEM_SUITE = cat(utf8('KEM'), i2osp(0x20, 2));
+const hpkeSuite = (aead) => cat(utf8('HPKE'), i2osp(0x20, 2), i2osp(1, 2), i2osp(aead, 2));
+const lExtract = (suite, salt, label, ikm) => hkdfExtract(salt, cat(utf8('HPKE-v1'), suite, utf8(label), ikm));
+const lExpand = (suite, prk, label, info, len) => hkdfExpand(prk, cat(i2osp(len, 2), utf8('HPKE-v1'), suite, utf8(label), info), len);
+function deriveKeyPair(ikm) {
+  const prk = lExtract(KEM_SUITE, Buffer.alloc(0), 'dkp_prk', ikm);
+  const sk = lExpand(KEM_SUITE, prk, 'sk', Buffer.alloc(0), 32);
+  return { sk, pk: rawPub(xPriv(sk)) };
+}
+const kemShared = (dh, enc, pkR) =>
+  lExpand(KEM_SUITE, lExtract(KEM_SUITE, Buffer.alloc(0), 'eae_prk', dh), 'shared_secret', cat(enc, pkR), 32);
+function keySchedule(aead, shared, info) {
+  const suite = hpkeSuite(aead);
+  const ctx = cat([0], lExtract(suite, Buffer.alloc(0), 'psk_id_hash', Buffer.alloc(0)), lExtract(suite, Buffer.alloc(0), 'info_hash', info));
+  const secret = lExtract(suite, shared, 'secret', Buffer.alloc(0));
+  const nk = aead === 2 ? 32 : 16;
+  const c = {
+    key: lExpand(suite, secret, 'key', ctx, nk),
+    nonce: lExpand(suite, secret, 'base_nonce', ctx, 12),
+    exp: lExpand(suite, secret, 'exp', ctx, 32),
+    seq: 0,
+    aead,
+  };
+  const nonce = () => {
+    const n = Buffer.from(c.nonce);
+    const s = i2osp(c.seq, 12);
+    for (let i = 0; i < 12; i++) n[i] ^= s[i];
+    return n;
+  };
+  const algo = aead === 2 ? 'aes-256-gcm' : 'aes-128-gcm';
+  c.seal = (aad, pt) => {
+    const e = crypto.createCipheriv(algo, c.key, nonce());
+    e.setAAD(aad);
+    const out = cat(e.update(pt), e.final(), e.getAuthTag());
+    c.seq++;
+    return out;
+  };
+  c.open = (aad, ct) => {
+    const d = crypto.createDecipheriv(algo, c.key, nonce());
+    d.setAAD(aad);
+    d.setAuthTag(ct.subarray(ct.length - 16));
+    const out = cat(d.update(ct.subarray(0, ct.length - 16)), d.final());
+    c.seq++;
+    return out;
+  };
+  c.export = (context, len) => lExpand(suite, c.exp, 'sec', context, len);
+  return c;
+}
+function setupSender(aead, pkR, info, ikmE) {
+  const e = deriveKeyPair(ikmE);
+  const shared = kemShared(x25519(e.sk, pkR), e.pk, pkR);
+  return { enc: e.pk, ctx: keySchedule(aead, shared, info) };
+}
+const hasDecapsulate = typeof crypto.decapsulate === 'function';
+function setupRecipient(aead, enc, skR, info) {
+  const pkR = rawPub(xPriv(skR));
+  const shared = kemShared(x25519(skR, enc), enc, pkR);
+  // Cross-check DHKEM with OpenSSL's own RFC 9180 implementation where Node exposes it (>= 24.7).
+  if (hasDecapsulate) eq(hex(crypto.decapsulate(xPriv(skR), enc)), hex(shared), 'DHKEM shared secret (OpenSSL decapsulate)');
+  return keySchedule(aead, shared, info);
+}
+
+{
+  const kat = load('hpke-rfc9180.json');
+  const shake = (n) => crypto.createHash('shake128', { outputLength: n }).update(Buffer.alloc(0)).digest();
+  for (const v of kat.vectors) {
+    const name = `HPKE kem ${v.kem_id} kdf ${v.kdf_id} aead ${v.aead_id}`;
+    const r = deriveKeyPair(unhex(v.ikmR));
+    eq(hex(r.sk), v.skRm, `${name} skRm`);
+    eq(hex(r.pk), v.pkRm, `${name} pkRm`);
+    const s = setupSender(v.aead_id, unhex(v.pkRm), unhex(v.info), unhex(v.ikmE));
+    eq(hex(s.enc), v.enc, `${name} enc`);
+    const rc = setupRecipient(v.aead_id, s.enc, unhex(v.skRm), unhex(v.info));
+    const src = shake(600000);
+    let off = 0;
+    const draw = () => {
+      const n = src[off++];
+      const b = src.subarray(off, off + n);
+      off += n;
+      return b;
+    };
+    const sink = crypto.createHash('shake128', { outputLength: 16 });
+    let opened = true;
+    for (let i = 0; i < 1000; i++) {
+      const aad = draw();
+      const pt = draw();
+      const ct = s.ctx.seal(aad, pt);
+      sink.update(ct);
+      opened &&= rc.open(aad, ct).equals(pt);
+    }
+    check(opened, `${name} recipient opens all 1000 messages`);
+    eq(sink.digest('hex'), v.encryptions_accumulated, `${name} accumulated encryptions`);
+    off = 0;
+    const sink2 = crypto.createHash('shake128', { outputLength: 16 });
+    for (let l = 0; l < 1000; l++) {
+      const value = s.ctx.export(draw(), l);
+      sink2.update(value);
+    }
+    eq(sink2.digest('hex'), v.exports_accumulated, `${name} accumulated exports`);
+  }
+}
+
+// ---- groups ----
+const gv = load('group.json');
+for (const [name, u] of Object.entries(gv.extraUsers)) {
+  const seed = unhex(u.seedHex);
+  const signSecret = hkdf(seed, utf8('fc/v1/sign'));
+  const boxSecret = hkdf(seed, utf8('fc/v1/box'));
+  const signPub = rawPub(edPriv(signSecret));
+  users[name] = { signSecret, boxSecret, signPub, boxPub: rawPub(xPriv(boxSecret)), userId: b32enc(sha256(signPub).subarray(0, 16)) };
+  eq(users[name].userId, u.userId, `${name} userId`);
+}
+const userIdOf = (pub) => b32enc(sha256(pub).subarray(0, 16));
+const groupId = (creatorPub, nonce) => b32enc(sha256(cat(utf8('fc/v1/group-id\n'), lp(creatorPub), lp(nonce))).subarray(0, 16));
+const transferInput = (serverId, chatId, version, fromPub, toPub) =>
+  cat(utf8('fc/v1/group-transfer\n'), lps(serverId), lps(chatId), u32(version), lp(fromPub), lp(toPub));
+
+/** Independent group state verification in the documented order; returns { error } or the state. */
+function verifyState(envText, ctx) {
+  const env = typeof envText === 'string' ? JSON.parse(envText) : envText;
+  const payload = b64dec(env.payload);
+  const sig = b64dec(env.sig);
+  const j = JSON.parse(payload.toString('utf8'));
+  if (j.v !== 1) return { error: 'unsupported-version' };
+  if (j.serverId !== ctx.serverId) return { error: 'wrong-server' };
+  if (j.chatId !== ctx.chatId) return { error: 'wrong-chat' };
+  const hash = sha256(payload);
+  if (ctx.expectedHash && !hash.equals(ctx.expectedHash)) return { error: 'state-mismatch' };
+  for (const m of j.members) if (userIdOf(b64dec(m.signPub)) !== m.userId) return { error: 'user-id-mismatch' };
+  const creatorPub = b64dec(j.creator.signPub);
+  if (groupId(creatorPub, b64dec(j.creator.nonce)) !== j.chatId) return { error: 'bad-chain' };
+  let cur = { userId: userIdOf(creatorPub), pub: creatorPub };
+  let signer = cur;
+  let last = 1;
+  for (const t of j.transfers) {
+    const toPub = b64dec(t.toSignPub);
+    if (t.version <= last || t.version > j.version) return { error: 'bad-chain' };
+    if (userIdOf(toPub) !== t.to || t.to === cur.userId) return { error: 'bad-chain' };
+    if (!edVerify(cur.pub, transferInput(j.serverId, j.chatId, t.version, cur.pub, toPub), b64dec(t.sig))) return { error: 'bad-chain' };
+    if (t.version < j.version) signer = { userId: t.to, pub: toPub };
+    cur = { userId: t.to, pub: toPub };
+    last = t.version;
+  }
+  if (j.owner !== cur.userId) return { error: 'bad-chain' };
+  if (!j.members.some((m) => m.userId === j.owner)) return { error: 'malformed' };
+  if (j.by !== signer.userId) return { error: 'not-owner' };
+  if (!edVerify(signer.pub, cat(utf8('fc/v1/group-state\n'), payload), sig)) return { error: 'bad-signature' };
+  const p = ctx.prev;
+  if (p) {
+    if (j.version !== p.j.version + 1) return { error: 'invalid-transition' };
+    if (j.prev === null || !b64dec(j.prev).equals(p.hash)) return { error: 'invalid-transition' };
+    if (j.transfers.length < p.j.transfers.length || j.transfers.length > p.j.transfers.length + 1) return { error: 'bad-chain' };
+    for (let i = 0; i < p.j.transfers.length; i++) {
+      if (JSON.stringify(p.j.transfers[i]) !== JSON.stringify(j.transfers[i])) return { error: 'bad-chain' };
+    }
+    const added = j.transfers[p.j.transfers.length];
+    if (added && added.version !== j.version) return { error: 'bad-chain' };
+    if (j.by !== p.j.owner) return { error: 'not-owner' };
+    if (j.epoch !== p.j.epoch && j.epoch !== p.j.epoch + 1) return { error: 'invalid-transition' };
+    const removed = p.j.members.some((m) => !j.members.some((n) => n.userId === m.userId));
+    if (removed && j.epoch !== p.j.epoch + 1) return { error: 'invalid-transition' };
+  }
+  return { j, hash, payload, signer };
+}
+
+const groupKeyInfo = (serverId, chatId, epoch, recipient, version, stateHash) =>
+  cat(utf8('fc/v1/group-key\n'), lps(serverId), lps(chatId), u32(epoch), lps(recipient), u32(version), lp(stateHash));
+
+/** Open a sealed key as `me`: recipient check, then HPKE. Returns { error } or { secret, j }. */
+function openKey(envText, me, serverId) {
+  const env = JSON.parse(envText);
+  const j = JSON.parse(b64dec(env.payload).toString('utf8'));
+  if (j.v !== 1) return { error: 'unsupported-version' };
+  if (j.serverId !== serverId) return { error: 'wrong-server' };
+  if (j.recipient !== me.userId) return { error: 'wrong-recipient' };
+  const info = groupKeyInfo(j.serverId, j.chatId, j.epoch, j.recipient, j.stateVersion, b64dec(j.stateHash));
+  try {
+    const rc = setupRecipient(2, b64dec(j.enc), me.boxSecret, info);
+    return { secret: rc.open(Buffer.alloc(0), b64dec(j.ct)), j, env };
+  } catch {
+    return { error: 'wrong-key' };
+  }
+}
+
+{
+  const serverId = gv.serverId;
+  const chatId = gv.groupId.chatId;
+  const gi = gv.groupId;
+  eq(hex(cat(utf8('fc/v1/group-id\n'), lp(users.alice.signPub), lp(unhex(gi.nonceHex)))), gi.hashInputHex, 'group id hash input');
+  eq(groupId(users.alice.signPub, unhex(gi.nonceHex)), chatId, 'group id');
+  eq(chatId.length, 26, 'group id length');
+  let prev;
+  for (const step of gv.steps) {
+    const n = `group ${step.name.split(':')[0]}`;
+    const st = verifyState(step.state.envelope, { serverId, chatId, prev });
+    check(!st.error, `${n}: state verifies (${st.error ?? 'ok'})`);
+    if (st.error) continue;
+    // Same result from the chain alone (a newcomer's view).
+    check(!verifyState(step.state.envelope, { serverId, chatId }).error, `${n}: verifies from the chain alone`);
+    eq(st.payload.toString('utf8'), step.state.payloadText, `${n}: payload text`);
+    eq(hex(cat(utf8('fc/v1/group-state\n'), st.payload)), step.state.signingInputHex, `${n}: signing input`);
+    eq(b64enc(edSign(users[step.state.signer].signSecret, cat(utf8('fc/v1/group-state\n'), st.payload))), JSON.parse(step.state.envelope).sig, `${n}: deterministic signature`);
+    eq(hex(st.hash), step.state.stateHashHex, `${n}: state hash`);
+    eq(Object.keys(st.j).join(','), 'v,serverId,chatId,version,epoch,name,creator,owner,by,transfers,members,prev', `${n}: field order`);
+    eq(st.j.owner, users[step.state.owner].userId, `${n}: owner`);
+    for (const t of step.transfers) {
+      const i = step.transfers.indexOf(t);
+      const fromPub = i === 0 ? b64dec(st.j.creator.signPub) : b64dec(st.j.transfers[i - 1].toSignPub);
+      const input = transferInput(serverId, chatId, t.version, fromPub, b64dec(st.j.transfers[i].toSignPub));
+      eq(hex(input), t.signingInputHex, `${n}: transfer ${i} signing input`);
+      check(edVerify(fromPub, input, unhex(t.sigHex)), `${n}: transfer ${i} signature`);
+    }
+    // Encrypted state blob.
+    const encKey = hkdf(unhex(step.epochSecretHex), utf8('fc/v1/enc'));
+    eq(hex(encKey), step.encKeyHex, `${n}: encKey`);
+    const header = cat(utf8('FCS'), [1], u32(st.j.epoch), u32(st.j.version), serverTag(serverId), chatTag(chatId));
+    eq(hex(header), step.blob.headerHex, `${n}: blob header`);
+    const aad = cat(header, lps(serverId), lps(chatId));
+    eq(hex(aad), step.blob.aadHex, `${n}: blob AAD`);
+    const envBytes = utf8(step.state.envelope);
+    const plain = Buffer.alloc(Math.ceil((4 + envBytes.length) / 256) * 256);
+    cat(u32(envBytes.length), envBytes).copy(plain);
+    eq(hex(plain), step.blob.plaintextHex, `${n}: blob plaintext`);
+    const blob = cat(header, unhex(step.blob.nonceHex), gcmEncrypt(encKey, unhex(step.blob.nonceHex), aad, plain));
+    eq(hex(blob), step.blob.blobHex, `${n}: blob`);
+    // Sealed keys.
+    for (const k of step.sealedKeys) {
+      const me = users[k.recipient];
+      const info = groupKeyInfo(serverId, chatId, st.j.epoch, me.userId, st.j.version, st.hash);
+      eq(hex(info), k.infoHex, `${n}: key for ${k.recipient} info`);
+      const s = setupSender(2, me.boxPub, info, unhex(k.ikmEHex));
+      eq(hex(deriveKeyPair(unhex(k.ikmEHex)).sk), k.ephemeralSecretHex, `${n}: key for ${k.recipient} ephemeral secret`);
+      eq(hex(s.enc), k.encHex, `${n}: key for ${k.recipient} enc`);
+      eq(hex(s.ctx.seal(Buffer.alloc(0), unhex(step.epochSecretHex))), k.ctHex, `${n}: key for ${k.recipient} ct`);
+      const o = openKey(k.envelope, me, serverId);
+      check(!o.error && hex(o.secret) === step.epochSecretHex, `${n}: key for ${k.recipient} opens`);
+      if (o.error) continue;
+      eq(Object.keys(o.j).join(','), 'v,serverId,chatId,epoch,recipient,stateVersion,stateHash,by,enc,ct', `${n}: key field order`);
+      eq(o.j.by, st.signer.userId, `${n}: key signed by the state signer`);
+      check(edVerify(st.signer.pub, cat(utf8('fc/v1/group-key\n'), b64dec(o.env.payload)), b64dec(o.env.sig)), `${n}: key signature`);
+      eq(o.j.stateHash, b64enc(st.hash), `${n}: key names the state hash`);
+    }
+    prev = st;
+  }
+}
+
+// ---- envelopes-m2.json ----
+{
+  const ev = load('envelopes-m2.json');
+  for (const e of ev.envelopes) {
+    const r = openEnvelope(e.envelope, e.kind, users[e.signer].signPub);
+    check(!r.error, `${e.kind} (M2) envelope verifies (${r.error ?? 'ok'})`);
+    if (r.error) continue;
+    eq(r.payload.toString('utf8'), e.payloadText, `${e.kind} (M2) payload text`);
+    eq(hex(r.input), e.signingInputHex, `${e.kind} (M2) signing input`);
+    if (e.kind === 'profile') {
+      const a = r.json.avatar;
+      check(
+        a !== null && Object.keys(a).join(',') === 'sha256,type' && b64dec(a.sha256).length === 32 && ['image/jpeg', 'image/webp'].includes(a.type),
+        'profile avatar shape',
+      );
+    }
+    if (e.kind === 'revoked') eq(Object.keys(r.json).join(','), 'v,userId,revokedAt', 'revoked field order');
+  }
+}
+
+// ---- attachments ----
+const blobAad = (idRaw, i, parts) => cat(utf8('fc/v1/blob\n'), lp(idRaw), u32(i), u32(parts));
+const counterNonce = (i) => cat(Buffer.alloc(8), u32(i));
+const pattern = (n, seed) => {
+  const b = Buffer.alloc(n);
+  for (let i = 0; i < n; i++) b[i] = (i * 31 + seed) & 0xff;
+  return b;
+};
+const partCount = (size, partSize) => (size === 0 ? 1 : Math.ceil(size / partSize));
+function descriptorError(a) {
+  const b = a.blob;
+  if (!b || typeof b.id !== 'string' || !/^[a-z2-7]{26}$/.test(b.id)) return 'malformed';
+  try {
+    if (b32dec(b.id).length !== 16 || b64dec(b.key).length !== 32) return 'malformed';
+  } catch {
+    return 'malformed';
+  }
+  if (b.partSize !== 4194304 || !Number.isSafeInteger(b.size) || b.size < 0 || b.parts !== partCount(b.size, b.partSize)) return 'malformed';
+  if (typeof a.name !== 'string' || /[/\\\u0000-\u001f\u007f-\u009f]/.test(a.name) || a.name === '.' || a.name === '..') return 'malformed';
+  if (a.kind === 'voice' && (!Array.isArray(a.peaks) || a.peaks.length !== 64 || !Number.isSafeInteger(a.dur))) return 'malformed';
+  if (a.thumb !== undefined && b64dec(a.thumb).length > 4096) return 'malformed';
+  return 'ok';
+}
+const av = load('attachment.json');
+const blobParts = { single: [], twoParts: [] };
+{
+  const s = av.single;
+  const idRaw = b32dec(s.blob.id);
+  eq(hex(blobAad(idRaw, 0, 1)), s.aadHex, 'attachment single AAD');
+  eq(hex(pattern(s.blob.size, s.seed)), s.plaintextHex, 'attachment single plaintext');
+  const ct = gcmEncrypt(b64dec(s.blob.key), counterNonce(0), blobAad(idRaw, 0, 1), unhex(s.plaintextHex));
+  eq(hex(ct), s.ciphertextHex, 'attachment single ciphertext');
+  blobParts.single.push(ct);
+  const t = av.twoParts;
+  const plain = pattern(t.blob.size, t.seed);
+  for (const p of t.parts) {
+    const pt = plain.subarray(p.index * t.blob.partSize, Math.min((p.index + 1) * t.blob.partSize, t.blob.size));
+    eq(pt.length, p.plaintextLength, `attachment part ${p.index} length`);
+    const aad = blobAad(b32dec(t.blob.id), p.index, t.blob.parts);
+    eq(hex(aad), p.aadHex, `attachment part ${p.index} AAD`);
+    eq(hex(counterNonce(p.index)), p.nonceHex, `attachment part ${p.index} nonce`);
+    const ct = gcmEncrypt(b64dec(t.blob.key), counterNonce(p.index), aad, pt);
+    eq(sha256(ct).toString('hex'), p.ciphertextSha256, `attachment part ${p.index} ciphertext hash`);
+    eq(hex(ct.subarray(ct.length - 16)), p.tagHex, `attachment part ${p.index} tag`);
+    blobParts.twoParts.push(ct);
+  }
+  eq(descriptorError(av.descriptor), 'ok', 'attachment descriptor is valid');
+}
+
+// ---- payloads.json ----
+for (const p of load('payloads.json').payloads) {
+  const j = JSON.parse(p.text);
+  const order = {
+    msg: 'v,t,id,dev,seq,fwd,attachments,location',
+    edit: 'v,t,id,dev,seq,target,body',
+    delete: 'v,t,id,dev,seq,target,targetDev,targetSeq',
+    react: 'v,t,id,dev,seq,target,emoji,on',
+  }[j.t];
+  eq(Object.keys(j).join(','), order, `payload ${j.t} field order`);
+  if (j.t === 'msg') for (const a of j.attachments) eq(descriptorError(a), 'ok', `payload attachment ${a.name}`);
+}
+
+// ---- archive ----
+const arv = load('archive.json');
+function readArchiveIndep(file, selfKey) {
+  if (file.length < 36 || file.subarray(0, 3).toString('latin1') !== 'FCA') return { error: 'malformed' };
+  if (file[3] !== 1) return { error: 'unsupported-version' };
+  const h = file.subarray(0, 36);
+  const key = hkdf(selfKey, cat(utf8('fc/v1/archive'), h.subarray(4, 20)));
+  if (!hkdf(key, utf8('fc/v1/archive-check')).subarray(0, 16).equals(h.subarray(20, 36))) return { error: 'wrong-identity' };
+  const blockCt = 1024 * 1024 + 16;
+  const body = file.subarray(36);
+  const plains = [];
+  for (let i = 0, off = 0; off < body.length || i === 0; i++) {
+    const last = body.length - off <= blockCt;
+    const ct = body.subarray(off, last ? body.length : off + blockCt);
+    if (ct.length < 16) return { error: 'malformed' };
+    try {
+      plains.push(gcmDecrypt(key, counterNonce(i), cat(h, u32(i), [last ? 1 : 0]), ct));
+    } catch {
+      return { error: 'malformed' };
+    }
+    off += ct.length;
+    if (last) break;
+  }
+  const plain = cat(...plains);
+  const records = [];
+  for (let off = 0; off < plain.length; ) {
+    if (plain.length - off < 6) return { error: 'malformed' };
+    const type = plain.readUInt16BE(off);
+    const len = plain.readUInt32BE(off + 2);
+    if (type === 0 || off + 6 + len > plain.length) return { error: 'malformed' };
+    records.push({ type, dataHex: hex(plain.subarray(off + 6, off + 6 + len)) });
+    off += 6 + len;
+  }
+  return { records, key, header: h };
+}
+const archives = {};
+{
+  const s = arv.small;
+  const alice = hkdf(unhex(idv.users[arv.owner].seedHex), utf8('fc/v1/self'));
+  eq(hex(hkdf(alice, cat(utf8('fc/v1/archive'), unhex(s.saltHex)))), s.archiveKeyHex, 'archive key');
+  eq(hex(hkdf(unhex(s.archiveKeyHex), utf8('fc/v1/archive-check')).subarray(0, 16)), s.checkHex, 'archive check');
+  const file = unhex(s.fileHex);
+  eq(hex(file.subarray(0, 36)), hex(cat(utf8('FCA'), [1], unhex(s.saltHex), unhex(s.checkHex))), 'archive header');
+  const r = readArchiveIndep(file, alice);
+  check(!r.error, `small archive reads (${r.error ?? 'ok'})`);
+  eq(JSON.stringify(r.records), JSON.stringify(s.records), 'small archive records');
+  archives.small = file;
+  // Rebuild the two-block archive from its description.
+  const t = arv.twoBlocks;
+  const salt = unhex(t.saltHex);
+  const key = hkdf(alice, cat(utf8('fc/v1/archive'), salt));
+  const header = cat(utf8('FCA'), [1], salt, hkdf(key, utf8('fc/v1/archive-check')).subarray(0, 16));
+  const plain = cat(u32(t.record.length).subarray(0, 0), Buffer.from([0, t.record.type]), u32(t.record.length), pattern(t.record.length, t.record.seed));
+  const blocks = [];
+  for (let i = 0, off = 0; ; i++) {
+    const last = plain.length - off <= 1024 * 1024;
+    const chunk = plain.subarray(off, last ? plain.length : off + 1024 * 1024);
+    blocks.push(gcmEncrypt(key, counterNonce(i), cat(header, u32(i), [last ? 1 : 0]), chunk));
+    off += chunk.length;
+    if (last) break;
+  }
+  const big = cat(header, ...blocks);
+  eq(big.length, t.fileLength, 'two-block archive length');
+  eq(sha256(big).toString('hex'), t.fileSha256, 'two-block archive hash');
+  eq(JSON.stringify(blocks.map((b) => hex(b.subarray(b.length - 16)))), JSON.stringify(t.blockTagsHex), 'two-block archive tags');
+  check(!readArchiveIndep(big, alice).error, 'two-block archive reads');
+  archives.twoBlocks = big;
+}
+
+// ---- negative-m2.json ----
+{
+  const neg = load('negative-m2.json');
+  const serverId = gv.serverId;
+  const chatId = gv.groupId.chatId;
+  const states = {};
+  let prev;
+  for (const step of gv.steps) {
+    prev = verifyState(step.state.envelope, { serverId, chatId, prev });
+    states[step.name.split(':')[0]] = prev;
+  }
+  for (const c of neg.groupStates) {
+    const r = verifyState(c.envelope, { serverId, chatId, prev: c.prev ? states[c.prev] : undefined });
+    eq(r.error ?? 'ok', c.expectedError, c.name);
+  }
+  for (const c of neg.sealedKeys) eq(openKey(c.envelope, users[c.openAs], serverId).error ?? 'ok', c.expectedError, c.name);
+  for (const c of neg.attachmentParts) {
+    const v = av[c.vector];
+    let ct = blobParts[c.vector][c.present];
+    if (c.truncate) ct = ct.subarray(0, ct.length - c.truncate);
+    if (c.flipLastByte) {
+      ct = Buffer.from(ct);
+      ct[ct.length - 1] ^= 1;
+    }
+    const expectedLen = (c.as < v.blob.parts - 1 ? v.blob.partSize : v.blob.size - (v.blob.parts - 1) * v.blob.partSize) + 16;
+    let code = 'ok';
+    if (ct.length !== expectedLen) code = 'malformed';
+    else {
+      try {
+        gcmDecrypt(b64dec(v.blob.key), counterNonce(c.as), blobAad(b32dec(v.blob.id), c.as, v.blob.parts), ct);
+      } catch {
+        code = 'wrong-key';
+      }
+    }
+    eq(code, c.expectedError, c.name);
+  }
+  for (const c of neg.descriptors) eq(descriptorError(c.descriptor), c.expectedError, c.name);
+  for (const c of neg.archives) {
+    let file = archives[c.vector];
+    if (c.truncateTo) file = file.subarray(0, c.truncateTo);
+    if (c.flipByte !== undefined) {
+      file = Buffer.from(file);
+      file[c.flipByte] ^= 1;
+    }
+    const selfKey = hkdf(unhex((idv.users[c.openAs] ?? gv.extraUsers[c.openAs]).seedHex), utf8('fc/v1/self'));
+    eq(readArchiveIndep(file, selfKey).error ?? 'ok', c.expectedError, c.name);
+  }
+}
+
 if (failures > 0) {
   console.error(`${failures} of ${checks} checks failed`);
   process.exit(1);

@@ -169,6 +169,51 @@ impl Member {
         .await
     }
 
+    /// Posts an event with an explicit epoch.
+    pub async fn post_event_epoch(
+        &self,
+        srv: &TestServer,
+        chat: &ChatId,
+        msg_id: &str,
+        epoch: u32,
+        body: &[u8],
+    ) -> Res {
+        let epoch = epoch.to_string();
+        request_bytes(
+            "POST",
+            &srv.url(&format!("/v1/chats/{chat}/events")),
+            &[
+                ("Authorization", &self.auth()),
+                ("Content-Type", "application/octet-stream"),
+                ("Idempotency-Key", msg_id),
+                ("X-FC-Epoch", &epoch),
+            ],
+            body.to_vec(),
+        )
+        .await
+    }
+
+    /// Sends raw bytes.
+    pub async fn send_bytes(&self, srv: &TestServer, method: &str, path: &str, body: Vec<u8>) -> Res {
+        request_bytes(
+            method,
+            &srv.url(path),
+            &[
+                ("Authorization", &self.auth()),
+                ("Content-Type", "application/octet-stream"),
+            ],
+            body,
+        )
+        .await
+    }
+
+    /// Events after `after` (no waiting).
+    pub async fn feed(&self, srv: &TestServer, after: u64) -> Vec<Value> {
+        let res = self.get(srv, &format!("/v1/events?after={after}")).await;
+        assert_eq!(res.status, 200, "{}", String::from_utf8_lossy(&res.body));
+        res.json()["events"].as_array().unwrap().clone()
+    }
+
     /// Signs an auth payload for a challenge.
     pub fn auth_envelope(&self, server_id: &str, nonce: &str, dev: &DevId) -> Envelope {
         let p =
@@ -208,6 +253,35 @@ pub async fn family(srv: &TestServer) -> (Member, Member) {
     let code = invite(srv, &admin).await;
     let other = join(srv, "Папа", "invite", &code).await;
     (admin, other)
+}
+
+/// A second device of `m` (by signature); returns the member with that device's token.
+pub async fn second_device(srv: &TestServer, m: &Member) -> Member {
+    let nonce = request("POST", &srv.url("/v1/auth/challenge"), &[], None).await.json()["nonce"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let dev = new_dev();
+    let env = m.auth_envelope(&srv.server_id(), &nonce, &dev);
+    let res = request(
+        "POST",
+        &srv.url("/v1/auth/device"),
+        &[("Content-Type", "application/json")],
+        Some(&env_json(&env).to_string()),
+    )
+    .await;
+    assert_eq!(res.status, 200, "{}", String::from_utf8_lossy(&res.body));
+    Member {
+        key: m.key.clone(),
+        user: m.user,
+        identity: m.identity.clone(),
+        dev,
+        token: res.json()["token"].as_str().unwrap().to_string(),
+    }
+}
+
+pub fn b64e(b: &[u8]) -> String {
+    B64.encode(b)
 }
 
 pub async fn invite(srv: &TestServer, admin: &Member) -> String {

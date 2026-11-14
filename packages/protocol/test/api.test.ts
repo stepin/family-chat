@@ -11,38 +11,84 @@ describe('public API', () => {
     expect(functions).toEqual(
       [
         'ProtocolError',
+        'acceptGroupKey',
+        'addGroupMembers',
         'base32Decode',
         'base32Encode',
         'base64urlDecode',
         'base64urlEncode',
+        'blobPartCount',
+        'blobPartLength',
+        'checkAttachmentInput',
+        'compareGroupMembers',
+        'createArchiveReader',
+        'createArchiveWriter',
         'createAuthEnvelope',
+        'createGroup',
         'createIdentityEnvelope',
         'createProfileEnvelope',
+        'createRevocationEnvelope',
         'decodeEvent',
         'decodePayload',
+        'decryptBlobPart',
         'deriveDmKeys',
+        'deriveGroupKeys',
         'deriveIdentityKeys',
         'dmChatId',
+        'encodeDeletePayload',
+        'encodeEditPayload',
         'encodeEvent',
         'encodeMsgPayload',
+        'encodeReactPayload',
+        'encryptBlobPart',
+        'encryptGroupState',
         'fingerprint',
+        'groupChatId',
+        'groupStateActions',
         'isProtocolError',
         'isValidPhrase',
+        'newBlob',
         'newDevId',
+        'newEpochSecret',
+        'newGroupNonce',
         'newMessageId',
         'newSeed',
+        'openGroupKey',
+        'openGroupState',
         'parseEnvelope',
+        'parsePayload',
+        'parseSealedGroupKey',
         'phraseToSeed',
         'randomBytes',
+        'readArchive',
+        'readGroupKey',
+        'readGroupStateHeader',
+        'removeGroupMembers',
+        'renameGroup',
+        'sealGroupKey',
         'seedToPhrase',
         'serializeEnvelope',
+        'transferGroupOwnership',
         'userIdFromSignPub',
+        'validateAttachment',
         'verifyAuthEnvelope',
+        'verifyGroupKey',
+        'verifyGroupState',
         'verifyIdentityEnvelope',
         'verifyProfileEnvelope',
+        'verifyRevocationEnvelope',
       ].sort(),
     );
-    expect('encodeEventWithNonce' in api).toBe(false);
+    for (const internal of [
+      'encodeEventWithNonce',
+      'encryptGroupStateWithNonce',
+      'sealGroupKeyWith',
+      'createGroupWith',
+      'createArchiveWriterWithSalt',
+      'hpkeSeal',
+    ]) {
+      expect(internal in api).toBe(false);
+    }
   });
 
   it('exports the limits', () => {
@@ -51,12 +97,30 @@ describe('public API', () => {
     expect(api.MAX_NAME_CHARS).toBe(64);
     expect(api.MAX_PAYLOAD_BYTES).toBe(261804);
     expect(api.DM_EPOCH).toBe(0);
+    expect(api.BLOB_PART_SIZE).toBe(4 * 1024 * 1024);
+    expect(api.ARCHIVE_BLOCK_SIZE).toBe(1024 * 1024);
+    expect(api.MAX_ATTACHMENTS).toBe(10);
+    expect(api.MAX_THUMB_BYTES).toBe(4096);
+    expect(api.VOICE_PEAKS).toBe(64);
+    expect(api.ARCHIVE_HEADER_BYTES).toBe(36);
+    expect(api.IMAGE_TYPES).toEqual(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+    expect(api.VOICE_TYPES).toEqual(['audio/mp4', 'audio/webm', 'audio/ogg']);
   });
 
   it('package.json exposes only the entry point', () => {
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
     expect(pkg.exports).toEqual({ '.': './src/index.ts' });
     expect(Object.keys(pkg.dependencies).sort()).toEqual(['@noble/curves', '@noble/hashes', '@scure/bip39']);
+  });
+
+  it('parseSealedGroupKey reads the stored key text', () => {
+    expect(api.parseSealedGroupKey('{"a":1}')).toEqual({ a: 1 });
+    expect(() => api.parseSealedGroupKey('{not json')).toThrow(api.ProtocolError);
+    try {
+      api.parseSealedGroupKey('');
+    } catch (e) {
+      expect(api.isProtocolError(e, 'malformed')).toBe(true);
+    }
   });
 
   it('isProtocolError narrows by code', () => {

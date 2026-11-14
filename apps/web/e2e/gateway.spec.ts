@@ -1,12 +1,15 @@
 // The invitation gateway's platform branches (docs/PLAN.md 8.1), by
-// user-agent emulation. The code below is well formed but never used: the
-// gateway does not spend it.
+// user-agent emulation. One real invitation is issued in beforeAll and never
+// spent: neither the gateway nor the invitation check uses it up. The
+// unknown code is well formed but was never issued.
 
+import { setupAdmin } from './support/flows.ts';
 import { Fcd } from './support/fcd.ts';
 import { expect, test } from './support/test.ts';
 
 const fcd = new Fcd();
 const CODE = 'abcdefghijklmnopqrstuvwxyz';
+let inviteLink = '';
 
 const UA = {
   iosSafari:
@@ -23,15 +26,20 @@ const phone = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile:
 // The installed app on iOS: navigator.standalone is true.
 const STANDALONE = `Object.defineProperty(Navigator.prototype, 'standalone', { get: () => true });`;
 
-test.beforeAll(async () => {
+test.beforeAll(async ({ browser }) => {
+  test.setTimeout(120_000);
   await fcd.start();
+  const context = await browser.newContext({ locale: 'ru-RU' });
+  const page = await context.newPage();
+  inviteLink = (await setupAdmin(page, fcd)).inviteLink;
+  await context.close();
 });
 
 test.afterAll(async () => {
   await fcd.dispose();
 });
 
-const link = () => `${fcd.url}/#invite=${CODE}`;
+const link = () => inviteLink;
 
 test('iOS Safari: install first, copy the invitation, no identity created', async ({ newUser }) => {
   const { page, context } = await newUser({ ...phone, userAgent: UA.iosSafari });
@@ -73,7 +81,7 @@ test('iOS installed app: the first screen pastes the invitation', async ({ newUs
   await expect(page.getByRole('button', { name: 'Вставить приглашение' })).toBeVisible();
   await page.getByLabel('Ссылка-приглашение').fill(`Вот приглашение: ${link()}`);
   await page.getByRole('button', { name: 'Дальше' }).click();
-  await expect(page.getByRole('heading', { name: 'Вас пригласили в «Ивановы»' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Вас пригласил(а) Мама в «Ивановы»' })).toBeVisible();
   await expect(page.getByLabel('Как вас зовут')).toBeVisible();
 });
 
@@ -106,17 +114,16 @@ test('Android Chrome: installation offered, joining continues in the browser', a
 test('desktop: straight to the name', async ({ newUser }) => {
   const { page } = await newUser();
   await page.goto(link());
-  await expect(page.getByRole('heading', { name: 'Вас пригласили в «Ивановы»' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Вас пригласил(а) Мама в «Ивановы»' })).toBeVisible();
   await expect(page.getByLabel('Как вас зовут')).toBeVisible();
   expect(page.url()).toBe(`${fcd.url}/`);
 });
 
-test('an unknown invitation is refused with a plain message', async ({ newUser }) => {
+test('an unknown invitation is refused with a plain message before the name', async ({ newUser }) => {
   const { page } = await newUser();
-  await page.goto(link());
-  await page.getByLabel('Как вас зовут').fill('Гость');
-  await page.getByRole('button', { name: 'Войти в семейный чат' }).click();
+  await page.goto(`${fcd.url}/#invite=${CODE}`);
   await expect(page.getByText('Это приглашение не найдено')).toBeVisible();
+  await expect(page.getByLabel('Как вас зовут')).toHaveCount(0);
 });
 
 test('an unreachable server is reported', async ({ newUser }) => {

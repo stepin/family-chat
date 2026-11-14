@@ -13,10 +13,13 @@ import {
   encodeMsgPayload,
   MAX_BODY_BYTES,
   newMessageId,
+  type Attachment,
+  type ChatKeys,
+  type Location,
   type MsgRef,
 } from '@family-chat/protocol';
 import { ApiError, isApiError, isTransient } from './api/errors.ts';
-import { commitSent, type AccountRuntimeLike } from './apply.ts';
+import { commitSent, outboxPayload, type AccountRuntimeLike } from './apply.ts';
 import { describeError } from './db/diagnostics.ts';
 import type { OutboxRow } from './db/schema.ts';
 import { CoreError, isCoreError } from './errors.ts';
@@ -32,21 +35,43 @@ export function checkMessageText(text: string): void {
   }
 }
 
+export interface MessageExtras {
+  readonly reply?: MsgRef | undefined;
+  readonly attachments?: readonly Attachment[];
+  readonly location?: Location;
+  readonly fwd?: boolean;
+  /** Use this message id (attachments were prepared under it). */
+  readonly msgId?: string;
+  /** Extra work in the same transaction as the outbox row (attachment rows). */
+  readonly inTransaction?: () => Promise<void>;
+}
+
 /** Puts a message into the outbox. Returns its message id. */
 export async function enqueueMessage(
   rt: AccountRuntimeLike,
   chatId: string,
   text: string,
-  reply?: MsgRef,
+  replyOrExtras?: MsgRef | MessageExtras,
 ): Promise<string> {
-  checkMessageText(text);
+  const extras: MessageExtras =
+    replyOrExtras && 'author' in replyOrExtras ? { reply: replyOrExtras } : ((replyOrExtras as MessageExtras | undefined) ?? {});
+  const reply = extras.reply;
+  const hasContent = (extras.attachments?.length ?? 0) > 0 || extras.location !== undefined;
+  if (!hasContent || text.length > 0) checkMessageText(text);
   const { ctx, session } = rt;
   const { db } = ctx;
   const acc = session.accountId;
   const chat = await db.chats.get([acc, chatId]);
   if (!chat) throw new CoreError('unknown-chat');
-  const msgId = newMessageId();
-  await db.transaction('rw', [db.counters, db.outbox, db.drafts], async () => {
+  if (chat.kind === 'group') {
+    const g = await db.groups.get([acc, chatId]);
+    if (!g?.member) throw new CoreError('not-member');
+  } else if (chat.kind === 'dm') {
+    const peer = await rt.directory.user(chat.peerId);
+    if (peer?.revoked) throw new CoreError('peer-revoked');
+  }
+  const msgId = extras.msgId ?? newMessageId();
+  await db.transaction('rw', [db.counters, db.outbox, db.drafts, db.blobs], async () => {
     const counter = await db.counters.get([acc, chatId]);
     const seq = counter?.nextSeq ?? 1;
     await db.counters.put({ accountId: acc, chatId, nextSeq: seq + 1 });
@@ -64,10 +89,26 @@ export async function enqueueMessage(
       nextAttemptAt: now,
       createdAt: now,
       error: null,
+      ...(extras.attachments && extras.attachments.length > 0 ? { attachments: [...extras.attachments] } : {}),
+      ...(extras.location ? { location: extras.location } : {}),
+      ...(extras.fwd ? { fwd: true as const } : {}),
     });
     await db.drafts.delete([acc, chatId]);
+    await extras.inTransaction?.();
   });
   return msgId;
+}
+
+/** Upload state of an outbox row's attachments: all done, still running, or one failed. */
+async function uploadState(rt: AccountRuntimeLike, row: OutboxRow): Promise<'ready' | 'waiting' | 'failed'> {
+  if (!row.attachments || row.attachments.length === 0) return 'ready';
+  const { db } = rt.ctx;
+  for (const a of row.attachments) {
+    const b = await db.blobs.get([row.accountId, a.blob.id]);
+    if (!b || b.status === 'failed' || b.status === 'cancelled') return 'failed';
+    if (b.status !== 'done') return 'waiting';
+  }
+  return 'ready';
 }
 
 /** Queue order: creation time, then seq (two messages may share a millisecond). */
@@ -135,35 +176,51 @@ export class OutboxSender {
       // Re-read: another context may have sent or cancelled it meanwhile.
       const fresh = await db.outbox.get([acc, row.msgId]);
       if (!fresh || fresh.status !== 'pending') continue;
+      // Attachments upload first; a message waiting for them does not hold up the rest.
+      const uploads = await uploadState(this.rt, fresh);
+      if (uploads === 'waiting') continue;
       try {
+        if (uploads === 'failed') throw new CoreError('invalid-input', 'attachment upload failed');
         const chat = await db.chats.get([acc, fresh.chatId]);
         if (!chat) throw new CoreError('unknown-chat');
-        let peer = await directory.identity(chat.peerId);
-        if (!peer) {
-          await directory.refresh();
-          peer = await directory.identity(chat.peerId);
-          if (!peer) throw new CoreError('unknown-user');
-        }
-        const keys = await directory.chatKeys(chat.peerId);
         const author = await ctx.keys(session.userId);
         const payload = encodeMsgPayload({
-          id: fresh.msgId,
-          dev: fresh.devId,
-          seq: fresh.seq,
-          body: fresh.body,
-          ...(fresh.reply ? { reply: fresh.reply } : {}),
+          ...outboxPayload(fresh),
+          ...(fresh.fwd ? { fwd: true } : {}),
         });
-        // A fresh nonce for every attempt (docs/PROTOCOL.md 6.4); the server
-        // deduplicates by the Idempotency-Key.
-        const body = await encodeEvent({ serverId: session.serverId, chatId: fresh.chatId, chat: keys, author, payload });
-        const res = await session.call((t) =>
-          session.transport.postEvent(t, { chatId: fresh.chatId, msgId: fresh.msgId, epoch: keys.epoch, body }),
-        );
-        await commitSent(ctx, acc, session.userId, fresh, chat.peerId, body, res);
+        let res;
+        let body: Uint8Array;
+        let epoch = 0;
+        for (let attempt = 0; ; attempt++) {
+          const keys: ChatKeys = await this.#keysFor(chat);
+          epoch = keys.epoch;
+          // A fresh nonce for every attempt (docs/PROTOCOL.md 6.4); the server
+          // deduplicates by the Idempotency-Key.
+          body = await encodeEvent({ serverId: session.serverId, chatId: fresh.chatId, chat: keys, author, payload });
+          const sendBody = body;
+          try {
+            res = await session.call((t) =>
+              session.transport.postEvent(t, { chatId: fresh.chatId, msgId: fresh.msgId, epoch: keys.epoch, body: sendBody }),
+            );
+            break;
+          } catch (e) {
+            // The group moved to a new epoch: fetch the key, re-encrypt with the same id, send again.
+            if (chat.kind === 'group' && isApiError(e, 'epoch_mismatch') && attempt < 3) {
+              void ctx.diag.info('outbox', `message ${fresh.msgId}: epoch changed, re-encrypting`, acc);
+              await this.rt.groups.reconcile({ full: true });
+              continue;
+            }
+            if (chat.kind === 'group' && isApiError(e, 'not_member')) {
+              await this.rt.groups.reconcile({ full: true }).catch(() => undefined);
+            }
+            throw e;
+          }
+        }
+        await commitSent(ctx, acc, session.userId, fresh, chat, epoch, body, res);
         if (res.duplicate) void ctx.diag.info('outbox', `message ${fresh.msgId} was already on the server`, acc);
       } catch (e) {
-        if (isCoreError(e, 'removed') || isCoreError(e, 'login-invalid')) return Infinity;
-        if (isTransient(e)) {
+        if (isCoreError(e, 'removed') || isCoreError(e, 'login-invalid') || isCoreError(e, 'revoked')) return Infinity;
+        if (isTransient(e) || isCoreError(e, 'need-key')) {
           const attempts = fresh.attempts + 1;
           const retryAfter = isApiError(e) ? (e.retryAfterMs ?? 0) : 0;
           const nextAttemptAt =
@@ -181,6 +238,19 @@ export class OutboxSender {
       }
     }
     return Infinity;
+  }
+
+  async #keysFor(chat: { kind: string; peerId: string; chatId: string }): Promise<ChatKeys> {
+    const { directory, groups } = this.rt;
+    if (chat.kind === 'group') return groups.sendKeys(chat.chatId);
+    let peer = await directory.identity(chat.peerId);
+    if (!peer) {
+      await directory.refresh();
+      peer = await directory.identity(chat.peerId);
+      if (!peer) throw new CoreError('unknown-user');
+    }
+    if (chat.kind === 'dm' && (await directory.user(chat.peerId))?.revoked) throw new CoreError('peer-revoked');
+    return directory.chatKeys(chat.peerId);
   }
 }
 

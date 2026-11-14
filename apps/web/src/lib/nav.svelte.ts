@@ -9,9 +9,16 @@ export type Route =
   | { readonly name: 'join' }
   | { readonly name: 'admin' }
   | { readonly name: 'restore' }
+  | { readonly name: 'revoke-phrase' }
   | { readonly name: 'list' }
   | { readonly name: 'chat'; readonly accountId: string; readonly chatId: string; readonly focus?: boolean }
   | { readonly name: 'new-chat' }
+  | { readonly name: 'new-group'; readonly members?: readonly string[]; readonly title?: string }
+  | { readonly name: 'chat-info'; readonly accountId: string; readonly chatId: string }
+  | { readonly name: 'contact'; readonly accountId: string; readonly userId: string }
+  | { readonly name: 'profile' }
+  | { readonly name: 'storage' }
+  | { readonly name: 'security' }
   | { readonly name: 'settings' }
   | { readonly name: 'phrase' }
   | { readonly name: 'server' }
@@ -58,7 +65,7 @@ class Nav {
   openChat(accountId: string, chatId: string, focus = false): void {
     const route: Route = { name: 'chat', accountId, chatId, focus };
     const top = this.top;
-    if (top.name === 'chat' || top.name === 'new-chat') this.replace(route);
+    if (top.name === 'chat' || top.name === 'new-chat' || top.name === 'new-group') this.replace(route);
     else if (this.stack.length > 1) {
       // From settings and similar screens: back to the list, then the chat.
       this.stack = [this.root, route];

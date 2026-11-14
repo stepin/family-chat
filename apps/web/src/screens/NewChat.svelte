@@ -1,17 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Member } from '@family-chat/core';
+  import Avatar from '../components/Avatar.svelte';
   import Icon from '../components/Icon.svelte';
   import Page from '../components/Page.svelte';
   import { app } from '../lib/app.svelte.ts';
+  import { displayNames } from '../lib/names.ts';
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // New chat: pick a family member (groups are not in M1).
+  // New chat (docs/PLAN.md screen 8): pick a relative, or "Новая группа".
   const account = $derived(app.account!);
+  const names = $derived(displayNames(app.members.filter((m) => !m.isMe), t.common.unknownName));
   const others = $derived(
     app.members
-      .filter((m) => !m.isMe && !m.removed)
+      .filter((m) => !m.isMe && !m.removed && !m.revoked)
       .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'ru')),
   );
 
@@ -32,6 +35,13 @@
 
 <Page title={t.newChat.title} onback={() => nav.back()}>
   <div class="stack">
+    {#if others.length > 0}
+      <button class="new-group" type="button" onclick={() => nav.push({ name: 'new-group' })}>
+        <Avatar accountId={account.id} kind="group" size={40} />
+        <span class="name">{t.newChat.newGroup}</span>
+        <Icon name="chevron" size={20} />
+      </button>
+    {/if}
     <p class="muted">{t.newChat.lead}</p>
     {#if others.length === 0}
       <p>{t.newChat.empty}</p>
@@ -43,8 +53,8 @@
         {#each others as m (m.userId)}
           <li>
             <button type="button" class="person" onclick={() => pick(m)}>
-              <span class="avatar" aria-hidden="true">{(m.name ?? '?').slice(0, 1).toUpperCase()}</span>
-              <span class="name">{m.name ?? t.common.unknownName}</span>
+              <Avatar accountId={account.id} userId={m.userId} name={m.name} hasAvatar={!!m.avatar} size={40} />
+              <span class="name">{names.get(m.userId) ?? t.common.unknownName}</span>
               <Icon name="chevron" size={20} />
             </button>
           </li>
@@ -62,6 +72,24 @@
     border-radius: var(--r-l);
     background: var(--surface);
     overflow: hidden;
+  }
+
+  .new-group {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    width: 100%;
+    min-height: 60px;
+    padding: var(--sp-2) var(--sp-4);
+    border: 0;
+    border-radius: var(--r-l);
+    background: var(--surface);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .new-group:hover {
+    background: var(--surface-2);
   }
 
   .person {
@@ -86,17 +114,6 @@
     background: var(--surface-2);
   }
 
-  .avatar {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: var(--accent);
-    color: var(--on-accent);
-    font-weight: 700;
-  }
 
   .name {
     flex: 1 1 auto;

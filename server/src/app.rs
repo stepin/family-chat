@@ -16,9 +16,12 @@ use tokio::sync::watch;
 
 use crate::api;
 use crate::assets::Assets;
+use crate::blobs;
 use crate::config::Settings;
 use crate::datadir::{DataDir, check_admin_code, now_ms};
 pub use crate::error::ApiError;
+use crate::groups;
+use crate::headers;
 use crate::ratelimit::RateLimiter;
 use crate::store::{Store, StoreConfig};
 use crate::webpush::{PushClient, Subscription, VapidKey};
@@ -59,6 +62,10 @@ impl AppState {
             StoreConfig {
                 retention_days: settings.retention_days,
                 min_free_mb: settings.min_free_mb,
+                max_blob_bytes: settings
+                    .max_file_mb
+                    .saturating_mul(1024 * 1024)
+                    .saturating_add(blobs::TOTAL_SLACK_BYTES),
             },
         )?;
         Ok(Arc::new(AppState {
@@ -99,9 +106,19 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/users", get(api::users))
         .route("/v1/me", get(api::me))
         .route("/v1/me/profile", put(api::put_profile))
+        .route("/v1/me/avatar", put(api::put_avatar))
+        .route("/v1/users/{id}/avatar/{sha}", get(api::get_avatar))
+        .route("/v1/revoke", post(api::revoke))
+        .route("/v1/invites/check", post(api::invite_check))
         .route("/v1/me/push", put(api::put_push).delete(api::delete_push))
-        .route("/v1/chats", get(api::chats))
+        .route("/v1/chats", get(api::chats).post(groups::create))
         .route("/v1/chats/{id}/events", post(api::post_event).get(api::chat_events))
+        .route("/v1/chats/{id}/state", put(groups::change))
+        .route("/v1/chats/{id}/state/{version}", get(groups::get_state))
+        .route("/v1/chats/{id}/leave", post(groups::leave))
+        .route("/v1/keys", get(groups::keys))
+        .route("/v1/blobs/{id}", get(blobs::info).delete(blobs::delete))
+        .route("/v1/blobs/{id}/{part}", put(blobs::put_part).get(blobs::get_part))
         .route("/v1/events", get(api::events))
         .route("/v1/admin/invites", post(api::create_invite).get(api::list_invites))
         .route("/v1/admin/invites/{id}", delete(api::delete_invite))
@@ -113,6 +130,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(fallback)
         .layer(middleware::from_fn(cors))
+        .layer(middleware::from_fn(headers::security_headers))
         .with_state(state)
 }
 
@@ -128,7 +146,7 @@ async fn method_not_allowed() -> Response {
 /// CORS for every API response (docs/PLAN-v2.md, section 5): any origin,
 /// no cookies; authorisation goes in the `Authorization` header.
 async fn cors(req: Request, next: Next) -> Response {
-    let is_api = req.uri().path().starts_with("/v1/") || req.uri().path() == "/v1";
+    let is_api = headers::is_api_path(req.uri().path());
     if !is_api {
         return next.run(req).await;
     }
@@ -152,9 +170,6 @@ async fn cors(req: Request, next: Next) -> Response {
         HeaderValue::from_static("Retry-After"),
     );
     h.insert(header::ACCESS_CONTROL_MAX_AGE, HeaderValue::from_static("86400"));
-    if !h.contains_key(header::CACHE_CONTROL) {
-        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    }
     res
 }
 
@@ -184,6 +199,12 @@ async fn hello(State(st): State<Arc<AppState>>) -> Response {
         "vapidPublicKey": if s.push { Some(st.vapid.public_key_b64()) } else { None },
         "time": now_ms(),
         "maxEventBytes": crate::eventlog::MAX_BODY,
+        "maxPartBytes": blobs::MAX_PART_BYTES,
+        "maxBlobBytes": st.store.blobs().max_total(),
+        "maxAvatarBytes": api::MAX_AVATAR_BYTES,
+        "maxStateBytes": groups::MAX_STATE_BYTES,
+        "maxSealedKeyBytes": groups::MAX_SEALED_KEY_BYTES,
+        "maxGroupMembers": groups::MAX_MEMBERS,
         "adminCodeActive": st.store.read(|m| !m.server.admin_code_hash.is_empty()),
         "m0": st.m0,
     }))

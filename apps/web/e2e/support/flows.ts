@@ -70,3 +70,20 @@ export async function send(page: Page, text: string): Promise<void> {
 export function message(page: Page, text: string) {
   return page.getByTestId('message').filter({ hasText: text });
 }
+
+/** A chat row in the list by its title (the first line starts with it). */
+export function chatRow(page: Page, title: string) {
+  return page.locator('button.chat').filter({ has: page.locator('.name', { hasText: new RegExp(`^${title}`) }) });
+}
+
+/** Opens a chat from the list by its title. */
+export async function openChat(page: Page, title: string): Promise<void> {
+  await chatRow(page, title).click({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
+}
+
+/** Returns to the chat list in the one-column layout, or does nothing in two columns. */
+export async function toList(page: Page): Promise<void> {
+  const back = page.getByRole('button', { name: 'К списку чатов' });
+  if (await back.isVisible()) await back.click();
+}

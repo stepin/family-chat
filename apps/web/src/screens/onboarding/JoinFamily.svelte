@@ -7,10 +7,12 @@
   import { nav } from '../../lib/nav.svelte.ts';
   import { t } from '../../lib/strings.ts';
 
-  // "Вас пригласили в «Семья»" → name → the chat with the person who invited
-  // (docs/PLAN.md 8.1). The server check runs silently and shows only on failure.
+  // "Вас пригласил(а) Мама в «Семья»" → name → the chat with the person who
+  // invited (docs/PLAN.md 8.1). The invitation is checked first (without
+  // using it): a used or expired one is reported at once, before the name.
   const invite = app.invite;
   let family = $state<string | null>(null);
+  let inviter = $state<string | null>(null);
   let checking = $state(true);
   let unreachable = $state<string | null>(null);
   let name = $state('');
@@ -23,8 +25,25 @@
     checking = true;
     unreachable = null;
     try {
-      family = (await app.core.serverInfo(invite.serverUrl)).familyName;
+      const c = await app.core.checkInvite(invite.serverUrl, invite.code);
+      if (c.status === 'invalid') {
+        fatal = 'invalid';
+        app.invite = null;
+      } else {
+        family = c.familyName;
+        inviter = c.createdBy.name;
+        if (c.status === 'used' || c.status === 'expired') {
+          fatal = c.status;
+          app.invite = null;
+        }
+      }
     } catch (e) {
+      const p = joinProblem(e);
+      if (p === 'used' || p === 'expired' || p === 'invalid') {
+        fatal = p;
+        app.invite = null;
+        return;
+      }
       unreachable = errorText(e);
       app.log('warn', 'join', 'server check before joining failed', e);
     } finally {
@@ -55,7 +74,7 @@
       const acc = await app.core.join({ serverUrl: invite.serverUrl, code: { invite: invite.code }, name: name.trim() });
       app.invite = null;
       void navigator.storage?.persist?.().catch(() => false);
-      const chatId = await firstChat(acc);
+      const chatId = acc.firstChatId ?? (await firstChat(acc));
       nav.reset({ name: 'list' });
       if (chatId) nav.openChat(acc.id, chatId, true);
     } catch (err) {
@@ -73,7 +92,7 @@
   const back = nav.stack.length > 1 ? () => nav.back() : undefined;
 </script>
 
-<Page title={family ? t.join.title(family) : t.join.titleUnknown} onback={back} narrow>
+<Page title={family ? (inviter ? t.join.titleBy(inviter, family) : t.join.title(family)) : t.join.titleUnknown} onback={back} narrow>
   {#if fatal}
     <div class="stack">
       <p class="notice warn" role="alert">

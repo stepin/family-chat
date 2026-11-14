@@ -37,7 +37,8 @@ test('family from setup to removal', async ({ newUser }) => {
     await petya.page.goto(firstLink);
     // The invitation fragment is removed from the address bar at once.
     await expect.poll(() => petya.page.url()).not.toContain('#');
-    await expect(petya.page.getByRole('heading', { name: 'Вас пригласили в «Ивановы»' })).toBeVisible();
+    // The invitation check names the inviter before asking for the name.
+    await expect(petya.page.getByRole('heading', { name: 'Вас пригласил(а) Мама в «Ивановы»' })).toBeVisible();
     await petya.page.getByLabel('Как вас зовут').fill('Петя');
     await petya.page.getByRole('button', { name: 'Войти в семейный чат' }).click();
     await expect(petya.page.getByRole('heading', { name: 'Мама' })).toBeVisible();
@@ -102,9 +103,9 @@ test('family from setup to removal', async ({ newUser }) => {
   await test.step('a used invitation shows the right message', async () => {
     const stranger = await newUser();
     await stranger.page.goto(firstLink);
-    await stranger.page.getByLabel('Как вас зовут').fill('Чужой');
-    await stranger.page.getByRole('button', { name: 'Войти в семейный чат' }).click();
+    // Reported at once by the invitation check, before any name is asked.
     await expect(stranger.page.getByText('Это приглашение уже использовано. Попросите новое.')).toBeVisible();
+    await expect(stranger.page.getByLabel('Как вас зовут')).toHaveCount(0);
   });
 
   await test.step('a third context restores the administrator by the phrase and sees the history', async () => {

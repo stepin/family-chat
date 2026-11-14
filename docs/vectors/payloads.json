@@ -1,0 +1,21 @@
+{
+  "note": "Test vectors for docs/PROTOCOL.md (M2). Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only. Users alice, bob and carol are the ones of identity.json.",
+  "payloads": [
+    {
+      "name": "msg with attachments, location and fwd, no body",
+      "text": "{\"v\":1,\"t\":\"msg\",\"id\":\"aebagbafaydqqcikbmga2dqpca\",\"dev\":\"mfrggzdfmztwq2lk\",\"seq\":5,\"fwd\":true,\"attachments\":[{\"blob\":{\"id\":\"aaisem2ekvthpcezvk54zxpo74\",\"key\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"parts\":1,\"partSize\":4194304,\"size\":1000},\"name\":\"photo.jpg\",\"mime\":\"image/jpeg\",\"kind\":\"image\",\"w\":800,\"h\":600,\"thumb\":\"_9j_4AAQSkZJRg\"},{\"blob\":{\"id\":\"77xn3tf3vkmyq53gkvcdgiqraa\",\"key\":\"ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8\",\"parts\":2,\"partSize\":4194304,\"size\":8388608},\"name\":\"voice.m4a\",\"mime\":\"audio/mp4\",\"kind\":\"voice\",\"dur\":4200,\"peaks\":[0,37,74,111,148,185,222,3,40,77,114,151,188,225,6,43,80,117,154,191,228,9,46,83,120,157,194,231,12,49,86,123,160,197,234,15,52,89,126,163,200,237,18,55,92,129,166,203,240,21,58,95,132,169,206,243,24,61,98,135,172,209,246,27]}],\"location\":{\"lat\":55.7558,\"lon\":37.6173,\"accuracy\":25}}"
+    },
+    {
+      "name": "edit",
+      "text": "{\"v\":1,\"t\":\"edit\",\"id\":\"aebagbafaydqqcikbmga2dqpca\",\"dev\":\"mfrggzdfmztwq2lk\",\"seq\":6,\"target\":{\"author\":\"7q73gm43b6kfv7myx7qgupatdi\",\"id\":\"zzzzzzzzzzzzzzzzzzzzzzzzzq\"},\"body\":\"исправлено\"}"
+    },
+    {
+      "name": "delete",
+      "text": "{\"v\":1,\"t\":\"delete\",\"id\":\"aebagbafaydqqcikbmga2dqpca\",\"dev\":\"mfrggzdfmztwq2lk\",\"seq\":7,\"target\":{\"author\":\"7q73gm43b6kfv7myx7qgupatdi\",\"id\":\"zzzzzzzzzzzzzzzzzzzzzzzzzq\"},\"targetDev\":\"mfrggzdfmztwq2lk\",\"targetSeq\":3}"
+    },
+    {
+      "name": "react",
+      "text": "{\"v\":1,\"t\":\"react\",\"id\":\"aebagbafaydqqcikbmga2dqpca\",\"dev\":\"mfrggzdfmztwq2lk\",\"seq\":8,\"target\":{\"author\":\"7q73gm43b6kfv7myx7qgupatdi\",\"id\":\"zzzzzzzzzzzzzzzzzzzzzzzzzq\"},\"emoji\":\"👍\",\"on\":true}"
+    }
+  ]
+}

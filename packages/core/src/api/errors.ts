@@ -4,11 +4,16 @@
 
 export type ServerErrorCode =
   | 'bad_request'
+  | 'bad_member'
+  | 'unknown_avatar'
+  | 'bad_image'
   | 'unauthorized'
   | 'bad_signature'
   | 'bad_nonce'
   | 'removed'
+  | 'revoked'
   | 'not_member'
+  | 'not_owner'
   | 'not_admin'
   | 'peer_removed'
   | 'invalid_invite'
@@ -16,9 +21,13 @@ export type ServerErrorCode =
   | 'not_found'
   | 'chat_not_found'
   | 'unknown_user'
+  | 'blob_not_found'
   | 'method_not_allowed'
   | 'already_member'
   | 'stale_rev'
+  | 'stale_version'
+  | 'chat_exists'
+  | 'owner_cannot_leave'
   | 'epoch_mismatch'
   | 'idempotency_conflict'
   | 'push_disabled'
@@ -32,11 +41,16 @@ export type ServerErrorCode =
 
 const SERVER_CODES: ReadonlySet<string> = new Set<ServerErrorCode>([
   'bad_request',
+  'bad_member',
+  'unknown_avatar',
+  'bad_image',
   'unauthorized',
   'bad_signature',
   'bad_nonce',
   'removed',
+  'revoked',
   'not_member',
+  'not_owner',
   'not_admin',
   'peer_removed',
   'invalid_invite',
@@ -44,9 +58,13 @@ const SERVER_CODES: ReadonlySet<string> = new Set<ServerErrorCode>([
   'not_found',
   'chat_not_found',
   'unknown_user',
+  'blob_not_found',
   'method_not_allowed',
   'already_member',
   'stale_rev',
+  'stale_version',
+  'chat_exists',
+  'owner_cannot_leave',
   'epoch_mismatch',
   'idempotency_conflict',
   'push_disabled',
@@ -76,7 +94,7 @@ export class ApiError extends Error {
   readonly code: ApiErrorCode;
   /** `Retry-After` in milliseconds (429). */
   readonly retryAfterMs: number | undefined;
-  /** Extra numeric fields of the error body: `epoch`, `limit`, `rev`. */
+  /** Extra numeric fields of the error body: `epoch`, `limit`, `rev`, `version`. */
   readonly details: Readonly<Record<string, number>>;
 
   constructor(

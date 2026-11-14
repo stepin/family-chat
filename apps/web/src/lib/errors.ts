@@ -33,6 +33,14 @@ export function errorText(e: unknown): string {
   if (isNetworkError(e)) return t.errors.unreachable;
   if (isCoreError(e, 'unsupported-server')) return t.errors.unsupported;
   if (isCoreError(e, 'removed') || isApiError(e, 'removed')) return t.errors.removed;
+  if (isCoreError(e, 'revoked') || isApiError(e, 'revoked')) return t.errors.revoked;
+  if (isCoreError(e, 'peer-revoked')) return t.chat.peerRevokedComposer;
+  if (isCoreError(e, 'not-owner')) return t.group.notOwner;
+  if (isCoreError(e, 'not-member') || isApiError(e, 'not_member')) return t.group.notMember;
+  if (isCoreError(e, 'owner-cannot-leave')) return t.group.leaveOwnerText;
+  if (isCoreError(e, 'wrong-identity')) return t.storage.wrongIdentity;
+  if (isCoreError(e, 'bad-archive')) return t.storage.badArchive;
+  if (isCoreError(e, 'busy')) return t.errors.busy;
   if (isApiError(e, 'rate_limited')) return t.errors.rateLimited;
   if (isApiError(e, 'storage_full')) return t.errors.storageFull;
   if (isApiError(e, 'unexpected_response') || isApiError(e, 'not_found')) return t.errors.notServer;

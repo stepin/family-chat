@@ -4,12 +4,14 @@
 
 import {
   base32Encode,
+  base64urlDecode,
   base64urlEncode,
   dmChatId,
   randomBytes,
   verifyAuthEnvelope,
   verifyIdentityEnvelope,
   verifyProfileEnvelope,
+  verifyRevocationEnvelope,
   type Identity,
   type SignedEnvelope,
 } from '@family-chat/protocol';
@@ -24,6 +26,19 @@ interface User {
   removed: boolean;
   removedAt: number | null;
   devices: Map<string, { token: string; createdAt: number; push: unknown | null }>;
+  revoked?: SignedEnvelope | null;
+  avatars?: Map<string, { type: string; bytes: Uint8Array }>;
+  keys?: { n: number; chatId: string; epoch: number; version: number; time: number; key: string }[];
+}
+
+export interface FakeChat {
+  members: string[];
+  createdAt: number;
+  kind?: 'dm' | 'group';
+  owner?: string;
+  version?: number;
+  epoch?: number;
+  states?: Map<number, Uint8Array>;
 }
 
 interface Ev {
@@ -35,6 +50,9 @@ interface Ev {
   epoch: number;
   msgId: string;
   body: Uint8Array;
+  /** Server notice (kind "notice") instead of a member event, with its recipients. */
+  notice?: Record<string, unknown>;
+  to?: string[];
 }
 
 export interface FakeServerOptions {
@@ -43,6 +61,8 @@ export interface FakeServerOptions {
   /** Milliseconds per "second" of `wait` (default 20, so wait=25 lasts 0.5 s). */
   msPerSecond?: number;
   push?: boolean;
+  /** maxBlobBytes in /v1/hello (default: as fcd for 200 MB). */
+  maxBlobBytes?: number;
 }
 
 type Handler = (req: Req) => Promise<Res> | Res;
@@ -58,6 +78,8 @@ interface Req {
 interface Res {
   status: number;
   body?: unknown;
+  /** Raw bytes (application/octet-stream unless headers say otherwise). */
+  raw?: Uint8Array;
   headers?: Record<string, string>;
 }
 
@@ -73,7 +95,9 @@ export class FakeServer {
   readonly users = new Map<string, User>();
   readonly tokens = new Map<string, { user: string; dev: string }>();
   readonly invites = new Map<string, { id: string; createdAt: number; expiresAt: number; createdBy: string; usedAt: number | null; usedBy: string | null; expired?: boolean }>();
-  readonly chats = new Map<string, { members: [string, string]; createdAt: number }>();
+  readonly chats = new Map<string, FakeChat>();
+  readonly blobs = new Map<string, { owner: string; createdAt: number; parts: Map<number, Uint8Array> }>();
+  readonly maxBlobBytes: number;
   readonly log: Ev[] = [];
   readonly nonces = new Set<string>();
   readonly idem = new Map<string, Ev>();
@@ -99,6 +123,49 @@ export class FakeServer {
     this.familyName = options.familyName ?? 'Семья';
     this.msPerSecond = options.msPerSecond ?? 20;
     this.push = options.push ?? true;
+    this.maxBlobBytes = options.maxBlobBytes ?? 200 * 1048576 + 65536;
+  }
+
+  /** Appends a server notice for `to`. */
+  appendNotice(chatId: string, notice: Record<string, unknown>, to: string[]): Ev {
+    const ev: Ev = { gseq: this.nextGseq++, time: this.now++, chatId, senderId: '', devId: '', epoch: 0, msgId: '', body: new Uint8Array(), notice, to: [...to] };
+    this.log.push(ev);
+    this.#wake();
+    return ev;
+  }
+
+  #groupsOf(userId: string): [string, FakeChat][] {
+    return [...this.chats].filter(([, c]) => c.kind === 'group' && c.members.includes(userId));
+  }
+
+  #addKey(userId: string, chatId: string, epoch: number, version: number, key: string): void {
+    const u = this.users.get(userId)!;
+    u.keys ??= [];
+    u.keys.push({ n: u.keys.length + 1, chatId, epoch, version, time: this.now, key });
+  }
+
+  #chatJson(chatId: string, c: FakeChat) {
+    const last = [...this.log].reverse().find((e) => e.chatId === chatId && !e.notice);
+    const group = c.kind === 'group';
+    return {
+      chatId,
+      kind: group ? 'group' : 'dm',
+      members: [...c.members].sort(),
+      owner: group ? c.owner : null,
+      version: group ? c.version : null,
+      epoch: c.epoch ?? 0,
+      createdAt: c.createdAt,
+      lastGseq: last?.gseq ?? null,
+      lastTime: last?.time ?? null,
+    };
+  }
+
+  /** Requests handled normally whose answer is then lost (network error), matched by prefix. */
+  readonly loseAnswer: { match: string; times: number }[] = [];
+
+  /** Process the next `times` matching requests, then fail them as if the answer was lost. */
+  failAfter(match: string, times = 1): void {
+    this.loseAnswer.push({ match, times });
   }
 
   /** Inject a response for the next `times` matching requests. */
@@ -123,7 +190,15 @@ export class FakeServer {
     u.removed = true;
     u.removedAt = this.now;
     u.admin = false;
+    this.#memberEvent('member_removed', userId);
     this.#wake();
+  }
+
+  #memberEvent(type: string, userId: string): void {
+    for (const [chatId, c] of this.#groupsOf(userId)) {
+      const to = c.owner === userId ? c.members.filter((m) => m !== userId) : [c.owner!];
+      this.appendNotice(chatId, { type, userId }, to);
+    }
   }
 
   /** Drop events with gseq < n (retention). */
@@ -138,7 +213,7 @@ export class FakeServer {
     this.log.push(ev);
     if (!this.chats.has(e.chatId)) {
       const peer = this.#peerFor(e.senderId, e.chatId);
-      if (peer) this.chats.set(e.chatId, { members: [e.senderId, peer].sort() as [string, string], createdAt: ev.time });
+      if (peer) this.chats.set(e.chatId, { members: [e.senderId, peer].sort(), createdAt: ev.time });
     }
     this.#wake();
     return ev;
@@ -173,6 +248,12 @@ export class FakeServer {
     if (req.signal?.aborted) throw new DOMException('aborted', 'AbortError');
     const res = await this.#route(req);
     if (req.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+    for (const l of this.loseAnswer) {
+      if (l.times > 0 && key.startsWith(l.match)) {
+        l.times--;
+        throw new TypeError('fetch failed after the server handled it');
+      }
+    }
     return toResponse(res);
   };
 
@@ -186,6 +267,7 @@ export class FakeServer {
     const c = this.tokens.get(token);
     if (!c) return err(401, 'unauthorized');
     const user = this.users.get(c.user)!;
+    if (user.revoked) return err(403, 'revoked');
     if (user.removed) return err(403, 'removed');
     return { user, userId: c.user, dev: c.dev };
   }
@@ -202,17 +284,19 @@ export class FakeServer {
 
   #peerFor(me: string, chatId: string): string | undefined {
     for (const id of this.users.keys()) {
-      if (id !== me && dmChatId(this.serverId, me, id) === chatId) return id;
+      if (dmChatId(this.serverId, me, id) === chatId) return id;
     }
     return undefined;
   }
 
   #userJson(id: string, u: User) {
-    return { userId: id, identity: u.identity.envelope, profile: u.profile, admin: u.admin, removed: u.removed };
+    return { userId: id, identity: u.identity.envelope, profile: u.profile, admin: u.admin, removed: u.removed, revoked: u.revoked ?? null };
   }
 
   #myEvents(userId: string, after: number, limit: number) {
-    const mine = this.log.filter((e) => e.gseq > after && this.chats.get(e.chatId)?.members.includes(userId));
+    const mine = this.log.filter((e) =>
+      e.gseq > after && (e.notice ? (e.to ?? []).includes(userId) : this.chats.get(e.chatId)?.members.includes(userId)),
+    );
     const page = mine.slice(0, limit);
     const more = mine.length > limit;
     const cursor = more ? page[page.length - 1]!.gseq : this.nextGseq - 1;
@@ -220,7 +304,9 @@ export class FakeServer {
   }
 
   #evJson(e: Ev) {
-    return { ...e, body: base64urlEncode(e.body) };
+    if (e.notice) return { kind: 'notice', gseq: e.gseq, time: e.time, chatId: e.chatId, notice: e.notice };
+    const { notice: _n, to: _t, ...rest } = e;
+    return { kind: 'event', ...rest, body: base64urlEncode(e.body) };
   }
 
   async #route(req: Req): Promise<Res> {
@@ -241,12 +327,52 @@ export class FakeServer {
           vapidPublicKey: this.push ? 'BOrfake' : null,
           time: this.now,
           maxEventBytes: 262144,
+          maxBlobBytes: this.maxBlobBytes,
           adminCodeActive: this.adminCodeActive,
           m0: false,
         },
       };
     }
     if (m === 'POST' && p === '/v1/join') return this.#join(req);
+    if (m === 'POST' && p === '/v1/invites/check') {
+      const code = String((req.json() as { invite?: string }).invite ?? '').trim().toLowerCase();
+      const inv = this.invites.get(code);
+      if (!inv) return err(403, 'invalid_invite');
+      const by = this.users.get(inv.createdBy);
+      return {
+        status: 200,
+        body: {
+          status: inv.usedAt !== null ? 'used' : inv.expired ? 'expired' : 'valid',
+          familyName: this.familyName,
+          createdBy: { userId: inv.createdBy, name: by?.name ?? null },
+          createdAt: inv.createdAt,
+          expiresAt: inv.expiresAt,
+        },
+      };
+    }
+    if (m === 'POST' && p === '/v1/revoke') {
+      const env = req.json() as SignedEnvelope;
+      let userId = '';
+      try {
+        userId = (JSON.parse(new TextDecoder().decode(base64urlDecode(env.payload))) as { userId: string }).userId;
+      } catch {
+        return err(400, 'bad_request');
+      }
+      const u = this.users.get(userId);
+      if (!u) return err(404, 'unknown_user');
+      try {
+        verifyRevocationEnvelope(env, u.identity);
+      } catch {
+        return err(401, 'bad_signature');
+      }
+      if (!u.revoked) {
+        u.revoked = env;
+        u.admin = false;
+        this.#memberEvent('member_revoked', userId);
+        this.#wake();
+      }
+      return { status: 204 };
+    }
     if (m === 'POST' && p === '/v1/auth/challenge') {
       const nonce = base64urlEncode(randomBytes(32));
       this.nonces.add(nonce);
@@ -272,10 +398,97 @@ export class FakeServer {
         return err(400, 'bad_request');
       }
       if (prof.rev <= a.user.rev) return err(409, 'stale_rev', { rev: a.user.rev });
+      if (prof.avatar && a.user.avatars?.get(prof.avatar.sha256)?.type !== prof.avatar.type) return err(400, 'unknown_avatar');
       a.user.profile = env;
       a.user.rev = prof.rev;
       a.user.name = prof.name;
       return { status: 200, body: { profile: env } };
+    }
+    if (m === 'PUT' && p === '/v1/me/avatar') {
+      const b = req.body;
+      const jpeg = b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+      const webp = new TextDecoder().decode(b.subarray(0, 4)) === 'RIFF' && new TextDecoder().decode(b.subarray(8, 12)) === 'WEBP';
+      if (!jpeg && !webp) return err(400, 'bad_image');
+      if (b.length > 262144) return err(413, 'too_large', { limit: 262144 });
+      const sha = base64urlEncode(new Uint8Array(await crypto.subtle.digest('SHA-256', b as Uint8Array<ArrayBuffer>)));
+      a.user.avatars ??= new Map();
+      a.user.avatars.set(sha, { type: jpeg ? 'image/jpeg' : 'image/webp', bytes: b.slice() });
+      return { status: 200, body: { sha256: sha, type: jpeg ? 'image/jpeg' : 'image/webp' } };
+    }
+    const avatarGet = /^\/v1\/users\/([^/]+)\/avatar\/([^/]+)$/.exec(p);
+    if (m === 'GET' && avatarGet) {
+      const img = this.users.get(avatarGet[1]!)?.avatars?.get(decodeURIComponent(avatarGet[2]!));
+      if (!img) return err(404, 'not_found');
+      return { status: 200, raw: img.bytes, headers: { 'Content-Type': img.type } };
+    }
+    if (p === '/v1/chats' && m === 'POST') return this.#createGroup(req, a.userId);
+    const stateRe = /^\/v1\/chats\/([^/]+)\/state(?:\/(\d+))?$/.exec(p);
+    if (stateRe) {
+      const chatId = decodeURIComponent(stateRe[1]!);
+      const c = this.chats.get(chatId);
+      if (!c) return err(404, 'chat_not_found');
+      if (c.kind !== 'group') return err(400, 'bad_request');
+      if (!c.members.includes(a.userId)) return err(403, 'not_member');
+      if (m === 'GET' && stateRe[2]) {
+        const blob = c.states!.get(Number(stateRe[2]));
+        if (!blob) return err(404, 'not_found');
+        return { status: 200, raw: blob };
+      }
+      if (m === 'PUT' && !stateRe[2]) return this.#changeGroup(req, a.userId, chatId, c);
+    }
+    const leaveRe = /^\/v1\/chats\/([^/]+)\/leave$/.exec(p);
+    if (m === 'POST' && leaveRe) {
+      const chatId = decodeURIComponent(leaveRe[1]!);
+      const c = this.chats.get(chatId);
+      if (!c) return err(404, 'chat_not_found');
+      if (c.kind !== 'group') return err(400, 'bad_request');
+      if (!c.members.includes(a.userId)) return err(403, 'not_member');
+      if (c.owner === a.userId) return err(409, 'owner_cannot_leave');
+      const to = [...c.members];
+      c.members = c.members.filter((x) => x !== a.userId);
+      this.appendNotice(chatId, { type: 'member_left', userId: a.userId, members: [...c.members].sort(), version: c.version, epoch: c.epoch }, to);
+      return { status: 204 };
+    }
+    if (m === 'GET' && p === '/v1/keys') {
+      const after = Number(req.query.get('after') ?? 0);
+      const limit = Math.min(Number(req.query.get('limit') ?? 500), 500);
+      const all = (a.user.keys ?? []).filter((k) => k.n > after);
+      const page = all.slice(0, limit);
+      return { status: 200, body: { keys: page, cursor: page[page.length - 1]?.n ?? after, more: all.length > page.length } };
+    }
+    const blobRe = /^\/v1\/blobs\/([a-z2-7]{26})(?:\/(\d+))?$/.exec(p);
+    if (blobRe) {
+      const id = blobRe[1]!;
+      const blob = this.blobs.get(id);
+      if (blobRe[2] !== undefined) {
+        const part = Number(blobRe[2]);
+        if (m === 'PUT') {
+          if (req.body.length === 0) return err(400, 'bad_request');
+          if (blob && blob.owner !== a.userId) return err(403, 'not_owner');
+          const b = blob ?? { owner: a.userId, createdAt: this.now, parts: new Map() };
+          const total = [...b.parts].reduce((n, [i, x]) => n + (i === part ? 0 : x.length), 0) + req.body.length;
+          if (total > this.maxBlobBytes) return err(413, 'too_large', { limit: this.maxBlobBytes });
+          b.parts.set(part, req.body.slice());
+          this.blobs.set(id, b);
+          return { status: 200, body: { blobId: id, part, size: req.body.length, total } };
+        }
+        if (m === 'GET') {
+          const bytes = blob?.parts.get(part);
+          if (!bytes) return err(404, 'blob_not_found');
+          return { status: 200, raw: bytes };
+        }
+      } else {
+        if (!blob) return err(404, 'blob_not_found');
+        if (m === 'GET') {
+          const parts = [...blob.parts].sort(([x], [y]) => x - y).map(([part, b]) => ({ part, size: b.length }));
+          return { status: 200, body: { blobId: id, owner: blob.owner, createdAt: blob.createdAt, parts, total: parts.reduce((n, x) => n + x.size, 0), maxBytes: this.maxBlobBytes } };
+        }
+        if (m === 'DELETE') {
+          if (blob.owner !== a.userId) return err(403, 'not_owner');
+          this.blobs.delete(id);
+          return { status: 204 };
+        }
+      }
     }
     if (p === '/v1/me/push') {
       if (m === 'PUT') {
@@ -291,12 +504,7 @@ export class FakeServer {
       }
     }
     if (m === 'GET' && p === '/v1/chats') {
-      const chats = [...this.chats]
-        .filter(([, c]) => c.members.includes(a.userId))
-        .map(([chatId, c]) => {
-          const last = [...this.log].reverse().find((e) => e.chatId === chatId);
-          return { chatId, kind: 'dm', members: c.members, epoch: 0, createdAt: c.createdAt, lastGseq: last?.gseq ?? null, lastTime: last?.time ?? null };
-        });
+      const chats = [...this.chats].filter(([, c]) => c.members.includes(a.userId)).map(([chatId, c]) => this.#chatJson(chatId, c));
       return { status: 200, body: { chats } };
     }
     const chatEv = /^\/v1\/chats\/([^/]+)\/events$/.exec(p);
@@ -309,10 +517,10 @@ export class FakeServer {
         if (!chat && !this.#peerFor(a.userId, chatId)) return err(404, 'chat_not_found');
         const before = Number(req.query.get('before') ?? Number.MAX_SAFE_INTEGER);
         const limit = Math.min(Number(req.query.get('limit') ?? 200), 500);
-        const all = this.log.filter((e) => e.chatId === chatId && e.gseq < before);
+        const all = this.log.filter((e) => e.chatId === chatId && e.gseq < before && (!e.notice || (e.to ?? []).includes(a.userId)));
         const page = all.slice(Math.max(0, all.length - limit));
         const cursor = page[0]?.gseq ?? Math.min(before, this.nextGseq);
-        return { status: 200, body: { events: page.map((e) => this.#evJson(e)), cursor, more: all.length > page.length, oldestGseq: this.oldestGseq } };
+        return { status: 200, body: { events: page.map((e) => this.#evJson(e)), cursor, more: all.length > page.length, oldestGseq: this.oldestGseq, oldestTime: this.log[0]?.time ?? null } };
       }
     }
     if (m === 'GET' && p === '/v1/events') {
@@ -324,7 +532,7 @@ export class FakeServer {
         if (a.user.removed) return err(403, 'removed');
         const r = this.#myEvents(a.userId, after, limit);
         if (r.page.length > 0 || Date.now() >= deadline || req.signal?.aborted) {
-          return { status: 200, body: { events: r.page.map((e) => this.#evJson(e)), cursor: r.cursor, more: r.more, oldestGseq: this.oldestGseq } };
+          return { status: 200, body: { events: r.page.map((e) => this.#evJson(e)), cursor: r.cursor, more: r.more, oldestGseq: this.oldestGseq, oldestTime: this.log[0]?.time ?? null } };
         }
         await new Promise<void>((resolve) => {
           const done = () => {
@@ -391,6 +599,48 @@ export class FakeServer {
       }
     }
     return err(404, 'not_found');
+  }
+
+  #createGroup(req: Req, userId: string): Res {
+    const b = req.json() as { chatId: string; state: string; members: string[]; epoch: number; keys: { userId: string; key: string }[] };
+    const taken = this.chats.has(b.chatId) || [...this.users.keys()].some((x) => [...this.users.keys()].some((y) => dmChatId(this.serverId, x, y) === b.chatId));
+    if (taken) return err(409, 'chat_exists');
+    if (!b.members.includes(userId)) return err(400, 'bad_request');
+    for (const id of b.members) {
+      const u = this.users.get(id);
+      if (!u || u.removed || u.revoked) return err(400, 'bad_member');
+    }
+    if (b.keys.length !== b.members.length || !b.members.every((id) => b.keys.some((k) => k.userId === id))) return err(400, 'bad_request');
+    const c: FakeChat = { kind: 'group', members: [...b.members].sort(), owner: userId, version: 1, epoch: b.epoch, createdAt: this.now, states: new Map([[1, base64urlDecode(b.state)]]) };
+    this.chats.set(b.chatId, c);
+    for (const k of b.keys) this.#addKey(k.userId, b.chatId, b.epoch, 1, k.key);
+    this.appendNotice(b.chatId, { type: 'group_created', by: userId, owner: userId, members: [...c.members], version: 1, epoch: b.epoch }, c.members);
+    return { status: 201, body: this.#chatJson(b.chatId, c) };
+  }
+
+  #changeGroup(req: Req, userId: string, chatId: string, c: FakeChat): Res {
+    const b = req.json() as { baseVersion: number; state: string; members: string[]; owner: string; epoch: number; keys: { userId: string; key: string }[] };
+    if (c.owner !== userId) return err(403, 'not_owner');
+    if (b.baseVersion !== c.version) return err(409, 'stale_version', { version: c.version });
+    if (!b.members.includes(b.owner)) return err(400, 'bad_request');
+    const removed = c.members.filter((x) => !b.members.includes(x));
+    const added = b.members.filter((x) => !c.members.includes(x));
+    for (const id of [...added, b.owner]) {
+      const u = this.users.get(id);
+      if (!u || u.removed || u.revoked) return err(400, 'bad_member');
+    }
+    if (b.epoch !== c.epoch && b.epoch !== c.epoch! + 1) return err(400, 'bad_request', { epoch: c.epoch });
+    if (removed.length > 0 && b.epoch !== c.epoch! + 1) return err(400, 'bad_request', { epoch: c.epoch });
+    const to = [...new Set([...c.members, ...b.members])].sort();
+    const by = c.owner!;
+    c.version = c.version! + 1;
+    c.epoch = b.epoch;
+    c.owner = b.owner;
+    c.members = [...b.members].sort();
+    c.states!.set(c.version, base64urlDecode(b.state));
+    for (const k of b.keys) this.#addKey(k.userId, chatId, b.epoch, c.version, k.key);
+    this.appendNotice(chatId, { type: 'group_state', by, owner: c.owner, members: [...c.members], version: c.version, epoch: c.epoch, added: added.sort(), removed: removed.sort() }, to);
+    return { status: 200, body: this.#chatJson(chatId, c) };
   }
 
   #join(req: Req): Res {
@@ -488,13 +738,18 @@ export class FakeServer {
     if (!chat) {
       const peer = this.#peerFor(userId, chatId);
       if (!peer) return err(404, 'chat_not_found');
-      chat = { members: [userId, peer].sort() as [string, string], createdAt: this.now };
+      chat = { members: [userId, peer].sort(), createdAt: this.now };
       this.chats.set(chatId, chat);
     }
-    const peer = chat.members.find((x) => x !== userId)!;
-    if (this.users.get(peer)?.removed) return err(403, 'peer_removed');
-    if (epoch !== '0') return err(409, 'epoch_mismatch', { epoch: 0 });
-    const ev: Ev = { gseq: this.nextGseq++, time: this.now++, chatId, senderId: userId, devId: dev, epoch: 0, msgId, body: req.body.slice() };
+    if (chat.kind === 'group') {
+      if (Number(epoch) !== chat.epoch) return err(409, 'epoch_mismatch', { epoch: chat.epoch });
+    } else {
+      const peer = chat.members.find((x) => x !== userId) ?? userId;
+      const pu = this.users.get(peer);
+      if (pu?.removed || pu?.revoked) return err(403, 'peer_removed');
+      if (epoch !== '0') return err(409, 'epoch_mismatch', { epoch: 0 });
+    }
+    const ev: Ev = { gseq: this.nextGseq++, time: this.now++, chatId, senderId: userId, devId: dev, epoch: Number(epoch), msgId, body: req.body.slice() };
     this.log.push(ev);
     this.idem.set(key, ev);
     this.#wake();
@@ -503,6 +758,9 @@ export class FakeServer {
 }
 
 function toResponse(res: Res): Response {
+  if (res.raw) {
+    return new Response(res.raw as Uint8Array<ArrayBuffer>, { status: res.status, headers: { 'Content-Type': 'application/octet-stream', ...(res.headers ?? {}) } });
+  }
   if (res.status === 204 || res.body === undefined) {
     return new Response(null, { status: res.status, headers: res.headers ?? {} });
   }

@@ -5,13 +5,22 @@
 // injectable for tests. The optional `onExchange` hook reports method, path
 // template, status and duration for diagnostics: never tokens or bodies.
 
-import { base64urlDecode, type SignedEnvelope } from '@family-chat/protocol';
+import { base64urlDecode, base64urlEncode, type SignedEnvelope } from '@family-chat/protocol';
 import { systemClock, type Clock } from '../util/clock.ts';
 import { ApiError, isServerErrorCode, NetworkError } from './errors.ts';
 import type {
   AdminUser,
+  AvatarUpload,
+  BlobInfo,
+  BlobPartResult,
+  ChangeGroupRequest,
   Challenge,
   ChatEntry,
+  CreateGroupRequest,
+  InviteCheck,
+  KeysPage,
+  NoticeBody,
+  ServerNotice,
   EventsPage,
   EventsQuery,
   Hello,
@@ -122,6 +131,12 @@ export class Transport {
       maxEventBytes: num(o, 'maxEventBytes'),
       adminCodeActive: bool(o, 'adminCodeActive'),
       m0: o.m0 === true,
+      maxPartBytes: optNum(o, 'maxPartBytes', 4194560),
+      maxBlobBytes: optNum(o, 'maxBlobBytes', num(o, 'maxFileMb') * 1048576 + 65536),
+      maxAvatarBytes: optNum(o, 'maxAvatarBytes', 262144),
+      maxStateBytes: optNum(o, 'maxStateBytes', 262144),
+      maxSealedKeyBytes: optNum(o, 'maxSealedKeyBytes', 8192),
+      maxGroupMembers: optNum(o, 'maxGroupMembers', 100),
     };
   }
 
@@ -194,18 +209,7 @@ export class Transport {
     const o = obj(await this.#json({ method: 'GET', path: '/v1/chats', template: '/v1/chats', token, signal }), 'chats');
     return arr(o, 'chats').map((c) => {
       const x = obj(c, 'chat');
-      return {
-        chatId: str(x, 'chatId'),
-        kind: 'dm' as const,
-        members: arr(x, 'members').map((m) => {
-          if (typeof m !== 'string') throw unexpected('chat members');
-          return m;
-        }),
-        epoch: num(x, 'epoch'),
-        createdAt: num(x, 'createdAt'),
-        lastGseq: nullableNum(x, 'lastGseq'),
-        lastTime: nullableNum(x, 'lastTime'),
-      };
+      return chatEntry(x);
     });
   }
 
@@ -251,6 +255,191 @@ export class Transport {
       signal,
     });
     return page(data);
+  }
+
+  // ---- invitations, avatars, revocation (M2) ----
+
+  /** `POST /v1/invites/check`: who invites and into which family, before joining. No token. */
+  async inviteCheck(code: string, signal?: AbortSignal): Promise<InviteCheck> {
+    const o = obj(
+      await this.#json({ method: 'POST', path: '/v1/invites/check', template: '/v1/invites/check', json: { invite: code }, signal }),
+      'invite check',
+    );
+    const status = str(o, 'status');
+    if (status !== 'valid' && status !== 'used' && status !== 'expired') throw unexpected('invite status');
+    const by = obj(o.createdBy, 'createdBy');
+    return {
+      status,
+      familyName: str(o, 'familyName'),
+      createdBy: { userId: str(by, 'userId'), name: nullableStr(by, 'name') },
+      createdAt: num(o, 'createdAt'),
+      expiresAt: num(o, 'expiresAt'),
+    };
+  }
+
+  /** `POST /v1/revoke`: revokes an identity by its own signature. No token. */
+  async revoke(env: SignedEnvelope, signal?: AbortSignal): Promise<void> {
+    await this.#json({
+      method: 'POST',
+      path: '/v1/revoke',
+      template: '/v1/revoke',
+      json: { payload: env.payload, sig: env.sig },
+      signal,
+    });
+  }
+
+  async putAvatar(token: string, image: Uint8Array, signal?: AbortSignal): Promise<AvatarUpload> {
+    const o = obj(
+      await this.#json({ method: 'PUT', path: '/v1/me/avatar', template: '/v1/me/avatar', token, bytes: image, signal }),
+      'avatar',
+    );
+    const type = str(o, 'type');
+    if (type !== 'image/jpeg' && type !== 'image/webp') throw unexpected('avatar type');
+    return { sha256: str(o, 'sha256'), type };
+  }
+
+  async getAvatar(token: string, userId: string, sha256: string, signal?: AbortSignal): Promise<Uint8Array> {
+    return this.#bytes({
+      method: 'GET',
+      path: `/v1/users/${encodeURIComponent(userId)}/avatar/${encodeURIComponent(sha256)}`,
+      template: '/v1/users/{userId}/avatar/{sha256}',
+      token,
+      signal,
+    });
+  }
+
+  // ---- groups (M2) ----
+
+  async createGroup(token: string, req: CreateGroupRequest, signal?: AbortSignal): Promise<ChatEntry> {
+    return chatEntry(
+      obj(
+        await this.#json({
+          method: 'POST',
+          path: '/v1/chats',
+          template: '/v1/chats',
+          token,
+          json: { chatId: req.chatId, state: base64urlEncode(req.state), members: req.members, epoch: req.epoch, keys: req.keys },
+          signal,
+        }),
+        'chat',
+      ),
+    );
+  }
+
+  async changeGroup(token: string, chatId: string, req: ChangeGroupRequest, signal?: AbortSignal): Promise<ChatEntry> {
+    return chatEntry(
+      obj(
+        await this.#json({
+          method: 'PUT',
+          path: `/v1/chats/${encodeURIComponent(chatId)}/state`,
+          template: '/v1/chats/{chatId}/state',
+          token,
+          json: {
+            baseVersion: req.baseVersion,
+            state: base64urlEncode(req.state),
+            members: req.members,
+            owner: req.owner,
+            epoch: req.epoch,
+            keys: req.keys,
+          },
+          signal,
+        }),
+        'chat',
+      ),
+    );
+  }
+
+  async groupState(token: string, chatId: string, version: number, signal?: AbortSignal): Promise<Uint8Array> {
+    return this.#bytes({
+      method: 'GET',
+      path: `/v1/chats/${encodeURIComponent(chatId)}/state/${version}`,
+      template: '/v1/chats/{chatId}/state/{version}',
+      token,
+      signal,
+    });
+  }
+
+  async leaveGroup(token: string, chatId: string, signal?: AbortSignal): Promise<void> {
+    await this.#json({
+      method: 'POST',
+      path: `/v1/chats/${encodeURIComponent(chatId)}/leave`,
+      template: '/v1/chats/{chatId}/leave',
+      token,
+      signal,
+    });
+  }
+
+  async keys(token: string, q: { after?: number; limit?: number } = {}, signal?: AbortSignal): Promise<KeysPage> {
+    const o = obj(
+      await this.#json({ method: 'GET', path: '/v1/keys', template: '/v1/keys', token, query: { after: q.after, limit: q.limit }, signal }),
+      'keys',
+    );
+    return {
+      keys: arr(o, 'keys').map((k) => {
+        const x = obj(k, 'key');
+        return {
+          n: num(x, 'n'),
+          chatId: str(x, 'chatId'),
+          epoch: num(x, 'epoch'),
+          version: num(x, 'version'),
+          time: num(x, 'time'),
+          key: str(x, 'key'),
+        };
+      }),
+      cursor: num(o, 'cursor'),
+      more: bool(o, 'more'),
+    };
+  }
+
+  // ---- attachments (M2) ----
+
+  async putBlobPart(token: string, blobId: string, part: number, bytes: Uint8Array, signal?: AbortSignal): Promise<BlobPartResult> {
+    const o = obj(
+      await this.#json({
+        method: 'PUT',
+        path: `/v1/blobs/${encodeURIComponent(blobId)}/${part}`,
+        template: '/v1/blobs/{blobId}/{part}',
+        token,
+        bytes,
+        signal,
+        timeoutMs: this.#timeoutMs * 6,
+      }),
+      'blob part',
+    );
+    return { blobId: str(o, 'blobId'), part: num(o, 'part'), size: num(o, 'size'), total: num(o, 'total') };
+  }
+
+  async getBlobPart(token: string, blobId: string, part: number, signal?: AbortSignal): Promise<Uint8Array> {
+    return this.#bytes({
+      method: 'GET',
+      path: `/v1/blobs/${encodeURIComponent(blobId)}/${part}`,
+      template: '/v1/blobs/{blobId}/{part}',
+      token,
+      signal,
+      timeoutMs: this.#timeoutMs * 6,
+    });
+  }
+
+  async blobInfo(token: string, blobId: string, signal?: AbortSignal): Promise<BlobInfo> {
+    const o = obj(
+      await this.#json({ method: 'GET', path: `/v1/blobs/${encodeURIComponent(blobId)}`, template: '/v1/blobs/{blobId}', token, signal }),
+      'blob',
+    );
+    return {
+      blobId: str(o, 'blobId'),
+      owner: str(o, 'owner'),
+      createdAt: num(o, 'createdAt'),
+      parts: arr(o, 'parts').map((p) => {
+        const x = obj(p, 'part');
+        return { part: num(x, 'part'), size: num(x, 'size') };
+      }),
+      total: num(o, 'total'),
+      maxBytes: num(o, 'maxBytes'),
+    };
+  }
+
+  async deleteBlob(token: string, blobId: string, signal?: AbortSignal): Promise<void> {
+    await this.#json({ method: 'DELETE', path: `/v1/blobs/${encodeURIComponent(blobId)}`, template: '/v1/blobs/{blobId}', token, signal });
   }
 
   // ---- administration ----
@@ -304,6 +493,8 @@ export class Transport {
         admin: bool(x, 'admin'),
         removed: bool(x, 'removed'),
         removedAt: nullableNum(x, 'removedAt'),
+        revoked: x.revoked === true,
+        revokedAt: nullableNum(x, 'revokedAt'),
         devices: arr(x, 'devices').map((d) => {
           const y = obj(d, 'device');
           return { devId: str(y, 'devId'), createdAt: num(y, 'createdAt'), push: bool(y, 'push') };
@@ -338,6 +529,7 @@ export class Transport {
       users: num(o, 'users'),
       removedUsers: num(o, 'removedUsers'),
       chats: num(o, 'chats'),
+      groups: optNum(o, 'groups', 0),
       retentionDays: num(o, 'retentionDays'),
       push: bool(o, 'push'),
     };
@@ -347,6 +539,15 @@ export class Transport {
 
   /** Performs a request; returns parsed JSON (or undefined for an empty 2xx body). */
   async #json(spec: RequestSpec): Promise<unknown> {
+    return (await this.#exchange(spec, false)) as unknown;
+  }
+
+  /** Performs a request whose successful answer is raw bytes (errors are still JSON). */
+  async #bytes(spec: RequestSpec): Promise<Uint8Array> {
+    return (await this.#exchange(spec, true)) as Uint8Array;
+  }
+
+  async #exchange(spec: RequestSpec, raw: boolean): Promise<unknown> {
     const where = `${spec.method} ${spec.template}`;
     const started = this.#clock.now();
     const report = (status: number, error?: string, events?: number) => {
@@ -374,7 +575,7 @@ export class Transport {
         .join('&');
       if (qs) url += `?${qs}`;
     }
-    const headers: Record<string, string> = { Accept: 'application/json', ...spec.headers };
+    const headers: Record<string, string> = { Accept: raw ? '*/*' : 'application/json', ...spec.headers };
     if (spec.token !== undefined) headers.Authorization = `Bearer ${spec.token}`;
     let body: BodyInit | undefined;
     if (spec.json !== undefined) {
@@ -394,6 +595,7 @@ export class Transport {
     const onAbort = () => ctl.abort();
     if (spec.signal?.aborted) ctl.abort();
     spec.signal?.addEventListener('abort', onAbort, { once: true });
+    const failReason = () => (timedOut ? 'timeout' : spec.signal?.aborted ? 'aborted' : 'offline');
 
     try {
       let res: Response;
@@ -407,21 +609,38 @@ export class Transport {
           signal: ctl.signal,
         });
       } catch {
-        const reason = timedOut ? 'timeout' : spec.signal?.aborted ? 'aborted' : 'offline';
+        const reason = failReason();
         report(0, reason);
         throw new NetworkError(reason, where);
+      }
+
+      const isJson = (res.headers.get('content-type') ?? '').toLowerCase().includes('application/json');
+      if (raw && res.ok) {
+        if (isJson) {
+          report(res.status, 'unexpected_response');
+          throw new ApiError(res.status, 'unexpected_response', where);
+        }
+        let buf: ArrayBuffer;
+        try {
+          buf = await res.arrayBuffer();
+        } catch {
+          const reason = failReason();
+          report(res.status, reason);
+          throw new NetworkError(reason, where);
+        }
+        report(res.status);
+        return new Uint8Array(buf);
       }
 
       let text: string;
       try {
         text = await res.text();
       } catch {
-        const reason = timedOut ? 'timeout' : spec.signal?.aborted ? 'aborted' : 'offline';
+        const reason = failReason();
         report(res.status, reason);
         throw new NetworkError(reason, where);
       }
 
-      const isJson = (res.headers.get('content-type') ?? '').toLowerCase().includes('application/json');
       let data: unknown;
       if (text.length > 0) {
         if (!isJson) {
@@ -440,7 +659,7 @@ export class Transport {
         const o = isObject(data) ? data : {};
         const code = isServerErrorCode(o.error) ? o.error : 'unexpected_response';
         const details: Record<string, number> = {};
-        for (const k of ['epoch', 'limit', 'rev']) {
+        for (const k of ['epoch', 'limit', 'rev', 'version']) {
           const v = o[k];
           if (typeof v === 'number' && Number.isFinite(v)) details[k] = v;
         }
@@ -481,6 +700,10 @@ function num(o: Obj, k: string): number {
   const v = o[k];
   if (typeof v !== 'number' || !Number.isFinite(v)) throw unexpected(k);
   return v;
+}
+
+function optNum(o: Obj, k: string, fallback: number): number {
+  return o[k] === undefined || o[k] === null ? fallback : num(o, k);
 }
 
 function nullableNum(o: Obj, k: string): number | null {
@@ -527,7 +750,75 @@ function userEntry(v: unknown): UserEntry {
     profile: o.profile === null || o.profile === undefined ? null : envelope(o.profile, 'profile'),
     admin: bool(o, 'admin'),
     removed: bool(o, 'removed'),
+    revoked: o.revoked === null || o.revoked === undefined ? null : envelope(o.revoked, 'revoked'),
   };
+}
+
+function strList(o: Obj, k: string): string[] {
+  return arr(o, k).map((m) => {
+    if (typeof m !== 'string') throw unexpected(k);
+    return m;
+  });
+}
+
+function chatEntry(x: Obj): ChatEntry {
+  const kind = str(x, 'kind');
+  if (kind !== 'dm' && kind !== 'group') throw unexpected('chat kind');
+  return {
+    chatId: str(x, 'chatId'),
+    kind,
+    members: strList(x, 'members'),
+    owner: nullableStr(x, 'owner'),
+    version: nullableNum(x, 'version'),
+    epoch: num(x, 'epoch'),
+    createdAt: num(x, 'createdAt'),
+    lastGseq: nullableNum(x, 'lastGseq'),
+    lastTime: nullableNum(x, 'lastTime'),
+  };
+}
+
+/** Parses a notice body of a known type; undefined for unknown or malformed ones (skipped). */
+function noticeBody(v: unknown): NoticeBody | undefined {
+  if (!isObject(v)) return undefined;
+  try {
+    switch (v.type) {
+      case 'group_created':
+        return {
+          type: 'group_created',
+          by: str(v, 'by'),
+          owner: str(v, 'owner'),
+          members: strList(v, 'members'),
+          version: num(v, 'version'),
+          epoch: num(v, 'epoch'),
+        };
+      case 'group_state':
+        return {
+          type: 'group_state',
+          by: str(v, 'by'),
+          owner: str(v, 'owner'),
+          members: strList(v, 'members'),
+          version: num(v, 'version'),
+          epoch: num(v, 'epoch'),
+          added: strList(v, 'added'),
+          removed: strList(v, 'removed'),
+        };
+      case 'member_left':
+        return {
+          type: 'member_left',
+          userId: str(v, 'userId'),
+          members: strList(v, 'members'),
+          version: num(v, 'version'),
+          epoch: num(v, 'epoch'),
+        };
+      case 'member_removed':
+      case 'member_revoked':
+        return { type: v.type, userId: str(v, 'userId') };
+      default:
+        return undefined;
+    }
+  } catch {
+    return undefined;
+  }
 }
 
 function serverEvent(v: unknown): ServerEvent {
@@ -552,10 +843,25 @@ function serverEvent(v: unknown): ServerEvent {
 
 function page(v: unknown): EventsPage {
   const o = obj(v, 'events page');
+  const events: ServerEvent[] = [];
+  const notices: ServerNotice[] = [];
+  for (const item of arr(o, 'events')) {
+    const x = obj(item, 'event');
+    // M1 servers send no `kind`: those are always member events.
+    const kind = x.kind === undefined ? 'event' : x.kind;
+    if (kind === 'event') events.push(serverEvent(x));
+    else if (kind === 'notice') {
+      const notice = noticeBody(x.notice);
+      if (notice) notices.push({ gseq: num(x, 'gseq'), time: num(x, 'time'), chatId: str(x, 'chatId'), notice });
+    }
+    // Unknown kinds are skipped (docs/API.md 5.4).
+  }
   return {
-    events: arr(o, 'events').map(serverEvent),
+    events,
+    notices,
     cursor: num(o, 'cursor'),
     more: bool(o, 'more'),
     oldestGseq: num(o, 'oldestGseq'),
+    oldestTime: nullableNum(o, 'oldestTime'),
   };
 }

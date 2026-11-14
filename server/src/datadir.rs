@@ -18,7 +18,12 @@ use crate::webpush::{VapidFile, VapidKey, random_bytes};
 
 /// Version of the data folder format. Bumped on incompatible changes; a
 /// server refuses to start on a folder with a newer version.
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// 2 (M2): groups in `chats/`, sealed keys, server notices in the log,
+/// attachments, avatars, revocations. A version 1 folder (M1) is read as is
+/// and its `server.json` is upgraded at start, so an M1 build no longer
+/// starts on it (it would not understand groups and notices).
+pub const FORMAT_VERSION: u32 = 2;
 
 pub const LOCK_FILE: &str = "fcd.lock";
 pub const SERVER_FILE: &str = "server.json";
@@ -149,6 +154,15 @@ impl DataDir {
         };
 
         let (server, new_admin_code) = match existing {
+            Some(mut s) if s.format_version < FORMAT_VERSION => {
+                tracing::info!(
+                    "папка данных обновлена: формат {} -> {FORMAT_VERSION}",
+                    s.format_version
+                );
+                s.format_version = FORMAT_VERSION;
+                write_server_file(&path, &s)?;
+                (s, None)
+            }
             Some(s) => (s, None),
             None => {
                 let code = generate_admin_code();

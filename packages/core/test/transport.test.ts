@@ -63,7 +63,16 @@ describe('Transport', () => {
       m0: false,
     };
     const { t, calls } = client(() => json(hello));
-    expect(await t.hello()).toEqual(hello);
+    // An M1 server sends no limits: the defaults of docs/API.md 1.7 fill in.
+    expect(await t.hello()).toEqual({
+      ...hello,
+      maxPartBytes: 4194560,
+      maxBlobBytes: 200 * 1048576 + 65536,
+      maxAvatarBytes: 262144,
+      maxStateBytes: 262144,
+      maxSealedKeyBytes: 8192,
+      maxGroupMembers: 100,
+    });
     expect(calls[0]!.url).toBe('https://fc.test/v1/hello');
     expect(calls[0]!.init.credentials).toBe('omit');
     expect(calls[0]!.init.cache).toBe('no-store');

@@ -3,12 +3,15 @@ import {
   createAuthEnvelope,
   createIdentityEnvelope,
   createProfileEnvelope,
+  createRevocationEnvelope,
   envelopeSigningInput,
+  maxPayloadBytes,
   parseEnvelope,
   serializeEnvelope,
   verifyAuthEnvelope,
   verifyIdentityEnvelope,
   verifyProfileEnvelope,
+  verifyRevocationEnvelope,
   type SignedEnvelope,
 } from '../src/envelope.ts';
 import { utf8 } from '../src/bytes.ts';
@@ -31,7 +34,7 @@ const aliceId = verifyIdentityEnvelope(v.identities.alice);
 const bobId = verifyIdentityEnvelope(v.identities.bob);
 
 /** Build an envelope signed by `k` over arbitrary payload JSON. */
-function forge(kind: 'identity' | 'profile' | 'auth', payload: unknown, k: IdentityKeys = alice): SignedEnvelope {
+function forge(kind: 'identity' | 'profile' | 'auth' | 'revoked', payload: unknown, k: IdentityKeys = alice): SignedEnvelope {
   const bytes = utf8(typeof payload === 'string' ? payload : JSON.stringify(payload));
   return { payload: base64urlEncode(bytes), sig: base64urlEncode(sign(envelopeSigningInput(kind, bytes), k.signSecret)) };
 }
@@ -206,11 +209,35 @@ describe('profile envelope', () => {
     expect(errorCode(() => createProfileEnvelope(alice, { name: 7 as unknown as string, rev: 0 }))).toBe('invalid-argument');
   });
 
-  it('accepts an avatar object (M2 format) and rejects other avatar types', () => {
-    const p = verifyProfileEnvelope(forge('profile', { ...base(), avatar: { file: 'x' } }), aliceId);
-    expect(p.avatar).toEqual({ file: 'x' });
-    expect(errorCode(() => verifyProfileEnvelope(forge('profile', { ...base(), avatar: 'x' }), aliceId))).toBe('malformed');
-    expect(errorCode(() => verifyProfileEnvelope(forge('profile', { ...base(), avatar: [] }), aliceId))).toBe('malformed');
+  it('avatar (M2): null or exactly {sha256, type}; replaces the M1 "any object" rule', () => {
+    const sha256 = base64urlEncode(new Uint8Array(32).fill(1));
+    const p = verifyProfileEnvelope(forge('profile', { ...base(), avatar: { sha256, type: 'image/webp' } }), aliceId);
+    expect(p.avatar).toEqual({ sha256, type: 'image/webp' });
+    const bad = (avatar: unknown) => errorCode(() => verifyProfileEnvelope(forge('profile', { ...base(), avatar }), aliceId));
+    expect(bad('x')).toBe('malformed');
+    expect(bad([])).toBe('malformed');
+    expect(bad({ file: 'x' })).toBe('malformed');
+    expect(bad({ sha256, type: 'image/png' })).toBe('malformed');
+    expect(bad({ sha256: sha256.slice(1), type: 'image/jpeg' })).toBe('malformed');
+    expect(bad({ sha256, type: 'image/jpeg', extra: 1 })).toBe('malformed');
+    expect(bad({ sha256 })).toBe('malformed');
+    expect(bad(undefined)).toBe('malformed');
+  });
+
+  it('creates a profile with an avatar in field order sha256, type', () => {
+    const sha256 = base64urlEncode(new Uint8Array(32).fill(2));
+    const env = createProfileEnvelope(alice, { name: 'A', rev: 1, updated: 5, avatar: { sha256, type: 'image/jpeg' } });
+    expect(new TextDecoder().decode(base64urlDecode(env.payload))).toBe(
+      `{"v":1,"userId":"${alice.userId}","name":"A","avatar":{"sha256":"${sha256}","type":"image/jpeg"},"rev":1,"updated":5}`,
+    );
+    expect(verifyProfileEnvelope(env, aliceId).avatar).toEqual({ sha256, type: 'image/jpeg' });
+    expect(createProfileEnvelope(alice, { name: 'A', rev: 1, updated: 5, avatar: null }).payload).toBe(
+      createProfileEnvelope(alice, { name: 'A', rev: 1, updated: 5 }).payload,
+    );
+    const bad = (avatar: unknown) =>
+      errorCode(() => createProfileEnvelope(alice, { name: 'A', rev: 1, avatar: avatar as null }));
+    expect(bad({ sha256, type: 'image/gif' })).toBe('invalid-argument');
+    expect(bad({ sha256: 'x', type: 'image/jpeg' })).toBe('invalid-argument');
   });
 
   it('rejects missing fields, another user, and a forged signature', () => {
@@ -251,5 +278,42 @@ describe('auth envelope', () => {
     expect(errorCode(() => verifyAuthEnvelope(forge('auth', { ...base, nonce: 3 }), aliceId))).toBe('malformed');
     expect(errorCode(() => verifyAuthEnvelope(forge('auth', { ...base, serverId: '' }), aliceId))).toBe('malformed');
     expect(errorCode(() => verifyAuthEnvelope(forge('auth', { ...base, userId: 7 }), aliceId))).toBe('malformed');
+  });
+});
+
+describe('revocation envelope (M2)', () => {
+  it('creates and verifies with field order v, userId, revokedAt', () => {
+    const env = createRevocationEnvelope(alice, 1794787200000);
+    expect(new TextDecoder().decode(base64urlDecode(env.payload))).toBe(
+      `{"v":1,"userId":"${alice.userId}","revokedAt":1794787200000}`,
+    );
+    expect(verifyRevocationEnvelope(serializeEnvelope(env), aliceId)).toMatchObject({ userId: alice.userId, revokedAt: 1794787200000 });
+    expect(createRevocationEnvelope(alice).payload).toBeTruthy();
+  });
+
+  it('rejects another user, a forged signature, bad fields and other kinds', () => {
+    const env = createRevocationEnvelope(alice, 5);
+    expect(errorCode(() => verifyRevocationEnvelope(env, bobId))).toBe('user-id-mismatch');
+    expect(errorCode(() => verifyRevocationEnvelope(forge('revoked', { v: 1, userId: alice.userId, revokedAt: 5 }, bob), aliceId))).toBe(
+      'bad-signature',
+    );
+    expect(errorCode(() => verifyRevocationEnvelope(forge('revoked', { v: 1, userId: alice.userId, revokedAt: -1 }), aliceId))).toBe(
+      'malformed',
+    );
+    expect(errorCode(() => verifyRevocationEnvelope(forge('revoked', { v: 1, userId: 'x', revokedAt: 1 }), aliceId))).toBe('malformed');
+    expect(errorCode(() => verifyRevocationEnvelope(forge('revoked', { v: 2, userId: alice.userId, revokedAt: 1 }), aliceId))).toBe(
+      'unsupported-version',
+    );
+    // A profile signature is not a revocation signature (kind label).
+    const asProfile = forge('profile', { v: 1, userId: alice.userId, revokedAt: 5 });
+    expect(errorCode(() => verifyRevocationEnvelope(asProfile, aliceId))).toBe('bad-signature');
+    expect(errorCode(() => createRevocationEnvelope(alice, 1.5))).toBe('invalid-argument');
+  });
+
+  it('group states get a larger payload limit than other envelopes', () => {
+    expect(maxPayloadBytes('group-state')).toBe(65536);
+    expect(maxPayloadBytes('revoked')).toBe(8192);
+    const big = forge('revoked', { v: 1, userId: alice.userId, revokedAt: 1, pad: 'x'.repeat(8200) });
+    expect(errorCode(() => verifyRevocationEnvelope(big, aliceId))).toBe('too-large');
   });
 });

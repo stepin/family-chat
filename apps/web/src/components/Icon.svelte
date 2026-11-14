@@ -10,7 +10,18 @@
     | 'copy'
     | 'chevron'
     | 'share'
-    | 'close';
+    | 'close'
+    | 'users'
+    | 'bookmark'
+    | 'clip'
+    | 'camera'
+    | 'image'
+    | 'file'
+    | 'download'
+    | 'zoom-in'
+    | 'zoom-out'
+    | 'shield'
+    | 'forward';
 
   // 24x24 outline paths (stroke = currentColor).
   const PATHS: Record<IconName, string> = {
@@ -26,6 +37,18 @@
     chevron: 'M9 5l7 7-7 7',
     share: 'M12 15V3M7 8l5-5 5 5M5 13v7h14v-7',
     close: 'M6 6l12 12M18 6L6 18',
+    users:
+      'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6M16 4.3a3.5 3.5 0 0 1 0 6.4M18 14.4c2.1.7 3.5 2.8 3.5 5.6',
+    bookmark: 'M6 3h12v18l-6-4.5L6 21z',
+    clip: 'M20 11.5l-8.3 8.3a5 5 0 0 1-7.1-7.1l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4L15 7.1',
+    camera: 'M4 8h3l2-3h6l2 3h3v11H4zM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z',
+    image: 'M4 5h16v14H4zM4 16l5-5 4 4 2.5-2.5L20 17M15.5 9.5h.01',
+    file: 'M6 3h8l4 4v14H6zM14 3v4h4',
+    download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+    'zoom-in': 'M10.5 17.5a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20.5 20.5l-5-5M10.5 7.5v6M7.5 10.5h6',
+    'zoom-out': 'M10.5 17.5a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20.5 20.5l-5-5M7.5 10.5h6',
+    shield: 'M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z',
+    forward: 'M9 5l7 7-7 7',
   };
 </script>
 

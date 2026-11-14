@@ -35,6 +35,12 @@ export type PushNotice =
       readonly familyName: string;
       /** Message text, only when the person enabled it (SETTING_PUSH_SHOW_TEXT). */
       readonly text: string | null;
+      /** 'dm', 'self' (the chat with myself, from another own device) or 'group'. */
+      readonly chatKind: 'dm' | 'self' | 'group';
+      /** Group name from the verified state; the peer's name for a direct chat; null for 'self' or unknown. */
+      readonly chatName: string | null;
+      /** Number of attachments (the text may be empty). */
+      readonly attachments: number;
     }
   /** Could not fetch or decrypt: show a generic "new message". */
   | {
@@ -92,12 +98,16 @@ export async function handlePush(
       if (!account || account.status !== 'active') continue;
       const rt = await runtimeFor(accountId);
       const chat = chats.find((c) => c.accountId === accountId);
-      const peerName = chat ? ((await db.users.get([accountId, chat.peerId]))?.name ?? null) : null;
-      fallback = generic(accountId, p.chatId, account.familyName, peerName);
+      const group = await db.groups.get([accountId, p.chatId]);
+      const chatName = group
+        ? (group.state?.name ?? null)
+        : chat && chat.kind === 'dm'
+          ? ((await db.users.get([accountId, chat.peerId]))?.name ?? null)
+          : null;
+      fallback = generic(accountId, p.chatId, account.familyName, chatName);
       try {
         let event = await db.events.where('[accountId+gseq]').equals([accountId, p.gseq]).first();
         if (!event) {
-          if (!chat && !(await rt.directory.peerForChat(p.chatId))) continue;
           const page = await rt.session.call((t) =>
             rt.session.transport.chatEvents(t, p.chatId, { before: p.gseq + 1, limit: 1 }),
           );
@@ -113,6 +123,8 @@ export async function handlePush(
         const msg = await db.messages.get([accountId, event.senderId, event.msgId]);
         if (!msg || msg.kind !== 'msg') return fallback;
         const sender = await db.users.get([accountId, msg.senderId]);
+        const groupNow = group ?? (await db.groups.get([accountId, p.chatId]));
+        const nameNow = groupNow ? (groupNow.state?.name ?? null) : chatName;
         const showText = (await db.settings.get(SETTING_PUSH_SHOW_TEXT))?.value === true;
         return {
           kind: 'message',
@@ -123,6 +135,9 @@ export async function handlePush(
           senderName: sender?.name ?? null,
           familyName: account.familyName,
           text: showText ? msg.body : null,
+          chatKind: groupNow ? 'group' : chat?.kind === 'self' || msg.chatId === rt.directory.selfChatId() ? 'self' : 'dm',
+          chatName: nameNow,
+          attachments: msg.attachments?.length ?? 0,
         };
       } catch (e) {
         void ctx.diag.warn('push', `push for chat ${p.chatId} gseq=${p.gseq} not decrypted: ${describeError(e)}`, accountId);

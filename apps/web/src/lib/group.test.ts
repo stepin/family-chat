@@ -26,6 +26,13 @@ const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h)
 describe('groupByDay', () => {
   const now = at(2026, 11, 14, 18);
 
+  it('service lines break a run of one author', () => {
+    const service: MessageView = { ...msg('s', '', at(2026, 11, 14, 10)), kind: 'service' };
+    const feed = groupByDay([msg('a', 'x', at(2026, 11, 14, 9)), service, msg('b', 'x', at(2026, 11, 14, 11)), msg('c', 'x', at(2026, 11, 14, 12))], now);
+    const cont = feed.filter((e) => e.kind === 'message').map((e) => (e.kind === 'message' ? e.continued : null));
+    expect(cont).toEqual([false, false, false, true]);
+  });
+
   it('puts a separator before each local day and labels today and yesterday', () => {
     const feed = groupByDay(
       [msg('1', 'peer', at(2026, 3, 2)), msg('2', 'peer', at(2026, 11, 13, 9)), msg('3', 'me', at(2026, 11, 14, 8)), msg('4', 'me', null)],

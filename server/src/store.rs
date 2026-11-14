@@ -16,13 +16,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::{oneshot, watch};
 
+use crate::blobs::BlobStore;
 use crate::datadir::{self, ServerFile, check_admin_code, create_private_dir, hex, now_ms, write_atomic_io};
-use crate::envelope::{self, EnvError, Envelope, Identity, Profile};
+use crate::envelope::{self, AvatarRef, EnvError, Envelope, Identity, ImageKind, Profile};
 use crate::error::{ApiError, io_error};
 use crate::eventlog::{self, Header};
 use crate::ids::{
     ChatId, DevId, MS_PER_DAY, MsgId, UserId, b32_encode, b64_encode, day_name, day_of_ms, parse_day_name,
 };
+use crate::notice::Notice;
 use crate::webpush::{Subscription, random_bytes};
 
 pub const INVITE_TTL_MS: u64 = 7 * MS_PER_DAY;
@@ -31,10 +33,16 @@ const MAX_NONCES: usize = 1000;
 /// Retention never counts from further than this past the newest event.
 pub const CLOCK_SLACK_MS: u64 = 7 * MS_PER_DAY;
 
+/// Sender of server notices in the log. No real user can have it: a
+/// `userId` is a SHA-256 prefix of a public key.
+pub const NOTICE_SENDER: UserId = UserId([0; 16]);
+
 #[derive(Debug, Clone)]
 pub struct StoreConfig {
     pub retention_days: u32,
     pub min_free_mb: u64,
+    /// Largest attachment (sum of its parts), bytes.
+    pub max_blob_bytes: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -44,13 +52,45 @@ pub struct Device {
     pub push: Option<Subscription>,
 }
 
+/// An avatar file `users/<id>/avatar.<sha256 hex>.<jpg|webp>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AvatarFile {
+    pub sha256: [u8; 32],
+    pub kind: ImageKind,
+}
+
+impl AvatarFile {
+    pub fn file_name(&self) -> String {
+        format!("avatar.{}.{}", hex(&self.sha256), self.kind.ext())
+    }
+}
+
+/// A stored `revoked` envelope.
+#[derive(Debug, Clone)]
+pub struct Revoked {
+    pub envelope: Envelope,
+    /// Server time when it was accepted.
+    pub at: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct User {
     pub id: UserId,
     pub identity: Identity,
     pub profile: Option<Profile>,
     pub removed_at: Option<u64>,
+    pub revoked: Option<Revoked>,
     pub devices: HashMap<DevId, Device>,
+    /// Avatar files on disk, oldest first (at most the profile's one and
+    /// the newest upload).
+    pub avatars: Vec<AvatarFile>,
+}
+
+impl User {
+    /// Still in the family and not revoked: can be added to groups.
+    pub fn active(&self) -> bool {
+        self.removed_at.is_none() && self.revoked.is_none()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -64,12 +104,73 @@ pub struct Invite {
     pub used_by: Option<UserId>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatKind {
+    Dm,
+    Group,
+}
+
+/// A stretch of group membership: events with `from <= gseq <= to` are
+/// delivered to the user (`to` is the notice that removed them).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Period {
+    pub user_id: UserId,
+    pub from: u64,
+    pub to: Option<u64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Chat {
     pub id: ChatId,
+    pub kind: ChatKind,
+    /// Sorted. A direct chat has two entries (the same user twice for the
+    /// chat with oneself); a group has its current members.
     pub members: Vec<UserId>,
     pub created_at: u64,
     pub epoch: u32,
+    /// Groups only.
+    pub owner: Option<UserId>,
+    /// Current state version (groups); 0 for direct chats.
+    pub version: u64,
+    /// Membership history (groups).
+    pub periods: Vec<Period>,
+}
+
+impl Chat {
+    pub fn is_member(&self, u: &UserId) -> bool {
+        self.members.contains(u)
+    }
+
+    /// Whether the event `gseq` of this chat is delivered to `u`.
+    pub fn delivers(&self, u: &UserId, gseq: u64) -> bool {
+        match self.kind {
+            ChatKind::Dm => self.members.contains(u),
+            ChatKind::Group => self
+                .periods
+                .iter()
+                .any(|p| p.user_id == *u && p.from <= gseq && p.to.is_none_or(|t| gseq <= t)),
+        }
+    }
+
+    /// Members without repeats (the chat with oneself lists one user twice).
+    pub fn unique_members(&self) -> Vec<UserId> {
+        let mut v = self.members.clone();
+        v.dedup();
+        v
+    }
+}
+
+/// A sealed group key for one user: `users/<id>/keys/<n>.key`.
+#[derive(Debug, Clone)]
+pub struct SealedKey {
+    pub n: u64,
+    pub chat: ChatId,
+    pub epoch: u32,
+    pub version: u64,
+    pub created_at: u64,
+    /// Opaque string from the owner's request.
+    pub key: String,
 }
 
 /// Index entry: where an event lives on disk.
@@ -94,6 +195,7 @@ pub struct Caller {
     pub dev: DevId,
     pub admin: bool,
     pub removed: bool,
+    pub revoked: bool,
 }
 
 pub struct Mem {
@@ -104,13 +206,18 @@ pub struct Mem {
     pub chats: HashMap<ChatId, Chat>,
     /// Sorted by `gseq`.
     pub log: Vec<Entry>,
+    /// Server notices in the log, by `gseq`.
+    pub notices: HashMap<u64, Arc<Notice>>,
     pub idem: HashMap<(UserId, MsgId), u64>,
     pub last_gseq: u64,
+    /// Sealed group keys per user, by `n`.
+    pub keys: HashMap<UserId, Vec<SealedKey>>,
 }
 
-/// One page of events.
+/// One page of events. `notices` holds the notice records among `events`.
 pub struct Page {
     pub events: Vec<Entry>,
+    pub notices: HashMap<u64, Arc<Notice>>,
     pub cursor: u64,
     pub more: bool,
 }
@@ -129,6 +236,7 @@ impl Mem {
             dev,
             admin: self.is_admin(&user),
             removed: u.removed_at.is_some(),
+            revoked: u.revoked.is_some(),
         })
     }
 
@@ -137,21 +245,41 @@ impl Mem {
         self.log.first().map_or(self.last_gseq + 1, |e| e.h.gseq)
     }
 
-    pub fn user_chats(&self, u: &UserId) -> HashSet<ChatId> {
-        self.chats
-            .values()
-            .filter(|c| c.members.contains(u))
-            .map(|c| c.id)
-            .collect()
+    /// Server time of the oldest stored event or notice.
+    pub fn oldest_time(&self) -> Option<u64> {
+        self.log.first().map(|e| e.h.time)
     }
 
-    /// The direct chat between `u` and some other user with this id, if any.
+    /// The direct chat between `u` and some user (`u` itself for the chat
+    /// with oneself) with this id, if any.
     pub fn derive_direct(&self, server_id: &str, u: &UserId, chat: &ChatId) -> Option<UserId> {
         self.users
             .keys()
-            .filter(|p| *p != u)
             .find(|p| ChatId::direct(server_id, u, p) == *chat)
             .copied()
+    }
+
+    /// Whether `chat` is the direct chat id of any two users (or of a user
+    /// with themselves).
+    pub fn is_direct_id(&self, server_id: &str, chat: &ChatId) -> bool {
+        self.users
+            .keys()
+            .any(|u| self.derive_direct(server_id, u, chat).is_some())
+    }
+
+    fn visible(&self, user: &UserId, e: &Entry) -> bool {
+        if e.h.sender == NOTICE_SENDER {
+            return self.notices.get(&e.h.gseq).is_some_and(|n| n.to.contains(user));
+        }
+        self.chats.get(&e.h.chat).is_some_and(|c| c.delivers(user, e.h.gseq))
+    }
+
+    fn page_notices(&self, events: &[Entry]) -> HashMap<u64, Arc<Notice>> {
+        events
+            .iter()
+            .filter(|e| e.h.sender == NOTICE_SENDER)
+            .filter_map(|e| Some((e.h.gseq, self.notices.get(&e.h.gseq)?.clone())))
+            .collect()
     }
 
     pub fn entry(&self, gseq: u64) -> Option<&Entry> {
@@ -163,13 +291,12 @@ impl Mem {
 
     /// Events of `user`'s chats after `after`, oldest first.
     pub fn events_after(&self, user: &UserId, after: u64, limit: usize, max_bytes: usize) -> Page {
-        let chats = self.user_chats(user);
         let start = self.log.partition_point(|e| e.h.gseq <= after);
         let mut events = Vec::new();
         let mut bytes = 0;
         let mut more = false;
         for e in &self.log[start..] {
-            if !chats.contains(&e.h.chat) {
+            if !self.visible(user, e) {
                 continue;
             }
             if events.len() >= limit || (!events.is_empty() && bytes + e.body_len() > max_bytes) {
@@ -183,18 +310,28 @@ impl Mem {
             (true, Some(l)) => l.h.gseq,
             _ => self.last_gseq,
         };
-        Page { events, cursor, more }
+        let notices = self.page_notices(&events);
+        Page {
+            events,
+            notices,
+            cursor,
+            more,
+        }
     }
 
     /// Events of one chat before `before`, returned oldest first; `more`
-    /// says whether older ones are still stored.
-    pub fn chat_history(&self, chat: &ChatId, before: u64, limit: usize, max_bytes: usize) -> Page {
+    /// says whether older ones are still stored. All member events of the
+    /// chat are included; notices only when addressed to `user`.
+    pub fn chat_history(&self, user: &UserId, chat: &ChatId, before: u64, limit: usize, max_bytes: usize) -> Page {
         let end = self.log.partition_point(|e| e.h.gseq < before);
         let mut events = Vec::new();
         let mut bytes = 0;
         let mut more = false;
         for e in self.log[..end].iter().rev() {
             if e.h.chat != *chat {
+                continue;
+            }
+            if e.h.sender == NOTICE_SENDER && !self.visible(user, e) {
                 continue;
             }
             if events.len() >= limit || (!events.is_empty() && bytes + e.body_len() > max_bytes) {
@@ -206,16 +343,30 @@ impl Mem {
         }
         events.reverse();
         let cursor = events.first().map_or(before.min(self.last_gseq + 1), |e| e.h.gseq);
-        Page { events, cursor, more }
+        let notices = self.page_notices(&events);
+        Page {
+            events,
+            notices,
+            cursor,
+            more,
+        }
     }
 
-    /// Last event of every chat.
+    /// Last member event (notices left out) of every chat.
     pub fn last_events(&self) -> HashMap<ChatId, Entry> {
         let mut out = HashMap::new();
-        for e in &self.log {
+        for e in self.log.iter().filter(|e| e.h.sender != NOTICE_SENDER) {
             out.insert(e.h.chat, *e);
         }
         out
+    }
+
+    /// Sealed keys of `user` with `n > after`, at most `limit`.
+    pub fn keys_after(&self, user: &UserId, after: u64, limit: usize) -> (Vec<SealedKey>, bool) {
+        let all = self.keys.get(user).map(Vec::as_slice).unwrap_or(&[]);
+        let start = all.partition_point(|k| k.n <= after);
+        let rest = &all[start..];
+        (rest.iter().take(limit).cloned().collect(), rest.len() > limit)
     }
 }
 
@@ -225,6 +376,7 @@ struct Shared {
     mem: RwLock<Mem>,
     changes: watch::Sender<u64>,
     nonces: Mutex<HashMap<String, u64>>,
+    blobs: BlobStore,
 }
 
 type Job = Box<dyn FnOnce(&mut Writer) + Send>;
@@ -245,7 +397,7 @@ struct OpenSegment {
 /// The only place that changes the state. Runs on its own thread.
 pub struct Writer {
     shared: Arc<Shared>,
-    config: StoreConfig,
+    pub(crate) config: StoreConfig,
     segment: Option<OpenSegment>,
 }
 
@@ -269,13 +421,61 @@ struct InviteFile {
     used_by: Option<UserId>,
 }
 
+fn is_zero(v: &u64) -> bool {
+    *v == 0
+}
+
+/// `chats/<id>/meta.json`. Direct chats keep the M1 fields only.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ChatMeta {
+pub(crate) struct ChatMeta {
     kind: String,
     members: Vec<UserId>,
     created_at: u64,
     epoch: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner: Option<UserId>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    version: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    periods: Vec<Period>,
+}
+
+impl ChatMeta {
+    pub(crate) fn of(c: &Chat) -> ChatMeta {
+        ChatMeta {
+            kind: match c.kind {
+                ChatKind::Dm => "dm".into(),
+                ChatKind::Group => "group".into(),
+            },
+            members: c.members.clone(),
+            created_at: c.created_at,
+            epoch: c.epoch,
+            owner: c.owner,
+            version: c.version,
+            periods: c.periods.clone(),
+        }
+    }
+}
+
+/// `users/<id>/revoked.json`: the envelope as posted plus the server time.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RevokedFile {
+    payload: String,
+    sig: String,
+    received_at: u64,
+}
+
+/// `users/<id>/keys/<n>.key`.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KeyFile {
+    chat_id: ChatId,
+    epoch: u32,
+    version: u64,
+    created_at: u64,
+    key: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -289,11 +489,11 @@ fn read_json<T: for<'de> Deserialize<'de>>(p: &Path) -> Result<T, String> {
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 
-fn to_json<T: Serialize>(v: &T) -> Vec<u8> {
+pub(crate) fn to_json<T: Serialize>(v: &T) -> Vec<u8> {
     serde_json::to_vec_pretty(v).expect("serialisable")
 }
 
-fn dir_entries(p: &Path) -> Vec<(String, PathBuf)> {
+pub(crate) fn dir_entries(p: &Path) -> Vec<(String, PathBuf)> {
     let Ok(rd) = fs::read_dir(p) else { return Vec::new() };
     let mut v: Vec<_> = rd
         .flatten()
@@ -397,6 +597,14 @@ pub struct RetentionReport {
     pub invites: usize,
 }
 
+/// Result of a group creation or state change.
+#[derive(Debug, Clone)]
+pub struct GroupChange {
+    pub chat: Chat,
+    /// `gseq` of the notice, if it was written.
+    pub notice: Option<u64>,
+}
+
 pub fn env_error(e: EnvError, what: &str) -> ApiError {
     match e {
         EnvError::Malformed(m) => ApiError::bad_request(format!("{what}: {m}")),
@@ -405,7 +613,7 @@ pub fn env_error(e: EnvError, what: &str) -> ApiError {
 }
 
 impl ApiError {
-    fn code(mut self, code: &'static str) -> Self {
+    pub(crate) fn code(mut self, code: &'static str) -> Self {
         self.code = code;
         self
     }
@@ -422,13 +630,17 @@ impl Store {
             invites: HashMap::new(),
             chats: HashMap::new(),
             log: Vec::new(),
+            notices: HashMap::new(),
             idem: HashMap::new(),
             last_gseq: 0,
+            keys: HashMap::new(),
         };
         load_users(path, &mut mem);
         load_invites(path, &mut mem);
         load_chats(path, &mut mem);
+        load_keys(path, &mut mem);
         let segment = load_log(path, &mut mem)?;
+        let blobs = BlobStore::open(path, config.max_blob_bytes, config.min_free_mb);
         let (changes, _) = watch::channel(0u64);
         let shared = Arc::new(Shared {
             path: path.to_path_buf(),
@@ -436,6 +648,7 @@ impl Store {
             mem: RwLock::new(mem),
             changes,
             nonces: Mutex::new(HashMap::new()),
+            blobs,
         });
         let (tx, rx) = mpsc::channel::<Job>();
         let mut writer = Writer {
@@ -464,6 +677,10 @@ impl Store {
 
     pub fn server_id(&self) -> &str {
         &self.shared.server_id
+    }
+
+    pub fn blobs(&self) -> &BlobStore {
+        &self.shared.blobs
     }
 
     pub fn read<R>(&self, f: impl FnOnce(&Mem) -> R) -> R {
@@ -562,6 +779,37 @@ fn load_users(root: &Path, mem: &mut Mem) {
             .map(|r| r.removed_at)
             .ok()
             .or_else(|| dir.join("removed").exists().then_some(0));
+        let revoked = match read_json::<RevokedFile>(&dir.join("revoked.json")) {
+            Ok(f) => {
+                let env = Envelope {
+                    payload: f.payload,
+                    sig: f.sig,
+                };
+                match envelope::parse_revocation(&env)
+                    .and_then(|r| envelope::verify_revocation(&env, &r, &identity.key).map(|_| r))
+                {
+                    Ok(r) if r.user_id == id => Some(Revoked {
+                        envelope: env,
+                        at: f.received_at,
+                    }),
+                    _ => {
+                        tracing::warn!("users/{name}/revoked.json: подпись или userId не сходятся, пропускаю");
+                        None
+                    }
+                }
+            }
+            Err(_) => None,
+        };
+        let mut avatars: Vec<(std::time::SystemTime, AvatarFile)> = Vec::new();
+        for (fname, p) in dir_entries(&dir) {
+            if let Some(a) = parse_avatar_name(&fname) {
+                let t = fs::metadata(&p)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH);
+                avatars.push((t, a));
+            }
+        }
+        avatars.sort_by_key(|(t, _)| *t);
         let mut devices = HashMap::new();
         for (fname, p) in dir_entries(&dir.join("devices")) {
             let Some(dev) = fname.strip_suffix(".json").and_then(DevId::parse) else {
@@ -592,10 +840,25 @@ fn load_users(root: &Path, mem: &mut Mem) {
                 identity,
                 profile,
                 removed_at,
+                revoked,
                 devices,
+                avatars: avatars.into_iter().map(|(_, a)| a).collect(),
             },
         );
     }
+}
+
+/// `avatar.<64 hex>.<jpg|webp>`.
+fn parse_avatar_name(name: &str) -> Option<AvatarFile> {
+    let rest = name.strip_prefix("avatar.")?;
+    let (h, ext) = rest.split_once('.')?;
+    if h.bytes().any(|b| b.is_ascii_uppercase()) {
+        return None;
+    }
+    Some(AvatarFile {
+        sha256: parse_hash(h)?,
+        kind: ImageKind::from_ext(ext)?,
+    })
 }
 
 fn load_invites(root: &Path, mem: &mut Mem) {
@@ -631,14 +894,78 @@ fn load_chats(root: &Path, mem: &mut Mem) {
                     id,
                     Chat {
                         id,
+                        kind: ChatKind::Dm,
                         members: m.members,
                         created_at: m.created_at,
                         epoch: m.epoch,
+                        owner: None,
+                        version: 0,
+                        periods: Vec::new(),
+                    },
+                );
+            }
+            Ok(m) if m.kind == "group" && m.owner.is_some() && m.version >= 1 => {
+                mem.chats.insert(
+                    id,
+                    Chat {
+                        id,
+                        kind: ChatKind::Group,
+                        members: m.members,
+                        created_at: m.created_at,
+                        epoch: m.epoch,
+                        owner: m.owner,
+                        version: m.version,
+                        periods: m.periods,
                     },
                 );
             }
             Ok(m) => tracing::warn!("chats/{name}: вид чата {} не поддерживается этой версией", m.kind),
             Err(e) => tracing::warn!("chats/{name}/meta.json: {e}"),
+        }
+    }
+}
+
+/// Reads the sealed keys. Keys of a change that never committed (a crash
+/// between writing the keys and `meta.json`) are deleted.
+fn load_keys(root: &Path, mem: &mut Mem) {
+    for (uid, dir) in dir_entries(&root.join("users")) {
+        let Some(user) = UserId::parse(&uid) else { continue };
+        let mut list = Vec::new();
+        for (fname, p) in dir_entries(&dir.join("keys")) {
+            let Some(n) = fname.strip_suffix(".key").and_then(|n| n.parse::<u64>().ok()) else {
+                continue;
+            };
+            let f = match read_json::<KeyFile>(&p) {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::warn!("users/{uid}/keys/{fname}: {e}");
+                    continue;
+                }
+            };
+            let committed = mem
+                .chats
+                .get(&f.chat_id)
+                .is_some_and(|c| c.kind == ChatKind::Group && f.version <= c.version);
+            let key = (!f.key.is_empty()).then_some(f.key);
+            match (committed, key) {
+                (true, Some(key)) => list.push(SealedKey {
+                    n,
+                    chat: f.chat_id,
+                    epoch: f.epoch,
+                    version: f.version,
+                    created_at: f.created_at,
+                    key,
+                }),
+                (false, _) => {
+                    tracing::warn!("users/{uid}/keys/{fname}: изменение группы не завершено, удаляю ключ");
+                    let _ = fs::remove_file(&p);
+                }
+                (true, None) => tracing::warn!("users/{uid}/keys/{fname}: повреждён ключ"),
+            }
+        }
+        list.sort_by_key(|k| k.n);
+        if !list.is_empty() {
+            mem.keys.insert(user, list);
         }
     }
 }
@@ -687,6 +1014,15 @@ fn load_log(root: &Path, mem: &mut Mem) -> Result<Option<OpenSegment>, String> {
             }
         }
         for f in found {
+            if f.header.sender == NOTICE_SENDER {
+                let rec = &bytes[f.offset as usize..(f.offset + f.size as u64) as usize];
+                match eventlog::decode(rec).and_then(|(_, body)| Notice::parse(body)) {
+                    Some(n) => {
+                        mem.notices.insert(f.header.gseq, Arc::new(n));
+                    }
+                    None => tracing::warn!("{}: повреждено служебное событие {}", path.display(), f.header.gseq),
+                }
+            }
             entries.push(Entry {
                 h: f.header,
                 day,
@@ -715,7 +1051,7 @@ fn load_log(root: &Path, mem: &mut Mem) -> Result<Option<OpenSegment>, String> {
             before - entries.len()
         );
     }
-    for e in &entries {
+    for e in entries.iter().filter(|e| e.h.sender != NOTICE_SENDER) {
         mem.idem.insert((e.h.sender, e.h.msg), e.h.gseq);
     }
     mem.last_gseq = entries.last().map_or(0, |e| e.h.gseq);
@@ -726,15 +1062,19 @@ fn load_log(root: &Path, mem: &mut Mem) -> Result<Option<OpenSegment>, String> {
 // ---- writing ----
 
 impl Writer {
-    fn root(&self) -> &Path {
+    pub(crate) fn root(&self) -> &Path {
         &self.shared.path
     }
 
-    fn mem(&self) -> std::sync::RwLockReadGuard<'_, Mem> {
+    pub(crate) fn server_id(&self) -> &str {
+        &self.shared.server_id
+    }
+
+    pub(crate) fn mem(&self) -> std::sync::RwLockReadGuard<'_, Mem> {
         self.shared.mem.read().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn mem_mut(&self) -> std::sync::RwLockWriteGuard<'_, Mem> {
+    pub(crate) fn mem_mut(&self) -> std::sync::RwLockWriteGuard<'_, Mem> {
         self.shared.mem.write().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -742,11 +1082,69 @@ impl Writer {
         self.shared.changes.send_modify(|v| *v += 1);
     }
 
-    fn write_file(&self, target: &Path, bytes: &[u8]) -> Result<(), ApiError> {
+    pub(crate) fn write_file(&self, target: &Path, bytes: &[u8]) -> Result<(), ApiError> {
         write_atomic_io(self.root(), target, bytes).map_err(|e| io_error("запись файла", e))
     }
 
-    fn user_dir(&self, u: &UserId) -> PathBuf {
+    pub(crate) fn chat_dir(&self, c: &ChatId) -> PathBuf {
+        self.root().join("chats").join(c.to_string())
+    }
+
+    pub(crate) fn write_meta(&self, c: &Chat) -> Result<(), ApiError> {
+        let dir = self.chat_dir(&c.id);
+        create_private_dir(&dir).map_err(|e| io_error("создание папки чата", e))?;
+        self.write_file(&dir.join("meta.json"), &to_json(&ChatMeta::of(c)))
+    }
+
+    /// Writes sealed keys to the users' `keys/` folders (not yet in memory;
+    /// see [`Writer::commit_keys`]).
+    pub(crate) fn write_keys(
+        &self,
+        chat: &ChatId,
+        epoch: u32,
+        version: u64,
+        keys: &[(UserId, String)],
+        now: u64,
+    ) -> Result<Vec<(UserId, SealedKey)>, ApiError> {
+        let mut out = Vec::with_capacity(keys.len());
+        for (u, key) in keys {
+            let n = self.mem().keys.get(u).and_then(|v| v.last()).map_or(0, |k| k.n) + 1;
+            let dir = self.user_dir(u).join("keys");
+            create_private_dir(&dir).map_err(|e| io_error("создание папки ключей", e))?;
+            let f = KeyFile {
+                chat_id: *chat,
+                epoch,
+                version,
+                created_at: now,
+                key: key.clone(),
+            };
+            self.write_file(&dir.join(format!("{n}.key")), &to_json(&f))?;
+            out.push((
+                *u,
+                SealedKey {
+                    n,
+                    chat: *chat,
+                    epoch,
+                    version,
+                    created_at: now,
+                    key: key.clone(),
+                },
+            ));
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn commit_keys(m: &mut Mem, keys: Vec<(UserId, SealedKey)>) {
+        for (u, k) in keys {
+            m.keys.entry(u).or_default().push(k);
+        }
+    }
+
+    pub(crate) fn check_space_pub(&self) -> Result<(), ApiError> {
+        self.check_space()
+    }
+
+    pub(crate) fn user_dir(&self, u: &UserId) -> PathBuf {
         self.root().join("users").join(u.to_string())
     }
 
@@ -856,7 +1254,13 @@ impl Writer {
                 None
             }
         };
+        if profile.avatar != AvatarRef::None {
+            return Err(ApiError::bad_request("avatar must be null when joining"));
+        }
         let rejoin = match self.mem().users.get(&uid) {
+            Some(u) if u.revoked.is_some() => {
+                return Err(ApiError::forbidden("revoked", "this identity was revoked by its owner"));
+            }
             Some(u) if u.removed_at.is_none() => {
                 return Err(ApiError::conflict(
                     "already_member",
@@ -893,10 +1297,12 @@ impl Writer {
         self.write_file(&dir.join("profile.json"), &to_json(&profile.envelope))?;
         {
             let mut m = self.mem_mut();
+            let mut avatars = Vec::new();
             if let Some(old) = m.users.remove(&uid) {
                 for d in old.devices.values() {
                     m.tokens.remove(&d.token_hash);
                 }
+                avatars = old.avatars;
             }
             m.users.insert(
                 uid,
@@ -905,7 +1311,9 @@ impl Writer {
                     identity,
                     profile: Some(profile),
                     removed_at: None,
+                    revoked: None,
                     devices: HashMap::new(),
+                    avatars,
                 },
             );
         }
@@ -935,6 +1343,9 @@ impl Writer {
                 .users
                 .get(&req.user_id)
                 .ok_or_else(|| ApiError::not_found("unknown_user", "no such member on this server"))?;
+            if u.revoked.is_some() {
+                return Err(ApiError::forbidden("revoked", "this identity was revoked by its owner"));
+            }
             if u.removed_at.is_some() {
                 return Err(ApiError::forbidden("removed", "removed from the family"));
             }
@@ -959,12 +1370,24 @@ impl Writer {
 
     /// `PUT /v1/me/profile`.
     pub fn set_profile(&mut self, user: &UserId, env: &Envelope) -> Result<Profile, ApiError> {
-        let (key, stored_rev) = {
+        let (key, stored_rev, avatars) = {
             let m = self.mem();
             let u = m.users.get(user).ok_or_else(|| ApiError::internal("caller vanished"))?;
-            (u.identity.key, u.profile.as_ref().map(|p| p.rev))
+            (u.identity.key, u.profile.as_ref().map(|p| p.rev), u.avatars.clone())
         };
         let p = envelope::verify_profile(env, user, &key).map_err(|e| env_error(e, "profile"))?;
+        match p.avatar {
+            AvatarRef::None => {}
+            AvatarRef::Image { sha256, kind } => {
+                if !avatars.contains(&AvatarFile { sha256, kind }) {
+                    return Err(
+                        ApiError::bad_request("the avatar named in the profile was not uploaded")
+                            .code("unknown_avatar"),
+                    );
+                }
+            }
+            AvatarRef::Legacy => return Err(ApiError::bad_request("avatar must be null or {sha256, type}")),
+        }
         if let Some(r) = stored_rev
             && p.rev <= r
         {
@@ -974,7 +1397,97 @@ impl Writer {
         if let Some(u) = self.mem_mut().users.get_mut(user) {
             u.profile = Some(p.clone());
         }
+        self.prune_avatars(user, None);
         Ok(p)
+    }
+
+    /// `PUT /v1/me/avatar`: stores the image (already checked) and returns
+    /// its file record.
+    pub fn set_avatar(&mut self, user: &UserId, bytes: &[u8], kind: ImageKind) -> Result<AvatarFile, ApiError> {
+        self.check_space()?;
+        let a = AvatarFile {
+            sha256: Sha256::digest(bytes).into(),
+            kind,
+        };
+        self.write_file(&self.user_dir(user).join(a.file_name()), bytes)?;
+        if let Some(u) = self.mem_mut().users.get_mut(user) {
+            u.avatars.retain(|x| *x != a);
+            u.avatars.push(a);
+        }
+        self.prune_avatars(user, Some(a));
+        Ok(a)
+    }
+
+    /// Keeps the avatar named by the profile and the newest upload (`keep`,
+    /// or the last one known); deletes the other avatar files.
+    fn prune_avatars(&self, user: &UserId, keep: Option<AvatarFile>) {
+        let (gone, dir) = {
+            let mut m = self.mem_mut();
+            let Some(u) = m.users.get_mut(user) else { return };
+            let current = match u.profile.as_ref().map(|p| &p.avatar) {
+                Some(AvatarRef::Image { sha256, kind }) => Some(AvatarFile {
+                    sha256: *sha256,
+                    kind: *kind,
+                }),
+                _ => None,
+            };
+            let newest = keep.or_else(|| u.avatars.last().copied());
+            let (kept, gone): (Vec<_>, Vec<_>) = u
+                .avatars
+                .iter()
+                .partition(|a| Some(**a) == current || Some(**a) == newest);
+            u.avatars = kept;
+            (gone, self.user_dir(user))
+        };
+        for a in gone {
+            let _ = fs::remove_file(dir.join(a.file_name()));
+        }
+    }
+
+    /// `POST /v1/revoke`: the owner of an identity revokes it.
+    pub fn revoke(&mut self, env: &Envelope, now: u64) -> Result<(), ApiError> {
+        let r = envelope::parse_revocation(env).map_err(|e| env_error(e, "revoked"))?;
+        let (key, already) = {
+            let m = self.mem();
+            let u = m
+                .users
+                .get(&r.user_id)
+                .ok_or_else(|| ApiError::not_found("unknown_user", "no such member on this server"))?;
+            (u.identity.key, u.revoked.is_some())
+        };
+        envelope::verify_revocation(env, &r, &key).map_err(|e| env_error(e, "revoked"))?;
+        if already {
+            return Ok(());
+        }
+        let user = r.user_id;
+        let f = RevokedFile {
+            payload: env.payload.clone(),
+            sig: env.sig.clone(),
+            received_at: now,
+        };
+        self.write_file(&self.user_dir(&user).join("revoked.json"), &to_json(&f))?;
+        self.drop_admin(&user)?;
+        if let Some(u) = self.mem_mut().users.get_mut(&user) {
+            u.revoked = Some(Revoked {
+                envelope: env.clone(),
+                at: now,
+            });
+        }
+        tracing::info!("участник {user} отозвал свою идентичность");
+        self.notify_group_owners(&user, "member_revoked", now);
+        self.notify();
+        Ok(())
+    }
+
+    fn drop_admin(&self, user: &UserId) -> Result<(), ApiError> {
+        let mut server = self.mem().server.clone();
+        let s = user.to_string();
+        if server.admins.contains(&s) {
+            server.admins.retain(|a| *a != s);
+            self.write_server(&server)?;
+            self.mem_mut().server = server;
+        }
+        Ok(())
     }
 
     /// `PUT/DELETE /v1/me/push`; also used to drop a subscription the push
@@ -1015,6 +1528,113 @@ impl Writer {
         Ok(self.segment.as_mut().expect("just opened"))
     }
 
+    /// Appends one record to today's segment (fsync before returning) and
+    /// adds it to the index. `gseq` is the next number.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn write_record(
+        &mut self,
+        chat: ChatId,
+        sender: UserId,
+        dev: DevId,
+        epoch: u32,
+        msg: MsgId,
+        body: &[u8],
+        now: u64,
+        notice: Option<Arc<Notice>>,
+    ) -> Result<u64, ApiError> {
+        let gseq = self.mem().last_gseq + 1;
+        let day = day_of_ms(now).max(self.segment.as_ref().map_or(i64::MIN, |s| s.day));
+        let header = Header {
+            gseq,
+            time: now,
+            chat,
+            sender,
+            dev,
+            epoch,
+            msg,
+        };
+        let rec = eventlog::encode(&header, body);
+        let seg = self.open_segment(day).map_err(|e| io_error("открытие журнала", e))?;
+        let offset = seg.len;
+        let written = seg.file.write_all(&rec).and_then(|_| seg.file.sync_data());
+        if let Err(e) = written {
+            // Leave no partial record behind.
+            let _ = seg.file.set_len(offset);
+            return Err(io_error("запись в журнал", e));
+        }
+        seg.len += rec.len() as u64;
+        {
+            let mut m = self.mem_mut();
+            m.log.push(Entry {
+                h: header,
+                day,
+                offset,
+                size: rec.len() as u32,
+            });
+            match notice {
+                Some(n) => {
+                    m.notices.insert(gseq, n);
+                }
+                None => {
+                    m.idem.insert((sender, msg), gseq);
+                }
+            }
+            m.last_gseq = gseq;
+        }
+        self.notify();
+        Ok(gseq)
+    }
+
+    /// Writes a server notice into the log. Its `gseq` is the next number
+    /// (callers that need it in advance use `last_gseq + 1`).
+    pub(crate) fn write_notice(&mut self, chat: ChatId, epoch: u32, n: Notice, now: u64) -> Result<u64, ApiError> {
+        let body = n.to_bytes();
+        self.write_record(
+            chat,
+            NOTICE_SENDER,
+            DevId([0; 10]),
+            epoch,
+            MsgId([0; 16]),
+            &body,
+            now,
+            Some(Arc::new(n)),
+        )
+    }
+
+    /// Tells the owners of `user`'s groups that `user` was removed from the
+    /// family or revoked their identity. When `user` owns the group, all
+    /// other members are told. Failures are only logged.
+    fn notify_group_owners(&mut self, user: &UserId, kind: &str, now: u64) {
+        let groups: Vec<(ChatId, u32, Vec<UserId>)> = {
+            let m = self.mem();
+            let mut v: Vec<_> = m
+                .chats
+                .values()
+                .filter(|c| c.kind == ChatKind::Group && c.is_member(user))
+                .map(|c| {
+                    let owner = c.owner.expect("group has an owner");
+                    let to = if owner != *user {
+                        vec![owner]
+                    } else {
+                        c.members.iter().filter(|u| *u != user).copied().collect()
+                    };
+                    (c.id, c.epoch, to)
+                })
+                .collect();
+            v.sort_by_key(|(id, _, _)| id.to_string());
+            v
+        };
+        for (chat, epoch, to) in groups {
+            if to.is_empty() {
+                continue;
+            }
+            let n = Notice::member_event(kind, user, to);
+            if let Err(e) = self.write_notice(chat, epoch, n, now) {
+                tracing::error!("не удалось записать служебное событие для группы {chat}: {}", e.message);
+            }
+        }
+    }
+
     /// `POST /v1/chats/<id>/events`.
     #[allow(clippy::too_many_arguments)]
     pub fn append(
@@ -1034,11 +1654,14 @@ impl Writer {
                 .users
                 .get(&sender)
                 .ok_or_else(|| ApiError::unauthorized("unknown device"))?;
+            if u.revoked.is_some() {
+                return Err(ApiError::forbidden("revoked", "this identity was revoked by its owner"));
+            }
             if u.removed_at.is_some() {
                 return Err(ApiError::forbidden("removed", "removed from the family"));
             }
             let (chat, new_chat) = match m.chats.get(&chat_id) {
-                Some(c) if c.members.contains(&sender) => (c.clone(), false),
+                Some(c) if c.is_member(&sender) => (c.clone(), false),
                 Some(_) => return Err(ApiError::forbidden("not_member", "not a member of this chat")),
                 None => match m.derive_direct(&server_id, &sender, &chat_id) {
                     Some(peer) => {
@@ -1047,9 +1670,13 @@ impl Writer {
                         (
                             Chat {
                                 id: chat_id,
+                                kind: ChatKind::Dm,
                                 members: members.to_vec(),
                                 created_at: now,
                                 epoch: 0,
+                                owner: None,
+                                version: 0,
+                                periods: Vec::new(),
                             },
                             true,
                         )
@@ -1080,66 +1707,28 @@ impl Writer {
                     .with("epoch", chat.epoch.into()),
             );
         }
-        let peer_removed = {
-            let m = self.mem();
-            chat.members
-                .iter()
-                .any(|p| *p != sender && m.users.get(p).is_none_or(|u| u.removed_at.is_some()))
-        };
-        if peer_removed {
-            return Err(ApiError::forbidden(
-                "peer_removed",
-                "the other member was removed from the family",
-            ));
+        if chat.kind == ChatKind::Dm {
+            let peer_removed = {
+                let m = self.mem();
+                chat.members
+                    .iter()
+                    .any(|p| *p != sender && m.users.get(p).is_none_or(|u| !u.active()))
+            };
+            if peer_removed {
+                return Err(ApiError::forbidden(
+                    "peer_removed",
+                    "the other member was removed from the family or revoked their identity",
+                ));
+            }
         }
         self.check_space()?;
 
         if new_chat {
-            let dir = self.root().join("chats").join(chat_id.to_string());
-            create_private_dir(&dir).map_err(|e| io_error("создание папки чата", e))?;
-            let meta = ChatMeta {
-                kind: "dm".into(),
-                members: chat.members.clone(),
-                created_at: chat.created_at,
-                epoch: 0,
-            };
-            self.write_file(&dir.join("meta.json"), &to_json(&meta))?;
+            self.write_meta(&chat)?;
             self.mem_mut().chats.insert(chat_id, chat.clone());
         }
 
-        let gseq = self.mem().last_gseq + 1;
-        let day = day_of_ms(now).max(self.segment.as_ref().map_or(i64::MIN, |s| s.day));
-        let header = Header {
-            gseq,
-            time: now,
-            chat: chat_id,
-            sender,
-            dev,
-            epoch,
-            msg,
-        };
-        let rec = eventlog::encode(&header, body);
-        let seg = self.open_segment(day).map_err(|e| io_error("открытие журнала", e))?;
-        let offset = seg.len;
-        let written = seg.file.write_all(&rec).and_then(|_| seg.file.sync_data());
-        if let Err(e) = written {
-            // Leave no partial record behind.
-            let _ = seg.file.set_len(offset);
-            return Err(io_error("запись в журнал", e));
-        }
-        seg.len += rec.len() as u64;
-        {
-            let mut m = self.mem_mut();
-            m.log.push(Entry {
-                h: header,
-                day,
-                offset,
-                size: rec.len() as u32,
-            });
-            m.idem.insert((sender, msg), gseq);
-            m.last_gseq = gseq;
-        }
-        self.notify();
+        let gseq = self.write_record(chat_id, sender, dev, epoch, msg, body, now, None)?;
         Ok(Appended {
             gseq,
             time: now,
@@ -1167,20 +1756,12 @@ impl Writer {
             &self.user_dir(user).join("removed"),
             &to_json(&RemovedFile { removed_at: now }),
         )?;
-        let mut server = self.mem().server.clone();
-        let s = user.to_string();
-        if server.admins.contains(&s) {
-            server.admins.retain(|a| *a != s);
-            self.write_server(&server)?;
-        }
-        {
-            let mut m = self.mem_mut();
-            m.server = server;
-            if let Some(u) = m.users.get_mut(user) {
-                u.removed_at = Some(now);
-            }
+        self.drop_admin(user)?;
+        if let Some(u) = self.mem_mut().users.get_mut(user) {
+            u.removed_at = Some(now);
         }
         tracing::info!("участник {user} исключён");
+        self.notify_group_owners(user, "member_removed", now);
         self.notify();
         Ok(())
     }
@@ -1249,18 +1830,9 @@ impl Writer {
             report.events = before - m.log.len();
             let kept: HashSet<u64> = m.log.iter().map(|e| e.h.gseq).collect();
             m.idem.retain(|_, g| kept.contains(g));
+            m.notices.retain(|g, _| kept.contains(g));
         }
-        for (name, path) in dir_entries(&self.root().join("blobs")) {
-            if let Some(day) = parse_day_name(&name)
-                && day_expired(day, reference, days)
-                && path.is_dir()
-            {
-                match fs::remove_dir_all(&path) {
-                    Ok(()) => report.blob_days.push(name),
-                    Err(e) => tracing::error!("не удалось удалить {}: {e}", path.display()),
-                }
-            }
-        }
+        report.blob_days = self.shared.blobs.remove_days(|day| day_expired(day, reference, days));
         let expired: Vec<String> = self
             .mem()
             .invites
@@ -1327,6 +1899,7 @@ mod tests {
             StoreConfig {
                 retention_days,
                 min_free_mb: 0,
+                max_blob_bytes: 1 << 30,
             },
         )
         .unwrap()

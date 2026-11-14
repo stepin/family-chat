@@ -8,11 +8,11 @@
   import Onboarding from './screens/onboarding/Onboarding.svelte';
   import Main from './screens/Main.svelte';
 
-  /** Opens the chat a notification pointed to (by chat id; one account in M1). */
+  /** Opens the chat a notification pointed to (by chat id; one account in the interface). */
   function openChatById(chatId: string | null): void {
     const account = app.account;
     if (!chatId || !account || nav.root.name !== 'list') return;
-    const item = app.chats.find((c) => c.chatId === chatId);
+    const item = app.chatList.find((c) => c.chatId === chatId);
     nav.openChat(item?.accountId ?? account.id, chatId);
   }
 

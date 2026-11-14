@@ -6,7 +6,7 @@
 // subscription of a web app that receives pushes silently. The payload is
 // `{chatId, gseq}` (docs/API.md 6); names come from the local database
 // (read-only, plain IndexedDB, nothing is created or changed). Text is not
-// decrypted here in M1.
+// decrypted here. Group chats show the group name (docs/PLAN-v2.md 7.7).
 
 const DB_NAME = 'family-chat';
 const LOOKUP_TIMEOUT_MS = 3000;
@@ -29,26 +29,50 @@ function openExisting() {
   });
 }
 
-/** Family name and the other person's name for a chat id, as far as the database knows. */
+/**
+ * Family name and what to call the chat, as far as the database knows: the
+ * other person's name for a direct chat, the group name (from the verified
+ * state) for a group, "Избранное" for the chat with oneself.
+ */
 async function lookup(chatId) {
   const db = await openExisting();
   try {
     const names = ['accounts', 'chats', 'users'];
     if (!names.every((n) => db.objectStoreNames.contains(n))) return {};
-    const tx = db.transaction(names, 'readonly');
+    const withGroups = db.objectStoreNames.contains('groups');
+    const tx = db.transaction(withGroups ? [...names, 'groups'] : names, 'readonly');
     const chats = typeof chatId === 'string' ? await request(tx.objectStore('chats').index('chatId').getAll(chatId)) : [];
     const chat = chats[0];
     const accounts = await request(tx.objectStore('accounts').getAll());
     const account = chat ? accounts.find((a) => a.id === chat.accountId) : accounts.length === 1 ? accounts[0] : undefined;
     let peerName = null;
-    if (chat) {
+    let groupName = null;
+    let self = false;
+    if (chat && chat.kind === 'group') {
+      if (withGroups) {
+        const group = await request(tx.objectStore('groups').get([chat.accountId, chat.chatId]));
+        const name = group && group.state ? group.state.name : null;
+        groupName = typeof name === 'string' && name.length > 0 ? name : null;
+      }
+    } else if (chat && chat.kind === 'self') {
+      self = true;
+    } else if (chat) {
       const peer = await request(tx.objectStore('users').get([chat.accountId, chat.peerId]));
       peerName = peer && typeof peer.name === 'string' ? peer.name : null;
     }
-    return { familyName: account ? account.familyName : null, peerName };
+    return { familyName: account ? account.familyName : null, peerName, groupName, group: !!chat && chat.kind === 'group', self };
   } finally {
     db.close();
   }
+}
+
+/** Title and text of the notification (no message text: it is not decrypted here). */
+function describe(info) {
+  if (info.group) {
+    return { title: info.groupName || info.familyName || 'Family Chat', body: 'Новое сообщение в группе' };
+  }
+  if (info.self) return { title: info.familyName || 'Family Chat', body: 'Новая запись в «Избранном»' };
+  return { title: info.familyName || 'Family Chat', body: info.peerName ? `Новое сообщение от ${info.peerName}` : 'Новое сообщение' };
 }
 
 function withTimeout(promise, ms) {
@@ -95,8 +119,7 @@ self.addEventListener('push', (event) => {
       } catch {
         info = {};
       }
-      const title = info.familyName || 'Family Chat';
-      const body = info.peerName ? `Новое сообщение от ${info.peerName}` : 'Новое сообщение';
+      const { title, body } = describe(info);
       const url = new URL(chatId ? `./?chat=${chatId}` : './', scope).href;
       try {
         await self.registration.showNotification(title, {

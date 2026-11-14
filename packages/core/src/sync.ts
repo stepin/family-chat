@@ -22,7 +22,8 @@ export type ConnectionState =
   | { readonly kind: 'connected'; readonly since: number }
   | { readonly kind: 'offline'; readonly since: number }
   | { readonly kind: 'login-invalid' }
-  | { readonly kind: 'removed' }
+  /** Removed from the family, or (`reason: 'revoked'`) my identity was revoked. */
+  | { readonly kind: 'removed'; readonly reason?: 'removed' | 'revoked' }
   | { readonly kind: 'stopped' };
 
 export const EVENTS_PAGE_LIMIT = 500;
@@ -84,7 +85,7 @@ export class SyncEngine {
     while (this.#running) {
       const status = session.status.get();
       if (status === 'removed') {
-        this.#state.set({ kind: 'removed' });
+        this.#state.set(await this.#removedState());
         return;
       }
       if (status === 'login-invalid') {
@@ -111,8 +112,8 @@ export class SyncEngine {
       } catch (e) {
         this.#abort = undefined;
         if (!this.#running) break;
-        if (isCoreError(e, 'removed')) {
-          this.#state.set({ kind: 'removed' });
+        if (isCoreError(e, 'removed') || isCoreError(e, 'revoked')) {
+          this.#state.set(await this.#removedState());
           return;
         }
         if (isCoreError(e, 'login-invalid')) {
@@ -134,6 +135,11 @@ export class SyncEngine {
     }
   }
 
+  async #removedState(): Promise<ConnectionState> {
+    const row = await this.rt.ctx.db.accounts.get(this.rt.session.accountId).catch(() => undefined);
+    return row?.revoked ? { kind: 'removed', reason: 'revoked' } : { kind: 'removed', reason: 'removed' };
+  }
+
   /**
    * Verifies and stores one page of `GET /v1/events` together with its cursor.
    * Public for tests and for one-shot syncs (for example in a service worker).
@@ -146,9 +152,10 @@ export class SyncEngine {
       gap = {
         after,
         oldestGseq: page.oldestGseq,
-        firstTime: page.events[0]?.time ?? null,
+        firstTime: page.events[0]?.time ?? page.notices[0]?.time ?? null,
         firstSync,
         detectedAt: ctx.clock.now(),
+        oldestTime: page.oldestTime,
       };
       void ctx.diag.info(
         'sync',
@@ -156,15 +163,20 @@ export class SyncEngine {
         acc,
       );
     }
+    // Notices first: group states and keys they announce are needed to decrypt the events after them.
+    const targets = await this.rt.groups.handleNotices(page.notices);
+    if (targets.size > 0) await this.rt.groups.reconcile({ targets });
     const items = await decodeEvents(this.rt, page.events);
     if (page.cursor < after) {
       void ctx.diag.warn('sync', `server cursor went back from ${after} to ${page.cursor}`, acc);
     }
-    await commitEvents(ctx, acc, session.userId, items, {
+    const r = await commitEvents(ctx, acc, session.userId, items, {
       cursor: page.cursor,
+      oldest: { gseq: page.oldestGseq, time: page.oldestTime },
       ...(gap ? { retentionGap: gap } : {}),
       ...(firstSync && !page.more ? { initialSyncDone: true } : {}),
     });
+    if (r.attachments) this.rt.onAttachments?.();
   }
 
   /** One request without waiting (wait=0); returns whether more pages are pending. */

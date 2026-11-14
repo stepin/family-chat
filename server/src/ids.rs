@@ -110,6 +110,7 @@ id_type!(UserId, 16, "userId");
 id_type!(ChatId, 16, "chatId");
 id_type!(DevId, 10, "devId");
 id_type!(MsgId, 16, "msgId");
+id_type!(BlobId, 16, "blobId");
 
 impl UserId {
     /// `userId` = base32 of the first 16 bytes of SHA-256(signPub).

@@ -30,6 +30,12 @@ async fn hello_reports_server_info() {
     assert_eq!(j["familyName"], "Ивановы");
     assert_eq!(j["retentionDays"], 30);
     assert_eq!(j["maxFileMb"], 200);
+    assert_eq!(j["maxPartBytes"], 4 * 1024 * 1024 + 256);
+    assert_eq!(j["maxBlobBytes"], 200 * 1024 * 1024 + 64 * 1024);
+    assert_eq!(j["maxAvatarBytes"], 256 * 1024);
+    assert_eq!(j["maxStateBytes"], 256 * 1024);
+    assert_eq!(j["maxSealedKeyBytes"], 8192);
+    assert_eq!(j["maxGroupMembers"], 100);
     assert_eq!(j["push"], true);
     assert_eq!(j["m0"], false);
     let key = B64.decode(j["vapidPublicKey"].as_str().unwrap()).unwrap();
@@ -230,7 +236,7 @@ async fn serves_embedded_client() {
     let m = res.json();
     assert_eq!(m["display"], "standalone");
 
-    assert_eq!(get(&srv.url("/sw.js")).await.header("cache-control"), Some("no-cache"));
+    assert_eq!(get(&srv.url("/sw.js")).await.header("cache-control"), Some("no-store"));
     assert_eq!(get(&srv.url("/nope.txt")).await.status, 404);
     assert_eq!(get(&srv.url("/../server.json")).await.status, 404);
 }

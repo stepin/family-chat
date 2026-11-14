@@ -21,10 +21,10 @@ export class Fcd {
     return `http://127.0.0.1:${this.port}`;
   }
 
-  async start(familyName = 'Ивановы'): Promise<void> {
+  async start(familyName = 'Ивановы', extraArgs: readonly string[] = []): Promise<void> {
     const proc = spawn(
       FCD_BIN,
-      ['--data', this.data, '--listen', '127.0.0.1', '--port', '0', '--push', 'false', '--family-name', familyName],
+      ['--data', this.data, '--listen', '127.0.0.1', '--port', '0', '--push', 'false', '--family-name', familyName, ...extraArgs],
       { env: { ...process.env, NO_COLOR: '1', RUST_LOG: 'info' }, stdio: ['ignore', 'pipe', 'pipe'] },
     );
     this.#proc = proc;

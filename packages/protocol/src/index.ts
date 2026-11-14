@@ -1,4 +1,5 @@
-// @family-chat/protocol: identity, direct-chat keys, signed envelopes and encrypted events.
+// @family-chat/protocol: identity, direct chats, groups, signed envelopes, encrypted events,
+// attachments and the archive file.
 // Pure TypeScript, no I/O. Specification: docs/PROTOCOL.md. Not independently audited.
 
 export * from './constants.ts';
@@ -20,6 +21,8 @@ export {
   verifyProfileEnvelope,
   createAuthEnvelope,
   verifyAuthEnvelope,
+  createRevocationEnvelope,
+  verifyRevocationEnvelope,
   parseEnvelope,
   serializeEnvelope,
 } from './envelope.ts';
@@ -29,6 +32,9 @@ export type {
   Identity,
   Profile,
   Avatar,
+  AvatarRef,
+  AvatarType,
+  Revocation,
   ProfileInput,
   AuthInput,
   AuthRequest,
@@ -37,10 +43,22 @@ export type {
 export { deriveDmKeys, dmChatId } from './dm.ts';
 export type { ChatKeys, DmKeys } from './dm.ts';
 
-export { encodeMsgPayload, decodePayload } from './payload.ts';
+export {
+  encodeMsgPayload,
+  encodeEditPayload,
+  encodeDeletePayload,
+  encodeReactPayload,
+  decodePayload,
+  parsePayload,
+} from './payload.ts';
 export type {
   MsgRef,
   MsgInput,
+  EditInput,
+  DeleteInput,
+  ReactInput,
+  Location,
+  ParsedPayload,
   MsgPayload,
   EditPayload,
   DeletePayload,
@@ -51,3 +69,55 @@ export type {
 
 export { encodeEvent, decodeEvent, MAX_PAYLOAD_BYTES } from './event.ts';
 export type { EventContext, EncodeEventInput, DecodeEventInput, DecodedEvent } from './event.ts';
+
+export {
+  newBlob,
+  blobPartCount,
+  blobPartLength,
+  encryptBlobPart,
+  decryptBlobPart,
+  validateAttachment,
+  checkAttachmentInput,
+  IMAGE_TYPES,
+  VOICE_TYPES,
+} from './attachment.ts';
+export type { Attachment, AttachmentKind, BlobRef } from './attachment.ts';
+
+export {
+  groupChatId,
+  newGroupNonce,
+  newEpochSecret,
+  deriveGroupKeys,
+  verifyGroupState,
+  encryptGroupState,
+  openGroupState,
+  readGroupStateHeader,
+} from './group.ts';
+export type { GroupMember, GroupMemberInput, GroupTransfer, GroupState, GroupStateContext, StateBlobContext } from './group.ts';
+
+export { sealGroupKey, openGroupKey, verifyGroupKey, readGroupKey, parseSealedGroupKey } from './group-key.ts';
+export type { SealGroupKeyInput, GroupKeyHeader, OpenedGroupKey } from './group-key.ts';
+
+export {
+  createGroup,
+  renameGroup,
+  addGroupMembers,
+  removeGroupMembers,
+  transferGroupOwnership,
+  acceptGroupKey,
+  groupStateActions,
+  compareGroupMembers,
+} from './group-ops.ts';
+export type {
+  GroupChange,
+  SealedGroupKey,
+  CreateGroupInput,
+  RenameGroupInput,
+  AddGroupMembersInput,
+  RemoveGroupMembersInput,
+  TransferGroupOwnershipInput,
+  GroupStateActions,
+} from './group-ops.ts';
+
+export { createArchiveWriter, createArchiveReader, readArchive, ARCHIVE_HEADER_BYTES } from './archive.ts';
+export type { ArchiveWriter, ArchiveReader, ArchiveRecord, ArchiveKeySource } from './archive.ts';

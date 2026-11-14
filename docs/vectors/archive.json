@@ -1,0 +1,40 @@
+{
+  "note": "Test vectors for docs/PROTOCOL.md (M2). Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only. Users alice, bob and carol are the ones of identity.json.",
+  "rule": "header = \"FCA\" || 0x01 || salt(16) || check(16); archiveKey = HKDF(selfKey, \"fc/v1/archive\" || salt); check = HKDF(archiveKey, \"fc/v1/archive-check\")[0..16]; block i = AES-256-GCM(archiveKey, nonce = 8 zero bytes || u32 i, plaintext_i, AAD = header || u32 i || u8 last); plaintext = records u16 type || u32 len || data; blocks of 1 MiB plaintext, the last one shorter (possibly empty) and flagged",
+  "owner": "alice",
+  "small": {
+    "saltHex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "archiveKeyHex": "a35a66735af7cf00d1c3a4bff303d10f39ce0c599c0051c2f68facfb88ee709b",
+    "checkHex": "decda8e071f3d9d81901b0008f2795b1",
+    "records": [
+      {
+        "type": 1,
+        "dataHex": "7b22736572766572223a2271384a62336b5666307732587937486e5431735a3941227d"
+      },
+      {
+        "type": 2,
+        "dataHex": ""
+      },
+      {
+        "type": 3,
+        "dataHex": "0524436281a0bfdefd1c3b5a7998b7d6f51433527190afceed0c2b4a6988a7c6e504234261809fbeddfc1b3a597897b6d5f4133251708faecdec0b2a496887a6c5e4032241607f9ebddcfb1a39587796b5d4f31231506f8eadcceb0a29486786a5c4e302"
+      }
+    ],
+    "fileHex": "464341015a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5adecda8e071f3d9d81901b0008f2795b1a95effefa3b41f02d7b352c1677e97c7f740f75ba152f9591bda101b5394982eae83be5e281304f0885611b989038a0507115b3ec55be2735842e130f880d7847700d58909e2455bb54897f1495e8d14c33d49044e3589d128f5ecbf089721e73832fdd6f7dddb1dde9a5e59b4e75ea357583a79aa2e07efdc28c708d97d754be5cc87fab941b277ddf56da717c44ee1271c5fa4718c61522728d99510feda3d2712a8d2620d859018"
+  },
+  "twoBlocks": {
+    "saltHex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+    "record": {
+      "type": 1,
+      "length": 1049076,
+      "seed": 9,
+      "pattern": "byte j = (j * 31 + seed) mod 256"
+    },
+    "fileLength": 1049150,
+    "fileSha256": "9d2b8b1ceca88170297c81ba94d4699d7c28052bc255d571d96536ae583e0565",
+    "blockTagsHex": [
+      "0def1463b1443f7c990527ab0f1c51f8",
+      "c2e326667a1f1b324687b132cc574c2e"
+    ]
+  }
+}

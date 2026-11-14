@@ -186,6 +186,8 @@ describe('facade', () => {
     const report = await a.diagnosticsReport();
     expect(report).toContain('POST /v1/chats/{chatId}/events 200');
     expect(report).not.toContain('секретный');
+    // Background loops (sync, groups) would log new exchanges meanwhile.
+    await a.stop();
     await a.clearDiagnostics();
     expect(await a.diagnosticsReport()).toBe('');
   });
@@ -196,7 +198,8 @@ describe('facade', () => {
     await expect(a.send(accA.id, chat, '   ')).rejects.toSatisfy((e) => isCoreError(e, 'invalid-input'));
     await expect(a.send(accA.id, chat, 'я'.repeat(9000))).rejects.toSatisfy((e) => isCoreError(e, 'invalid-input'));
     await expect(a.send(accA.id, 'aaaaaaaaaaaaaaaaaaaaaaaaaa', 'x')).rejects.toSatisfy((e) => isCoreError(e, 'unknown-chat'));
-    await expect(a.openChat(accA.id, accA.userId)).rejects.toSatisfy((e) => isCoreError(e, 'self-chat'));
+    // Since M2 the chat with oneself exists ("Избранное").
+    expect(await a.openChat(accA.id, accA.userId)).toBe(accA.selfChatId);
     await expect(a.openChat(accA.id, 'aaaaaaaaaaaaaaaaaaaaaaaaaa')).rejects.toSatisfy((e) => isCoreError(e, 'unknown-user'));
     await expect(a.relogin('nope')).rejects.toSatisfy((e) => isCoreError(e, 'no-account'));
     await expect(a.retry(accA.id, 'nope')).rejects.toSatisfy((e) => isCoreError(e, 'invalid-input'));

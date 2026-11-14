@@ -1,26 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import Avatar from '../components/Avatar.svelte';
   import Icon from '../components/Icon.svelte';
   import NotificationSettings from '../components/NotificationSettings.svelte';
   import Page from '../components/Page.svelte';
   import { app } from '../lib/app.svelte.ts';
-  import { errorText } from '../lib/errors.ts';
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // Settings (docs/PLAN.md 8, screen 20, M1 subset).
+  // Settings (docs/PLAN.md screen 20): profile, notifications, recovery
+  // phrase, storage and archive, security, family and server, diagnostics.
   const account = $derived(app.account!);
   const me = $derived(app.members.find((m) => m.isMe));
-  const removed = $derived(account.status === 'removed');
-  let name = $state('');
-  let nameTouched = $state(false);
-  let saving = $state(false);
-  let nameError = $state<string | null>(null);
   let serverVersion = $state<string | null>(null);
-
-  $effect(() => {
-    if (!nameTouched && me?.name) name = me.name;
-  });
 
   onMount(() => {
     app.core
@@ -28,46 +20,16 @@
       .then((h) => (serverVersion = h.version))
       .catch(() => undefined);
   });
-
-  async function saveName(e: SubmitEvent): Promise<void> {
-    e.preventDefault();
-    saving = true;
-    nameError = null;
-    try {
-      await app.core.updateProfile(account.id, name.trim());
-      nameTouched = false;
-      app.notify(t.settings.nameSaved);
-    } catch (err) {
-      nameError = errorText(err);
-      app.log('warn', 'profile', 'profile update failed', err);
-    } finally {
-      saving = false;
-    }
-  }
 </script>
 
 <Page title={t.settings.title} onback={() => nav.back()}>
-  <section class="section" aria-labelledby="set-profile">
-    <h2 id="set-profile">{t.settings.profile}</h2>
-    <form class="stack" onsubmit={saveName} novalidate>
-      <div class="field">
-        <label for="set-name">{t.settings.nameLabel}</label>
-        <input
-          id="set-name"
-          class="input"
-          type="text"
-          maxlength="64"
-          autocomplete="given-name"
-          disabled={removed}
-          bind:value={name}
-          oninput={() => (nameTouched = true)}
-        />
-      </div>
-      {#if nameError}<p class="error-text" role="alert">{nameError}</p>{/if}
-      {#if nameTouched && name.trim() !== (me?.name ?? '')}
-        <button class="btn" type="submit" disabled={saving || name.trim() === '' || removed}>{t.common.save}</button>
-      {/if}
-    </form>
+  <section class="section links" aria-labelledby="set-profile">
+    <h2 id="set-profile" class="visually-hidden">{t.settings.profile}</h2>
+    <button class="item" type="button" onclick={() => nav.push({ name: 'profile' })}>
+      <Avatar accountId={account.id} userId={account.userId} name={me?.name ?? null} hasAvatar={!!me?.avatar} size={44} />
+      <span class="label">{t.settings.profile}<span class="sub">{me?.name ?? ''}</span></span>
+      <Icon name="chevron" size={20} />
+    </button>
   </section>
 
   <section class="section" aria-labelledby="set-notify">
@@ -78,6 +40,14 @@
   <section class="section links" aria-label={t.settings.title}>
     <button class="item" type="button" onclick={() => nav.push({ name: 'phrase' })}>
       <span class="label">{t.settings.phrase}<span class="sub">{t.phrase.status(app.flags.phraseConfirmed)}</span></span>
+      <Icon name="chevron" size={20} />
+    </button>
+    <button class="item" type="button" onclick={() => nav.push({ name: 'storage' })}>
+      <span class="label">{t.settings.storage}</span>
+      <Icon name="chevron" size={20} />
+    </button>
+    <button class="item" type="button" onclick={() => nav.push({ name: 'security' })}>
+      <span class="label">{t.settings.security}</span>
       <Icon name="chevron" size={20} />
     </button>
     <button class="item" type="button" onclick={() => nav.push({ name: 'server' })}>

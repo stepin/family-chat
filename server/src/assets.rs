@@ -96,8 +96,12 @@ impl Assets {
                 .into_response();
         };
 
+        // Hashed file names under assets/ never change; service worker
+        // scripts must always be fetched fresh.
         let cache = if rel.starts_with("assets/") {
             "public, max-age=31536000, immutable"
+        } else if rel.ends_with("sw.js") {
+            "no-store"
         } else {
             "no-cache"
         };
@@ -124,7 +128,6 @@ impl Assets {
             HeaderValue::from_str(&mime).unwrap_or(HeaderValue::from_static("application/octet-stream")),
         );
         h.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
-        h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
         if let Some(v) = found.etag.and_then(|e| HeaderValue::from_str(&e).ok()) {
             h.insert(header::ETAG, v);
         }

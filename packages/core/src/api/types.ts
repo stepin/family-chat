@@ -18,6 +18,13 @@ export interface Hello {
   readonly maxEventBytes: number;
   readonly adminCodeActive: boolean;
   readonly m0: boolean;
+  /** Limits (M2). Older servers do not send them; defaults from docs/API.md 1.7 are used. */
+  readonly maxPartBytes: number;
+  readonly maxBlobBytes: number;
+  readonly maxAvatarBytes: number;
+  readonly maxStateBytes: number;
+  readonly maxSealedKeyBytes: number;
+  readonly maxGroupMembers: number;
 }
 
 export type JoinCode = { readonly invite: string } | { readonly adminCode: string };
@@ -48,6 +55,8 @@ export interface UserEntry {
   readonly profile: SignedEnvelope | null;
   readonly admin: boolean;
   readonly removed: boolean;
+  /** Revocation envelope (M2), exactly as its owner sent it; null or absent when not revoked. */
+  readonly revoked?: SignedEnvelope | null;
 }
 
 export interface MeEntry extends UserEntry {
@@ -57,8 +66,12 @@ export interface MeEntry extends UserEntry {
 
 export interface ChatEntry {
   readonly chatId: string;
-  readonly kind: 'dm';
+  readonly kind: 'dm' | 'group';
   readonly members: readonly string[];
+  /** Group owner; null for a direct chat. */
+  readonly owner: string | null;
+  /** Group state version; null for a direct chat. */
+  readonly version: number | null;
   readonly epoch: number;
   readonly createdAt: number;
   readonly lastGseq: number | null;
@@ -90,12 +103,54 @@ export interface ServerEvent {
   readonly body: Uint8Array;
 }
 
+/** A server notice (docs/API.md 7): unencrypted, written by the server itself. */
+export interface ServerNotice {
+  readonly gseq: number;
+  readonly time: number;
+  readonly chatId: string;
+  /** `type` and the public fields, as the server sent them (unknown types are kept as is). */
+  readonly notice: NoticeBody;
+}
+
+export type NoticeBody =
+  | {
+      readonly type: 'group_created';
+      readonly by: string;
+      readonly owner: string;
+      readonly members: readonly string[];
+      readonly version: number;
+      readonly epoch: number;
+    }
+  | {
+      readonly type: 'group_state';
+      readonly by: string;
+      readonly owner: string;
+      readonly members: readonly string[];
+      readonly version: number;
+      readonly epoch: number;
+      readonly added: readonly string[];
+      readonly removed: readonly string[];
+    }
+  | {
+      readonly type: 'member_left';
+      readonly userId: string;
+      readonly members: readonly string[];
+      readonly version: number;
+      readonly epoch: number;
+    }
+  | { readonly type: 'member_removed' | 'member_revoked'; readonly userId: string };
+
 export interface EventsPage {
+  /** Encrypted events of members (`kind: "event"`). */
   readonly events: readonly ServerEvent[];
+  /** Server notices of known types (`kind: "notice"`); unknown ones are dropped. */
+  readonly notices: readonly ServerNotice[];
   /** `GET /v1/events`: the next `after`; history: the oldest gseq in the page. */
   readonly cursor: number;
   readonly more: boolean;
   readonly oldestGseq: number;
+  /** Server time of the oldest record still on the server; null when the log is empty or unknown. */
+  readonly oldestTime: number | null;
 }
 
 export interface EventsQuery {
@@ -146,6 +201,8 @@ export interface AdminUser {
   readonly admin: boolean;
   readonly removed: boolean;
   readonly removedAt: number | null;
+  readonly revoked: boolean;
+  readonly revokedAt: number | null;
   readonly devices: readonly AdminDevice[];
 }
 
@@ -160,6 +217,78 @@ export interface ServerStats {
   readonly users: number;
   readonly removedUsers: number;
   readonly chats: number;
+  readonly groups: number;
   readonly retentionDays: number;
   readonly push: boolean;
+}
+
+// ---- M2 ----
+
+export interface SealedKeyEntry {
+  readonly userId: string;
+  /** Serialized `group-key` envelope (opaque for the server). */
+  readonly key: string;
+}
+
+export interface CreateGroupRequest {
+  readonly chatId: string;
+  /** Encrypted state blob of version 1. */
+  readonly state: Uint8Array;
+  readonly members: readonly string[];
+  readonly epoch: number;
+  readonly keys: readonly SealedKeyEntry[];
+}
+
+export interface ChangeGroupRequest {
+  readonly baseVersion: number;
+  readonly state: Uint8Array;
+  readonly members: readonly string[];
+  readonly owner: string;
+  readonly epoch: number;
+  readonly keys: readonly SealedKeyEntry[];
+}
+
+export interface KeyEntry {
+  readonly n: number;
+  readonly chatId: string;
+  readonly epoch: number;
+  readonly version: number;
+  readonly time: number;
+  readonly key: string;
+}
+
+export interface KeysPage {
+  readonly keys: readonly KeyEntry[];
+  readonly cursor: number;
+  readonly more: boolean;
+}
+
+export interface AvatarUpload {
+  readonly sha256: string;
+  readonly type: 'image/jpeg' | 'image/webp';
+}
+
+export interface BlobPartResult {
+  readonly blobId: string;
+  readonly part: number;
+  readonly size: number;
+  readonly total: number;
+}
+
+export interface BlobInfo {
+  readonly blobId: string;
+  readonly owner: string;
+  readonly createdAt: number;
+  readonly parts: readonly { readonly part: number; readonly size: number }[];
+  readonly total: number;
+  readonly maxBytes: number;
+}
+
+/** `POST /v1/invites/check`. `createdBy.name` is an unverified hint until the signed profile arrives. */
+export interface InviteCheck {
+  readonly status: 'valid' | 'used' | 'expired';
+  readonly familyName: string;
+  readonly createdBy: { readonly userId: string; readonly name: string | null };
+  readonly createdAt: number;
+  readonly expiresAt: number;
 }

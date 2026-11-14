@@ -111,6 +111,7 @@
       </div>
       {#if error}<p class="error-text" role="alert">{error}</p>{/if}
       <button class="btn block" type="submit" disabled={busy || where.trim() === ''}>{t.common.next}</button>
+      <button class="link-btn revoke" type="button" onclick={() => nav.push({ name: 'revoke-phrase' })}>{t.security.byPhraseLink}</button>
     </form>
   {:else if step === 'phrase'}
     <form class="stack" onsubmit={restore} novalidate>
@@ -151,3 +152,9 @@
     </div>
   {/if}
 </Page>
+
+<style>
+  .revoke {
+    align-self: center;
+  }
+</style>

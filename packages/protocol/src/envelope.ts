@@ -8,6 +8,7 @@ import {
   DEV_ID_BYTES,
   MAX_ENVELOPE_PAYLOAD_BYTES,
   MAX_NAME_CHARS,
+  MAX_STATE_PAYLOAD_BYTES,
   PROTOCOL_VERSION,
   PUBLIC_KEY_BYTES,
   SIGNATURE_BYTES,
@@ -25,7 +26,7 @@ import {
 } from './json.ts';
 import { checkSignPub, sign, userIdFromSignPub, verify, type IdentityKeys } from './keys.ts';
 
-export type EnvelopeKind = 'identity' | 'profile' | 'auth';
+export type EnvelopeKind = 'identity' | 'profile' | 'auth' | 'revoked' | 'group-state' | 'group-key';
 
 export interface SignedEnvelope {
   readonly payload: string;
@@ -41,9 +42,18 @@ export interface Identity {
   readonly envelope: SignedEnvelope;
 }
 
-export type Avatar = null | Readonly<Record<string, unknown>>;
+/** Reference to an avatar image uploaded with PUT /me/avatar: SHA-256 of the file and its type. */
+export interface AvatarRef {
+  /** base64url (no padding) of the 32-byte SHA-256 of the image file. */
+  readonly sha256: string;
+  readonly type: AvatarType;
+}
+export type AvatarType = 'image/jpeg' | 'image/webp';
+export const AVATAR_TYPES: readonly AvatarType[] = ['image/jpeg', 'image/webp'];
 
-/** A verified profile. `avatar` is always null in M1; its object form is defined in M2. */
+export type Avatar = null | AvatarRef;
+
+/** A verified profile. */
 export interface Profile {
   readonly userId: string;
   readonly name: string;
@@ -62,13 +72,32 @@ export interface AuthRequest {
   readonly envelope: SignedEnvelope;
 }
 
+/** A verified identity revocation: the owner of the key declares it no longer valid. */
+export interface Revocation {
+  readonly userId: string;
+  readonly revokedAt: number;
+  readonly envelope: SignedEnvelope;
+}
+
 export function envelopeSigningInput(kind: EnvelopeKind, payload: Uint8Array): Bytes {
   return concat(utf8(`fc/v1/${kind}\n`), payload);
 }
 
+/** Largest payload of an envelope kind; group states carry member lists and get more room. */
+export function maxPayloadBytes(kind: EnvelopeKind): number {
+  return kind === 'group-state' ? MAX_STATE_PAYLOAD_BYTES : MAX_ENVELOPE_PAYLOAD_BYTES;
+}
+
+/** Sign exact payload bytes. Internal: used by the group modules. */
+export function sealBytes(kind: EnvelopeKind, bytes: Uint8Array, keys: IdentityKeys): SignedEnvelope {
+  if (bytes.length > maxPayloadBytes(kind)) throw new ProtocolError('too-large', `${kind} payload is too large`);
+  const sig = sign(envelopeSigningInput(kind, bytes), keys.signSecret);
+  return { payload: base64urlEncode(bytes), sig: base64urlEncode(sig) };
+}
+
 function seal(kind: EnvelopeKind, payload: JsonObject, keys: IdentityKeys): SignedEnvelope {
   const bytes = utf8(JSON.stringify(payload));
-  if (bytes.length > MAX_ENVELOPE_PAYLOAD_BYTES) throw new ProtocolError('too-large', `${kind} payload is too large`);
+  if (bytes.length > maxPayloadBytes(kind)) throw new ProtocolError('too-large', `${kind} payload is too large`);
   const sig = sign(envelopeSigningInput(kind, bytes), keys.signSecret);
   return { payload: base64urlEncode(bytes), sig: base64urlEncode(sig) };
 }
@@ -96,20 +125,31 @@ export function parseEnvelope(input: unknown): SignedEnvelope {
   return { payload: value.payload, sig: value.sig };
 }
 
-interface Opened {
+export interface Opened {
   env: SignedEnvelope;
   bytes: Bytes;
   sig: Bytes;
   json: JsonObject;
 }
 
+/** Shape, size and version of an envelope; no signature check. Internal. */
+export function openEnvelope(input: unknown, kind: EnvelopeKind): Opened {
+  return open(input, kind);
+}
+
+/** Signature check over the received bytes. Internal. */
+export function checkEnvelopeSignature(o: Opened, kind: EnvelopeKind, signPub: Uint8Array): void {
+  checkSig(o, kind, signPub);
+}
+
 function open(input: unknown, kind: EnvelopeKind): Opened {
   const env = parseEnvelope(input);
   // base64url of MAX bytes is at most ceil(MAX * 4 / 3) characters; check before decoding.
-  if (env.payload.length > Math.ceil((MAX_ENVELOPE_PAYLOAD_BYTES * 4) / 3)) {
+  if (env.payload.length > Math.ceil((maxPayloadBytes(kind) * 4) / 3)) {
     throw new ProtocolError('too-large', `${kind} payload is too large`);
   }
   const bytes = base64urlDecode(env.payload);
+  if (bytes.length > maxPayloadBytes(kind)) throw new ProtocolError('too-large', `${kind} payload is too large`);
   const sig = base64urlDecodeExact(env.sig, SIGNATURE_BYTES, `${kind} sig`);
   const json = parseJsonObject(bytes, `${kind} payload`);
   const v = json.v;
@@ -182,6 +222,23 @@ export interface ProfileInput {
   readonly name: string;
   readonly rev: number;
   readonly updated?: number;
+  /** Avatar reference; null or absent means no avatar. */
+  readonly avatar?: AvatarRef | null;
+}
+
+/** Problem with an avatar reference, or undefined if it is valid (exactly the keys sha256 and type). */
+function avatarProblem(a: unknown): string | undefined {
+  if (a === null) return undefined;
+  if (!isObject(a)) return 'avatar must be null or an object';
+  const keys = Object.keys(a);
+  if (keys.length !== 2 || !('sha256' in a) || !('type' in a)) return 'avatar must have exactly "sha256" and "type"';
+  try {
+    base64urlDecodeExact(a.sha256, 32, 'avatar sha256');
+  } catch {
+    return 'avatar sha256 must be base64url of 32 bytes';
+  }
+  if (!AVATAR_TYPES.includes(a.type as AvatarType)) return 'avatar type must be image/jpeg or image/webp';
+  return undefined;
 }
 
 export function createProfileEnvelope(keys: IdentityKeys, input: ProfileInput): SignedEnvelope {
@@ -195,11 +252,11 @@ export function createProfileEnvelope(keys: IdentityKeys, input: ProfileInput): 
   if (!Number.isSafeInteger(updated) || updated < 0) {
     throw new ProtocolError('invalid-argument', 'updated must be a non-negative integer (ms)');
   }
-  return seal(
-    'profile',
-    { v: PROTOCOL_VERSION, userId: keys.userId, name, avatar: null, rev: input.rev, updated },
-    keys,
-  );
+  const avatarIn = input.avatar ?? null;
+  const ap = avatarProblem(avatarIn);
+  if (ap) throw new ProtocolError('invalid-argument', ap);
+  const avatar = avatarIn === null ? null : { sha256: avatarIn.sha256, type: avatarIn.type };
+  return seal('profile', { v: PROTOCOL_VERSION, userId: keys.userId, name, avatar, rev: input.rev, updated }, keys);
 }
 
 /** Verify a profile envelope against the owner's verified identity. */
@@ -209,8 +266,11 @@ export function verifyProfileEnvelope(input: unknown, identity: Identity): Profi
   const name = requireString(o.json, 'name', 'profile');
   const problem = nameProblem(name, MAX_NAME_CHARS);
   if (problem) throw malformed(`profile: ${problem}`);
-  const avatar = o.json.avatar;
-  if (avatar !== null && !isObject(avatar)) throw malformed('profile: avatar must be null or an object');
+  const avatarIn = o.json.avatar;
+  const ap = avatarProblem(avatarIn);
+  if (ap) throw malformed(`profile: ${ap}`);
+  const avatar: Avatar =
+    avatarIn === null ? null : { sha256: (avatarIn as AvatarRef).sha256, type: (avatarIn as AvatarRef).type };
   const rev = requireUint(o.json, 'rev', 'profile');
   const updated = requireUint(o.json, 'updated', 'profile');
   if (userId !== identity.userId) {
@@ -259,4 +319,27 @@ export function verifyAuthEnvelope(
     if (!same) throw new ProtocolError('context-mismatch', 'auth serverId or nonce does not match');
   }
   return { userId, serverId, nonce, devId, envelope: o.env };
+}
+
+// ---- revoked ----
+
+/**
+ * Revoke an identity: signed by the identity itself, so only the holder of the key can revoke it.
+ * Clients stop trusting the identity from `revokedAt` on (PROTOCOL.md 4.5).
+ */
+export function createRevocationEnvelope(keys: IdentityKeys, revokedAt: number = Date.now()): SignedEnvelope {
+  if (!Number.isSafeInteger(revokedAt) || revokedAt < 0) {
+    throw new ProtocolError('invalid-argument', 'revokedAt must be a non-negative integer (ms)');
+  }
+  return seal('revoked', { v: PROTOCOL_VERSION, userId: keys.userId, revokedAt }, keys);
+}
+
+/** Verify a revocation against the revoked user's verified identity. */
+export function verifyRevocationEnvelope(input: unknown, identity: Identity): Revocation {
+  const o = open(input, 'revoked');
+  const userId = checkUserId(o.json.userId, 'revoked');
+  const revokedAt = requireUint(o.json, 'revokedAt', 'revoked');
+  if (userId !== identity.userId) throw new ProtocolError('user-id-mismatch', 'revocation belongs to another user');
+  checkSig(o, 'revoked', identity.signPub);
+  return { userId, revokedAt, envelope: o.env };
 }

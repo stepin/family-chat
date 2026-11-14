@@ -78,7 +78,7 @@ describe('unknown kinds and versions', () => {
 
   it('non-critical unknown kind is ignored', () => {
     expect(decodePayload(json({ v: 1, t: 'typing', id, crit: false }))).toEqual({ kind: 'ignore', t: 'typing', id });
-    expect(decodePayload(json({ v: 1, t: 'react', id, dev, seq: 2 }))).toMatchObject({ kind: 'ignore', t: 'react' });
+    expect(decodePayload(json({ v: 2, t: 'react', id, dev, seq: 2 }))).toMatchObject({ kind: 'ignore', t: 'react' });
   });
 
   it('a newer version of msg follows the crit rule', () => {

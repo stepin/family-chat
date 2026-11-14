@@ -35,8 +35,10 @@ export function groupByDay(messages: readonly MessageView[], now: number): FeedI
       lastDay = day;
       lastSender = null;
     }
-    out.push({ kind: 'message', key: m.key, message: m, continued: lastSender === m.senderId });
-    lastSender = m.senderId;
+    // Service lines stand alone and break a run of one author.
+    const service = m.kind === 'service';
+    out.push({ kind: 'message', key: m.key, message: m, continued: !service && lastSender === m.senderId });
+    lastSender = service ? null : m.senderId;
   }
   return out;
 }

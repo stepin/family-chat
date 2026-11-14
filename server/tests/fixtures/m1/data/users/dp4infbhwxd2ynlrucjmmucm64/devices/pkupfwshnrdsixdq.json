@@ -1,0 +1,11 @@
+{
+  "tokenHash": "7dca6f19d5816a2e453efa3763267c8972b91c7e02d0a61dd62abc0932f07975",
+  "createdAt": 1794659568361,
+  "push": {
+    "endpoint": "https://push.example.net/x",
+    "keys": {
+      "p256dh": "BAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      "auth": "BQUFBQUFBQUFBQUFBQUFBQ"
+    }
+  }
+}

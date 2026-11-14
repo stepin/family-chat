@@ -7,10 +7,20 @@
 // keyed by `accountId` first.
 
 import { Dexie, type Table } from 'dexie';
-import type { MsgRef, SignedEnvelope } from '@family-chat/protocol';
+import type {
+  Attachment,
+  AttachmentKind,
+  AvatarRef,
+  BlobRef,
+  GroupState,
+  Location,
+  MsgRef,
+  SignedEnvelope,
+} from '@family-chat/protocol';
+import type { NoticeBody, ServerEvent } from '../api/types.ts';
 
 export const DEFAULT_DB_NAME = 'family-chat';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
 export type AccountStatus = 'active' | 'login-invalid' | 'removed';
 
@@ -24,6 +34,8 @@ export interface RetentionGap {
   readonly firstTime: number | null;
   /** True when the gap was met on the first sync of this device (expected). */
   readonly firstSync: boolean;
+  /** Server time of the oldest record still on the server (M2 `oldestTime`); null when unknown. */
+  readonly oldestTime?: number | null;
   /** Local time of detection. */
   readonly detectedAt: number;
 }
@@ -52,6 +64,24 @@ export interface AccountRow {
   pushRegistered: boolean;
   createdAt: number;
   lastSyncAt: number | null;
+  // ---- added in version 2 (absent in rows written by M1 until the upgrade runs) ----
+  /** Cursor of `GET /v1/keys`. */
+  keysCursor?: number;
+  /** Oldest record still on the server, from the last events page. */
+  oldest?: { gseq: number; time: number | null } | null;
+  /** The identity was revoked (status is then 'removed'). */
+  revoked?: boolean;
+  /** Server limits from `/v1/hello` (M2). */
+  limits?: ServerLimits | null;
+}
+
+export interface ServerLimits {
+  readonly maxFileMb: number;
+  readonly maxPartBytes: number;
+  readonly maxBlobBytes: number;
+  readonly maxAvatarBytes: number;
+  readonly maxGroupMembers: number;
+  readonly fetchedAt: number;
 }
 
 export interface IdentityRow {
@@ -79,6 +109,13 @@ export interface UserRow {
    * keys stay in force until the person accepts the change.
    */
   keyChange: { identity: SignedEnvelope; detectedAt: number } | null;
+  // ---- version 2 ----
+  /** Avatar reference from the verified profile. */
+  avatar?: AvatarRef | null;
+  /** Verified revocation: remembered forever, even if the server drops it later. */
+  revoked?: { revokedAt: number; envelope: SignedEnvelope; detectedAt: number } | null;
+  /** Fingerprint the person confirmed as verified (local mark); compared with the current keys. */
+  verifiedFingerprint?: string | null;
 }
 
 export interface LastMessage {
@@ -90,11 +127,14 @@ export interface LastMessage {
   time: number;
 }
 
+export type ChatKind = 'dm' | 'self' | 'group';
+
 export interface ChatRow {
   accountId: string;
   chatId: string;
-  kind: 'dm';
-  /** The other member of the direct chat. */
+  /** 'dm' with another member, 'self' ("Избранное", peerId is me), 'group' (peerId is ''). */
+  kind: ChatKind;
+  /** The other member of the direct chat (me for 'self', '' for a group). */
   peerId: string;
   /** Local time when the chat appeared on this device. */
   createdAt: number;
@@ -118,7 +158,20 @@ export interface EventRow {
   body: Uint8Array;
 }
 
-export type MessageKind = 'msg' | 'update-required';
+/** 'service': an entry derived from group states or server notices (no sender, no text). */
+export type MessageKind = 'msg' | 'update-required' | 'service';
+
+/** What a service entry in a group says (rendered by the UI). */
+export type ServiceEntry =
+  | { readonly type: 'created'; readonly by: string; readonly name: string; readonly members: readonly string[] }
+  | { readonly type: 'renamed'; readonly by: string; readonly name: string }
+  | { readonly type: 'added'; readonly by: string; readonly userIds: readonly string[] }
+  | { readonly type: 'joined'; readonly by: string }
+  | { readonly type: 'left'; readonly userId: string }
+  | { readonly type: 'removed'; readonly by: string; readonly userIds: readonly string[] }
+  | { readonly type: 'owner'; readonly by: string; readonly userId: string }
+  | { readonly type: 'you-removed' }
+  | { readonly type: 'you-left' };
 
 /** A message derived from a verified event. */
 export interface MessageRow {
@@ -134,6 +187,12 @@ export interface MessageRow {
   /** Markdown text; empty for `update-required` and for a msg without body. */
   body: string;
   reply: MsgRef | null;
+  // ---- version 2 ----
+  /** Validated attachment descriptors (contain the file keys: secrets). */
+  attachments?: Attachment[];
+  location?: Location;
+  fwd?: true;
+  service?: ServiceEntry;
 }
 
 export type OutboxStatus = 'pending' | 'failed';
@@ -154,6 +213,11 @@ export interface OutboxRow {
   createdAt: number;
   /** Error code of the last failure (ApiError code or a core code), no text. */
   error: string | null;
+  // ---- version 2 ----
+  /** Attachment descriptors; the message is sent once all their uploads are done. */
+  attachments?: Attachment[];
+  location?: Location;
+  fwd?: true;
 }
 
 /** Next `seq` of this device in a chat. */
@@ -197,6 +261,147 @@ export interface SettingRow {
   value: unknown;
 }
 
+// ---- version 2: groups ----
+
+export interface GroupRow {
+  accountId: string;
+  chatId: string;
+  /** Latest verified signed state; null until the first one is accepted. */
+  state: GroupState | null;
+  /** Delivery data from the server (GET /v1/chats or the last notice). */
+  server: { version: number; epoch: number; owner: string | null; members: string[] } | null;
+  /** I am a member (as far as this device knows). */
+  member: boolean;
+  /** Why I am no longer a member. */
+  left: { reason: 'left' | 'removed'; at: number } | null;
+  /** A sealed key for a state is missing (waiting for it). */
+  needKey: boolean;
+  /** A verification failure stopped progress (code only). */
+  broken: string | null;
+  createdAt: number;
+}
+
+export interface GroupStateRow {
+  accountId: string;
+  chatId: string;
+  version: number;
+  epoch: number;
+  state: GroupState;
+}
+
+/** Epoch secret of a group: a secret. */
+export interface EpochKeyRow {
+  accountId: string;
+  chatId: string;
+  epoch: number;
+  secret: Uint8Array;
+  /** State version the secret was accepted with. */
+  stateVersion: number;
+}
+
+/** A sealed key from GET /v1/keys, kept until processed (and afterwards, for restore and archive). */
+export interface SealedKeyRow {
+  accountId: string;
+  n: number;
+  chatId: string;
+  epoch: number;
+  version: number;
+  time: number;
+  key: string;
+  done: boolean;
+}
+
+export type GroupOp =
+  | { readonly type: 'create'; readonly name: string; readonly members: readonly string[] }
+  | { readonly type: 'rename'; readonly name: string }
+  | { readonly type: 'add'; readonly userIds: readonly string[]; readonly history: boolean }
+  | { readonly type: 'remove'; readonly userIds: readonly string[]; readonly auto?: boolean }
+  | { readonly type: 'transfer'; readonly to: string };
+
+/** A group change written locally before it is sent (holds the new epoch secret). */
+export interface GroupPendingRow {
+  accountId: string;
+  chatId: string;
+  op: GroupOp;
+  /** null for create. */
+  baseVersion: number | null;
+  state: GroupState;
+  blob: Uint8Array;
+  secret: Uint8Array;
+  newEpoch: boolean;
+  keys: { userId: string; key: string }[];
+  createdAt: number;
+  attempts: number;
+  error: string | null;
+}
+
+export interface NoticeRow {
+  accountId: string;
+  gseq: number;
+  time: number;
+  chatId: string;
+  notice: NoticeBody;
+}
+
+/** An event that could not be decrypted yet (group key or state missing); retried later. */
+export interface PendingEventRow {
+  accountId: string;
+  gseq: number;
+  chatId: string;
+  event: ServerEvent;
+  addedAt: number;
+  attempts: number;
+}
+
+// ---- version 2: attachments and avatars ----
+
+/** 'none': not downloaded; 'queued'/'active': transfer pending or running; 'done': the file is on this device. */
+export type BlobStatus = 'none' | 'queued' | 'active' | 'done' | 'failed' | 'cancelled' | 'gone';
+
+export interface BlobRow {
+  accountId: string;
+  blobId: string;
+  direction: 'up' | 'down';
+  chatId: string;
+  /** Message carrying the attachment (sender and id). */
+  senderId: string;
+  msgId: string;
+  /** The descriptor's blob reference (holds the file key: a secret). */
+  ref: BlobRef;
+  name: string;
+  mime: string;
+  kind: AttachmentKind;
+  size: number;
+  status: BlobStatus;
+  /** Bytes transferred so far (plaintext). */
+  bytesDone: number;
+  /** Download: parts written so far (0..parts). */
+  partsDone: number;
+  attempts: number;
+  nextAttemptAt: number;
+  error: string | null;
+  /** Where the plaintext copy lives. */
+  storage: 'opfs' | 'idb' | null;
+  createdAt: number;
+}
+
+/** One 4 MiB chunk of a file kept in IndexedDB (the fallback file store). */
+export interface FileChunkRow {
+  key: string;
+  index: number;
+  /** A Blob where the platform can store one in IndexedDB, else the bytes. */
+  data: Blob | Uint8Array;
+}
+
+export interface AvatarRow {
+  accountId: string;
+  userId: string;
+  sha256: string;
+  type: 'image/jpeg' | 'image/webp';
+  bytes: Uint8Array;
+  fetchedAt: number;
+}
+
 /** Fallback cross-context lock (when Web Locks are unavailable). */
 export interface LeaseRow {
   name: string;
@@ -224,6 +429,16 @@ export class CoreDb extends Dexie {
   diagnostics!: Table<DiagnosticRow, number>;
   settings!: Table<SettingRow, string>;
   leases!: Table<LeaseRow, string>;
+  groups!: Table<GroupRow, [string, string]>;
+  groupStates!: Table<GroupStateRow, [string, string, number]>;
+  epochKeys!: Table<EpochKeyRow, [string, string, number]>;
+  sealedKeys!: Table<SealedKeyRow, [string, number]>;
+  groupPending!: Table<GroupPendingRow, [string, string]>;
+  notices!: Table<NoticeRow, [string, number]>;
+  pendingEvents!: Table<PendingEventRow, [string, number]>;
+  blobs!: Table<BlobRow, [string, string]>;
+  fileChunks!: Table<FileChunkRow, [string, number]>;
+  avatars!: Table<AvatarRow, [string, string]>;
 
   constructor(name: string = DEFAULT_DB_NAME, deps: DbDeps = {}) {
     super(name, deps.indexedDB ? { indexedDB: deps.indexedDB, IDBKeyRange: deps.IDBKeyRange } : undefined);
@@ -244,6 +459,31 @@ export class CoreDb extends Dexie {
       settings: 'key',
       leases: 'name',
     });
+    // Version 2 (M2): groups, notices, attachments, avatars. Only additions.
+    this.version(2)
+      .stores({
+        groups: '[accountId+chatId], accountId',
+        groupStates: '[accountId+chatId+version], [accountId+chatId]',
+        epochKeys: '[accountId+chatId+epoch], [accountId+chatId]',
+        sealedKeys: '[accountId+n], [accountId+chatId]',
+        groupPending: '[accountId+chatId], accountId',
+        notices: '[accountId+gseq], [accountId+chatId]',
+        pendingEvents: '[accountId+gseq], [accountId+chatId], accountId',
+        blobs: '[accountId+blobId], accountId, [accountId+msgId], status',
+        fileChunks: '[key+index], key',
+        avatars: '[accountId+userId], accountId',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('accounts')
+          .toCollection()
+          .modify((a: AccountRow) => {
+            a.keysCursor ??= 0;
+            a.oldest ??= null;
+            a.revoked ??= false;
+            a.limits ??= null;
+          });
+      });
   }
 }
 

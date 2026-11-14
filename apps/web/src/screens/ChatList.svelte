@@ -1,25 +1,34 @@
 <script lang="ts">
-  import type { ChatListItem, Member } from '@family-chat/core';
+  import type { ChatSummary, Member } from '@family-chat/core';
+  import Avatar from '../components/Avatar.svelte';
   import Icon from '../components/Icon.svelte';
   import StatusLine from '../components/StatusLine.svelte';
   import { app } from '../lib/app.svelte.ts';
   import { formatListTime } from '../lib/format.ts';
+  import { displayNames } from '../lib/names.ts';
   import { nav } from '../lib/nav.svelte.ts';
   import { enableNotifications, notifyEnv, notifyState } from '../lib/push.ts';
+  import { archiveReminder, type Reminder } from '../lib/storage.ts';
   import { t } from '../lib/strings.ts';
 
-  // Chat list (docs/PLAN.md 8.3): status line, chats with name and time,
-  // last message and counter; marks for drafts and failed sends.
+  // Chat list (docs/PLAN.md 8.3): status line, "Избранное" pinned first,
+  // then groups and direct chats by time; avatars, member counts, marks for
+  // drafts, failed sends and failed uploads.
   const account = $derived(app.account!);
-  const chats = $derived(app.chats.filter((c) => c.accountId === account.id));
+  const chats = $derived(app.chatList.filter((c) => c.accountId === account.id));
+  const otherChats = $derived(chats.filter((c) => c.kind !== 'self'));
   const failedByChat = $derived.by(() => {
     const m = new Set<string>();
     for (const o of app.outbox) if (o.status === 'failed') m.add(`${o.accountId}/${o.chatId}`);
+    for (const x of app.transfers) if (x.direction === 'up' && x.status === 'failed') m.add(`${x.accountId}/${x.chatId}`);
     return m;
   });
-  const others = $derived(app.members.filter((m) => !m.isMe && !m.removed));
+  const others = $derived(app.members.filter((m) => !m.isMe && !m.removed && !m.revoked));
+  const memberById = $derived(new Map(app.members.map((m) => [m.userId, m])));
+  const names = $derived(displayNames(app.members.filter((m) => !m.isMe), t.common.unknownName));
   const removed = $derived(account.status === 'removed' || app.connection[account.id]?.kind === 'removed');
   const openChatId = $derived(nav.top.name === 'chat' ? nav.top.chatId : null);
+  const groupSizes = $state<Record<string, number>>({});
 
   let now = $state(Date.now());
   $effect(() => {
@@ -27,14 +36,56 @@
     return () => clearInterval(timer);
   });
 
+  // Member counts of groups (from the verified signed state); re-subscribed only when the set of groups changes.
+  const groupIds = $derived(
+    chats
+      .filter((c) => c.kind === 'group')
+      .map((c) => c.chatId)
+      .join(' '),
+  );
+  $effect(() => {
+    const accountId = account.id;
+    const unsubs = groupIds
+      .split(' ')
+      .filter((id) => id.length > 0)
+      .map((chatId) =>
+        app.core.group(accountId, chatId).subscribe((g) => {
+          if (g) groupSizes[chatId] = g.members.length;
+        }),
+      );
+    return () => unsubs.forEach((u) => u());
+  });
+
   let notifyEnvNow = $state(notifyEnv());
   const pushState = $derived(notifyState(notifyEnvNow, app.platform, account));
   const offerNotify = $derived(
-    app.flagsLoaded && !app.flags.notifyDismissed && !removed && pushState === 'off' && chats.some((c) => c.lastMessage),
+    app.flagsLoaded && !app.flags.notifyDismissed && !removed && pushState === 'off' && otherChats.some((c) => c.lastMessage),
   );
   const phraseReminder = $derived(
     app.flagsLoaded && !app.flags.phraseConfirmed && !removed && (account.admin || app.flags.phraseOffered),
   );
+
+  // The archive reminder (docs/PLAN-v2.md 8): once every 30 days, loudly when storage is not persistent.
+  let reminder = $state<Reminder>('none');
+  async function checkReminder(): Promise<void> {
+    let firstSeen = await app.getValue<number>('firstSeen');
+    if (typeof firstSeen !== 'number') {
+      firstSeen = Date.now();
+      await app.setValue('firstSeen', firstSeen);
+    }
+    const lastExport = (await app.getValue<number>('lastExport')) ?? null;
+    const snoozedAt = (await app.getValue<number>('archiveSnoozed')) ?? null;
+    reminder = archiveReminder({ now: Date.now(), persisted: app.persisted, lastExport, snoozedAt, firstSeen });
+  }
+  $effect(() => {
+    void app.persisted;
+    void checkReminder();
+  });
+
+  async function snoozeReminder(): Promise<void> {
+    reminder = 'none';
+    await app.setValue('archiveSnoozed', Date.now());
+  }
 
   async function turnOnNotifications(): Promise<void> {
     try {
@@ -56,15 +107,40 @@
     }
   }
 
-  function preview(c: ChatListItem): string {
-    const last = c.lastMessage;
-    if (!last) return t.list.emptyChat;
-    const body = last.kind === 'update-required' ? t.list.updateRequired : last.body.replace(/\s+/g, ' ');
-    return last.outgoing ? `${t.list.youPrefix} ${body}` : body;
+  function title(c: ChatSummary): string {
+    if (c.kind === 'self') return t.list.selfChat;
+    if (c.kind === 'dm' && c.peerId) return names.get(c.peerId) ?? c.title ?? t.common.unknownName;
+    return c.title ?? (c.kind === 'group' ? t.group.title(null) : t.common.unknownName);
   }
 
-  function name(c: ChatListItem): string {
-    return c.peerName ?? t.common.unknownName;
+  function preview(c: ChatSummary): string {
+    const last = c.lastMessage;
+    if (!last) return c.kind === 'self' ? t.list.selfChatEmpty : t.list.emptyChat;
+    if (last.kind === 'update-required') return t.list.updateRequired;
+    if (last.kind === 'service') return t.list.groupChanged;
+    const body = last.body.replace(/\s+/g, ' ').trim() || t.list.attachment(1);
+    if (last.outgoing && c.kind !== 'self') return `${t.list.youPrefix} ${body}`;
+    if (c.kind === 'group' && last.senderId) {
+      const who = names.get(last.senderId);
+      if (who) return `${who}: ${body}`;
+    }
+    return body;
+  }
+
+  function marks(c: ChatSummary): string[] {
+    const out: string[] = [];
+    if (c.kind === 'group') {
+      const n = groupSizes[c.chatId];
+      if (n !== undefined) out.push(t.list.members(n));
+      if (!c.member) out.push(t.list.notMember);
+    }
+    if (c.kind === 'dm') {
+      const peer = c.peerId ? memberById.get(c.peerId) : undefined;
+      if (c.peerRevoked) out.push(t.list.revokedPeer);
+      else if (c.peerRemoved) out.push(t.list.removedPeer);
+      else if (peer?.keyChanged) out.push(t.list.keyChanged);
+    }
+    return out;
   }
 
   /** Arrow keys move between chats (docs/PLAN.md 8.7). */
@@ -98,8 +174,13 @@
   <div class="body">
     {#if removed}
       <div class="banner error" role="alert">
-        <strong>{t.status.removed(account.familyName)}</strong>
-        <p>{t.status.removedText}</p>
+        {#if account.revoked}
+          <strong>{t.status.revoked(account.familyName)}</strong>
+          <p>{t.status.revokedText}</p>
+        {:else}
+          <strong>{t.status.removed(account.familyName)}</strong>
+          <p>{t.status.removedText}</p>
+        {/if}
       </div>
     {:else if !account.initialSyncDone}
       <p class="banner muted small" role="status">{t.status.syncing}</p>
@@ -109,6 +190,19 @@
       <div class="banner warn">
         <p>{t.phrase.reminder}</p>
         <button class="btn small" type="button" onclick={() => nav.push({ name: 'phrase' })}>{t.phrase.reminderAction}</button>
+      </div>
+    {/if}
+
+    {#if reminder !== 'none' && !removed}
+      <div class="banner" class:warn={reminder === 'warning'} data-testid="archive-reminder">
+        <p>
+          <strong>{reminder === 'warning' ? t.list.archiveWarnTitle : t.list.archiveTitle}</strong>
+          {reminder === 'warning' ? t.list.archiveWarnText : t.list.archiveText(account.retentionDays)}
+        </p>
+        <div class="row">
+          <button class="btn small" type="button" onclick={() => nav.push({ name: 'storage' })}>{t.list.archiveAction}</button>
+          <button class="btn secondary small" type="button" onclick={snoozeReminder}>{t.common.notNow}</button>
+        </div>
       </div>
     {/if}
 
@@ -126,22 +220,31 @@
       <ul class="skeleton" aria-hidden="true">
         {#each [0, 1, 2, 3, 4, 5] as i (i)}<li></li>{/each}
       </ul>
-    {:else if chats.length > 0}
+    {:else}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <ul class="chats" aria-label={t.list.title} onkeydown={onListKey}>
         {#each chats as c (c.chatId)}
           {@const failed = failedByChat.has(`${c.accountId}/${c.chatId}`)}
+          {@const peer = c.peerId ? memberById.get(c.peerId) : undefined}
+          {@const extra = marks(c)}
           <li>
             <button
               class="chat"
               type="button"
+              data-kind={c.kind}
               aria-current={openChatId === c.chatId ? 'true' : undefined}
               onclick={() => nav.openChat(c.accountId, c.chatId)}
             >
-              <span class="avatar" aria-hidden="true">{name(c).slice(0, 1).toUpperCase()}</span>
+              <Avatar
+                accountId={c.accountId}
+                userId={c.peerId}
+                name={title(c)}
+                kind={c.kind === 'dm' ? 'person' : c.kind}
+                hasAvatar={!!peer?.avatar}
+              />
               <span class="lines">
                 <span class="line1">
-                  <span class="name">{name(c)}{#if c.peerRemoved}<span class="muted small"> · {t.list.removedPeer}</span>{/if}</span>
+                  <span class="name">{title(c)}{#if extra.length > 0}<span class="muted small extra"> · {extra.join(' · ')}</span>{/if}</span>
                   {#if c.lastTime}<span class="time tabular">{formatListTime(c.lastTime, now)}</span>{/if}
                 </span>
                 <span class="line2">
@@ -162,29 +265,30 @@
           </li>
         {/each}
       </ul>
-    {:else if app.membersLoaded}
-      <div class="empty">
-        {#if others.length > 0}
-          <h2>{t.list.emptyMemberTitle}</h2>
-          <ul class="people">
-            {#each others as m (m.userId)}
-              <li>
-                <button class="person" type="button" onclick={() => startChat(m)}>
-                  <span class="avatar" aria-hidden="true">{(m.name ?? '?').slice(0, 1).toUpperCase()}</span>
-                  <span class="name">{m.name ?? t.common.unknownName}</span>
-                  <Icon name="chevron" size={20} />
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {:else if account.admin}
-          <h2>{t.list.emptyAdminTitle}</h2>
-          <p class="muted">{t.list.emptyAdminText}</p>
-          <button class="btn" type="button" onclick={() => nav.push({ name: 'invites' })}>{t.list.emptyAdminAction}</button>
-        {:else}
-          <p class="muted">{t.list.emptyNobody}</p>
-        {/if}
-      </div>
+      {#if otherChats.length === 0 && app.membersLoaded}
+        <div class="empty">
+          {#if others.length > 0}
+            <h2>{t.list.emptyMemberTitle}</h2>
+            <ul class="people">
+              {#each others as m (m.userId)}
+                <li>
+                  <button class="person" type="button" onclick={() => startChat(m)}>
+                    <Avatar accountId={account.id} userId={m.userId} name={m.name} hasAvatar={!!m.avatar} />
+                    <span class="name">{names.get(m.userId) ?? t.common.unknownName}</span>
+                    <Icon name="chevron" size={20} />
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {:else if account.admin}
+            <h2>{t.list.emptyAdminTitle}</h2>
+            <p class="muted">{t.list.emptyAdminText}</p>
+            <button class="btn" type="button" onclick={() => nav.push({ name: 'invites' })}>{t.list.emptyAdminAction}</button>
+          {:else}
+            <p class="muted">{t.list.emptyNobody}</p>
+          {/if}
+        </div>
+      {/if}
     {/if}
   </div>
 
@@ -267,19 +371,6 @@
     color: var(--on-accent-soft-muted);
   }
 
-  .avatar {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 auto;
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    background: var(--accent);
-    color: var(--on-accent);
-    font-weight: 700;
-    font-size: var(--text-m);
-  }
 
   .lines {
     display: flex;
@@ -305,6 +396,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .extra {
+    font-weight: 400;
   }
 
   .time {

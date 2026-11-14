@@ -3,14 +3,19 @@
 pub mod api;
 pub mod app;
 pub mod assets;
+pub mod blobs;
 pub mod config;
 pub mod datadir;
 pub mod envelope;
 pub mod error;
 pub mod eventlog;
+pub mod groups;
+pub mod headers;
 pub mod ids;
+pub mod notice;
 pub mod ratelimit;
 pub mod store;
+pub mod tls;
 pub mod webpush;
 
 use std::net::{IpAddr, SocketAddr, UdpSocket};
@@ -58,6 +63,12 @@ pub struct Cli {
     /// Serve the web client from this folder instead of the embedded copy.
     #[arg(long, value_name = "DIR")]
     pub web_dir: Option<PathBuf>,
+    /// Serve HTTPS with this certificate chain (PEM); needs --tls-key.
+    #[arg(long, value_name = "PEM", requires = "tls_key")]
+    pub tls_cert: Option<PathBuf>,
+    /// Private key for --tls-cert (PEM).
+    #[arg(long, value_name = "PEM", requires = "tls_cert")]
+    pub tls_key: Option<PathBuf>,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -173,6 +184,17 @@ pub async fn main_with(cli: Cli) -> i32 {
         None => Assets::Embedded,
     };
 
+    let tls = match (&cli.tls_cert, &cli.tls_key) {
+        (Some(c), Some(k)) => match tls::load_config(c, k) {
+            Ok(cfg) => Some(cfg),
+            Err(e) => {
+                tracing::error!("{e}");
+                return 1;
+            }
+        },
+        _ => None,
+    };
+
     let listener = match tokio::net::TcpListener::bind(settings.listen).await {
         Ok(l) => l,
         Err(e) => {
@@ -214,8 +236,9 @@ pub async fn main_with(cli: Cli) -> i32 {
         .store
         .read(|m| (m.users.values().filter(|u| u.removed_at.is_none()).count(), m.log.len()));
     tracing::info!("участников {members}, событий в журнале {events}");
-    tracing::info!("слушаю {local}");
-    for url in browse_urls(local) {
+    let scheme = if tls.is_some() { "https" } else { "http" };
+    tracing::info!("слушаю {local} ({})", scheme.to_uppercase());
+    for url in browse_urls(scheme, local) {
         tracing::info!("откройте {url}");
     }
     if let Some(code) = &dir.new_admin_code {
@@ -225,22 +248,14 @@ pub async fn main_with(cli: Cli) -> i32 {
         tracing::info!("код показывается один раз; новый: fcd reset-admin-code --data <DIR> при остановленном сервере");
     }
 
-    let app = app::router(state).into_make_service_with_connect_info::<SocketAddr>();
-    let mut stopping = shutdown_tx.subscribe();
-    let server = axum::serve(listener, app).with_graceful_shutdown(async move {
-        shutdown_signal().await;
-        tracing::info!("получен сигнал завершения, останавливаюсь");
-        let _ = shutdown_tx.send(true);
-    });
-    let result = tokio::select! {
-        r = std::future::IntoFuture::into_future(server) => r,
-        _ = async {
-            let _ = stopping.wait_for(|v| *v).await;
-            tokio::time::sleep(SHUTDOWN_GRACE).await;
-        } => {
-            tracing::warn!("соединения не закрылись за {} с, завершаюсь", SHUTDOWN_GRACE.as_secs());
-            Ok(())
-        }
+    let app = app::router(state);
+    let result = match tls {
+        Some(cfg) => match tls::TlsListener::new(listener, cfg) {
+            // `tap_io` gives the listener axum's `ConnectInfo<SocketAddr>`.
+            Ok(l) => run(axum::serve::ListenerExt::tap_io(l, |_| {}), app, shutdown_tx).await,
+            Err(e) => Err(e),
+        },
+        None => run(listener, app, shutdown_tx).await,
     };
     drop(dir);
     match result {
@@ -251,6 +266,33 @@ pub async fn main_with(cli: Cli) -> i32 {
         Err(e) => {
             tracing::error!("ошибка сервера: {e}");
             1
+        }
+    }
+}
+
+/// Serves until a shutdown signal, then waits for open requests at most
+/// [`SHUTDOWN_GRACE`].
+async fn run<L>(listener: L, app: axum::Router, shutdown_tx: watch::Sender<bool>) -> std::io::Result<()>
+where
+    L: axum::serve::Listener<Addr = SocketAddr>,
+    SocketAddr: for<'a> axum::extract::connect_info::Connected<axum::serve::IncomingStream<'a, L>>,
+{
+    let mut stopping = shutdown_tx.subscribe();
+    let server = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).with_graceful_shutdown(
+        async move {
+            shutdown_signal().await;
+            tracing::info!("получен сигнал завершения, останавливаюсь");
+            let _ = shutdown_tx.send(true);
+        },
+    );
+    tokio::select! {
+        r = std::future::IntoFuture::into_future(server) => r,
+        _ = async {
+            let _ = stopping.wait_for(|v| *v).await;
+            tokio::time::sleep(SHUTDOWN_GRACE).await;
+        } => {
+            tracing::warn!("соединения не закрылись за {} с, завершаюсь", SHUTDOWN_GRACE.as_secs());
+            Ok(())
         }
     }
 }
@@ -278,16 +320,16 @@ async fn shutdown_signal() {
 
 /// Addresses to print for the owner. For `0.0.0.0` the LAN address is found
 /// with a connected UDP socket (no packet is sent).
-fn browse_urls(local: SocketAddr) -> Vec<String> {
+fn browse_urls(scheme: &str, local: SocketAddr) -> Vec<String> {
     let port = local.port();
     let mut out = Vec::new();
     if local.ip().is_unspecified() {
-        out.push(format!("http://localhost:{port}/server/"));
+        out.push(format!("{scheme}://localhost:{port}/server/"));
         if let Some(ip) = lan_ip() {
-            out.push(format!("http://{ip}:{port}/server/"));
+            out.push(format!("{scheme}://{ip}:{port}/server/"));
         }
     } else {
-        out.push(format!("http://{local}/server/"));
+        out.push(format!("{scheme}://{local}/server/"));
     }
     out
 }

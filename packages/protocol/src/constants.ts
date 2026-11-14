@@ -34,3 +34,48 @@ export const MAX_EVENT_BYTES = 262144;
 export const EVENT_PADDING_BLOCK = 256;
 /** Epoch of every direct chat. */
 export const DM_EPOCH = 0;
+
+// ---- M2: groups ----
+
+/** Random nonce mixed into a group id, in bytes. */
+export const GROUP_NONCE_BYTES = 16;
+/** Group chat id: base32 of 16 bytes, like a direct chat id. */
+export const CHAT_ID_BYTES = 16;
+export const CHAT_ID_LENGTH = 26;
+/** Epoch secret, in bytes. */
+export const EPOCH_SECRET_BYTES = 32;
+/** First epoch of a group (direct chats always stay at DM_EPOCH). */
+export const FIRST_GROUP_EPOCH = 0;
+/** First version of a group state. */
+export const FIRST_STATE_VERSION = 1;
+/** Members of one group. */
+export const MAX_GROUP_MEMBERS = 100;
+/** Group state payload (exact signed JSON bytes). */
+export const MAX_STATE_PAYLOAD_BYTES = 65536;
+/** Encrypted group state as stored by the server. */
+export const MAX_STATE_BLOB_BYTES = 131072;
+
+// ---- M2: attachments ----
+
+/** Part size of every attachment (the only allowed value of `partSize`). */
+export const BLOB_PART_SIZE = 4 * 1024 * 1024;
+export const ALLOWED_PART_SIZES: readonly number[] = [BLOB_PART_SIZE];
+/** Blob id: base32 of 16 random bytes. */
+export const BLOB_ID_BYTES = 16;
+/** Hard upper bound of an attachment size; the server limit (`maxFileMB`) is usually lower. */
+export const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 10;
+/** Inline thumbnail (JPEG bytes before base64url). */
+export const MAX_THUMB_BYTES = 4096;
+/** Voice waveform: exactly this many peaks, each 0..255. */
+export const VOICE_PEAKS = 64;
+/** File name of an attachment, in Unicode code points and UTF-8 bytes. */
+export const MAX_FILE_NAME_CHARS = 128;
+export const MAX_FILE_NAME_BYTES = 255;
+
+// ---- M2: archive ----
+
+/** Archive plaintext is encrypted in blocks of this size. */
+export const ARCHIVE_BLOCK_SIZE = 1024 * 1024;
+/** Largest single archive record (split bigger data into several records). */
+export const MAX_ARCHIVE_RECORD_BYTES = 16 * 1024 * 1024;

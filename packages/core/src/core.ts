@@ -5,16 +5,20 @@
 // No DOM: it needs fetch, IndexedDB, WebCrypto and timers, all present in a
 // worker. In M1 it may run on the main thread.
 
-import { fingerprint, type MsgRef } from '@family-chat/protocol';
+import { dmChatId, fingerprint, type AvatarRef, type IdentityKeys, type Location, type MsgRef } from '@family-chat/protocol';
 import { Dexie, liveQuery } from 'dexie';
 import {
   AccountRuntime,
   addDeviceForIdentity,
+  checkInvite,
   createIdentity,
+  ensureSelfChat,
   fetchHello,
   joinServer,
+  keysFromPhrase,
   recoveryPhrase,
   restoreAccount,
+  revokeIdentity,
   updateProfile,
   type JoinInput,
   type RestoreInput,
@@ -23,12 +27,27 @@ import type { FetchFn } from './api/transport.ts';
 import type {
   AdminUser,
   Hello,
+  InviteCheck,
   InviteInfo,
   NewInvite,
   PushSubscriptionInput,
   ServerStats,
 } from './api/types.ts';
 import { commitEvents, decodeEvents } from './apply.ts';
+import { exportArchive, importArchive, toReadableStream, type ArchiveSource, type ExportOptions, type ImportResult } from './archive.ts';
+import { prepareUploads, type AttachmentInput } from './attachments.ts';
+import { fetchAvatar, removeAvatar, setAvatar } from './avatars.ts';
+import type { FileStorePreference, OpfsDirectory } from './files.ts';
+import {
+  chatMessages,
+  chatSummaries,
+  groupView,
+  transferView,
+  type ChatSummary,
+  type GroupView,
+  type MessageView,
+  type TransferView,
+} from './views.ts';
 import { CoreContext } from './context.ts';
 import {
   CoreDb,
@@ -45,6 +64,7 @@ import {
 import { CoreError } from './errors.ts';
 import { inviteLink } from './invite.ts';
 import { byQueueOrder, cancelMessage, enqueueMessage, retryMessage } from './outbox.ts';
+import { newMessageId } from '@family-chat/protocol';
 import { handlePush, registerPush, unregisterPush, type PushNotice } from './push.ts';
 import type { ConnectionState } from './sync.ts';
 import type { BackoffOptions } from './util/backoff.ts';
@@ -70,6 +90,10 @@ export interface CoreOptions {
   readonly waitSeconds?: number;
   /** Timeout of ordinary requests, ms (default 20000). */
   readonly timeoutMs?: number;
+  /** Attachment storage: 'auto' (OPFS when available, else IndexedDB; default), 'opfs' or 'idb'. */
+  readonly fileStore?: FileStorePreference;
+  /** OPFS root directory (tests); defaults to navigator.storage.getDirectory(). */
+  readonly opfsRoot?: () => Promise<OpfsDirectory>;
 }
 
 // ---- views ----
@@ -92,6 +116,23 @@ export interface AccountView {
   readonly pushRegistered: boolean;
   readonly vapidPublicKey: string | null;
   readonly lastSyncAt: number | null;
+  /** My identity was revoked on this server (status is 'removed'). */
+  readonly revoked: boolean;
+  /** The chat with myself ("Избранное") on this account. */
+  readonly selfChatId: string;
+  /**
+   * Server time of the oldest record still on the server (null when unknown).
+   * With `historyTrimmed`, the UI shows "messages before <date> are no longer
+   * on the server" at the top of a chat whose history reached the start.
+   */
+  readonly oldestTime: number | null;
+  /** Older records were deleted by retention (the oldest gseq on the server is above 1). */
+  readonly historyTrimmed: boolean;
+}
+
+/** Result of join: the account, plus the chat with the person who invited (opened locally). */
+export interface JoinResult extends AccountView {
+  readonly firstChatId: string | null;
 }
 
 export interface Member {
@@ -106,8 +147,14 @@ export interface Member {
   readonly fingerprint: string;
   /** The server offered different keys for this userId (see acceptKeyChange). */
   readonly keyChanged: boolean;
-  /** Direct chat id with this member (null for oneself). */
+  /** Direct chat id with this member (null for oneself; see AccountView.selfChatId). */
   readonly chatId: string | null;
+  /** The identity was revoked: nothing is encrypted to it any more. */
+  readonly revoked: boolean;
+  /** I marked this fingerprint as verified (and the keys did not change since). */
+  readonly verified: boolean;
+  /** Avatar reference from the verified profile (blob: core.avatar()). */
+  readonly avatar: AvatarRef | null;
 }
 
 export interface ChatListItem {
@@ -132,28 +179,7 @@ export interface ChatListItem {
   readonly draft: string | null;
 }
 
-/** "on-device": in the outbox; "on-server": accepted by the server; "failed": needs retry or cancel. */
-export type MessageStatus = 'on-device' | 'on-server' | 'failed';
-
-export interface MessageView {
-  /** Stable key for lists: `${senderId}/${msgId}`. */
-  readonly key: string;
-  readonly accountId: string;
-  readonly chatId: string;
-  readonly msgId: string;
-  readonly senderId: string;
-  readonly outgoing: boolean;
-  /** `update-required`: show "update the app to see this message". */
-  readonly kind: MessageKind;
-  readonly body: string;
-  readonly reply: MsgRef | null;
-  /** Server order and time; null while the message is still on the device. */
-  readonly gseq: number | null;
-  readonly time: number | null;
-  readonly status: MessageStatus;
-  /** Last error code for failed or retrying outbox messages. */
-  readonly error: string | null;
-}
+export type { MessageStatus, MessageView } from './views.ts';
 
 export interface OutboxItem {
   readonly accountId: string;
@@ -222,7 +248,28 @@ function accountView(a: AccountRow): AccountView {
     pushRegistered: a.pushRegistered,
     vapidPublicKey: a.vapidPublicKey,
     lastSyncAt: a.lastSyncAt,
+    revoked: a.revoked === true,
+    selfChatId: dmChatId(a.serverId, a.userId, a.userId),
+    oldestTime: a.oldest?.time ?? null,
+    historyTrimmed: (a.oldest?.gseq ?? 1) > 1,
   };
+}
+
+/** What to send: text (Markdown), attachments, a place; at least one of them. */
+export interface OutgoingMessage {
+  readonly text?: string;
+  readonly reply?: MsgRef;
+  readonly attachments?: readonly AttachmentInput[];
+  /** Passed through as is (capture is a later stage). */
+  readonly location?: Location;
+  readonly fwd?: boolean;
+}
+
+export interface AvatarView {
+  readonly userId: string;
+  readonly sha256: string;
+  readonly type: 'image/jpeg' | 'image/webp';
+  readonly blob: Blob;
 }
 
 // ---- the facade ----
@@ -240,8 +287,15 @@ export class FamilyChatCore {
   readonly accounts: Readable<AccountView[]>;
   /** Connection state per account id. */
   readonly connection: Readable<Record<string, ConnectionState>>;
-  /** All chats of all accounts, most recent first. */
+  /**
+   * Direct chats with other members, most recent first (the M1 list; groups
+   * and the chat with myself are not in it). New screens use `chatList`.
+   */
   readonly chats: Readable<ChatListItem[]>;
+  /** Every chat: the chat with myself pinned first, then groups and direct chats by last activity. */
+  readonly chatList: Readable<ChatSummary[]>;
+  /** Uploads and downloads that are queued, running or failed. */
+  readonly transfers: Readable<TransferView[]>;
   /** Messages not yet accepted by the server, oldest first. */
   readonly outbox: Readable<OutboxItem[]>;
   readonly drafts: Readable<DraftItem[]>;
@@ -259,6 +313,8 @@ export class FamilyChatCore {
       ...(options.backoff ? { backoff: options.backoff } : {}),
       ...(options.waitSeconds !== undefined ? { waitSeconds: options.waitSeconds } : {}),
       ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.fileStore ? { fileStore: options.fileStore } : {}),
+      ...(options.opfsRoot ? { opfsRoot: options.opfsRoot } : {}),
     });
     const onError = (e: unknown) => void this.#ctx.diag.error('db', `live query failed: ${String((e as Error)?.name)}`);
     const db = this.db;
@@ -266,6 +322,16 @@ export class FamilyChatCore {
     this.accounts = live<AccountView[]>([], async () => (await db.accounts.toArray()).map(accountView), onError);
     this.connection = { subscribe: (run) => this.#connection.subscribe(run), get: () => this.#connection.get() };
     this.chats = live<ChatListItem[]>([], () => this.#chatList(), onError);
+    this.chatList = live<ChatSummary[]>([], () => chatSummaries(db), onError);
+    this.transfers = live<TransferView[]>(
+      [],
+      async () =>
+        (await db.blobs.toArray())
+          .filter((b) => b.status === 'queued' || b.status === 'active' || b.status === 'failed')
+          .sort((a, b) => a.createdAt - b.createdAt)
+          .map(transferView),
+      onError,
+    );
     this.outbox = live<OutboxItem[]>(
       [],
       async () =>
@@ -355,10 +421,34 @@ export class FamilyChatCore {
     return recoveryPhrase(this.#ctx, userId);
   }
 
-  /** Joins a server with an invitation or the admin code; starts syncing it. */
-  async join(input: JoinInput): Promise<AccountView> {
+  /**
+   * Joins a server with an invitation or the admin code; starts syncing it.
+   * With an invitation, the chat with the person who invited is opened
+   * locally and returned as `firstChatId`.
+   */
+  async join(input: JoinInput): Promise<JoinResult> {
+    let inviter: string | null = null;
+    if ('invite' in input.code) {
+      try {
+        const check = await checkInvite(this.#ctx, input.serverUrl, input.code.invite);
+        if (check.status !== 'invalid') inviter = check.createdBy.userId;
+      } catch {
+        // The check is a hint; joining reports the real error.
+      }
+    }
     const row = await joinServer(this.#ctx, input);
-    return this.#adopt(row);
+    const view = await this.#adopt(row);
+    let firstChatId: string | null = null;
+    if (inviter && inviter !== row.userId) firstChatId = await this.openChat(row.id, inviter).catch(() => null);
+    return { ...view, firstChatId };
+  }
+
+  /**
+   * Before joining: is the invitation valid, into which family, who invited
+   * (`createdBy.name` is an unverified hint until the signed profile arrives).
+   */
+  checkInvite(serverUrl: string, code: string): Promise<InviteCheck | { readonly status: 'invalid' }> {
+    return checkInvite(this.#ctx, serverUrl, code);
   }
 
   /** Restores an identity by its phrase on this device and adds the device to the server. */
@@ -407,6 +497,9 @@ export class FamilyChatCore {
           fingerprint: fingerprint(u),
           keyChanged: u.keyChange !== null,
           chatId: u.userId === account.userId ? null : rt.directory.chatIdFor(u.userId),
+          revoked: !!u.revoked,
+          verified: !!u.verifiedFingerprint && u.verifiedFingerprint === fingerprint(u),
+          avatar: u.avatar ?? null,
         }));
       },
       (e) => void this.#ctx.diag.error('db', `members query failed: ${String((e as Error)?.name)}`, accountId),
@@ -430,6 +523,7 @@ export class FamilyChatCore {
    */
   async openChat(accountId: string, peerId: string): Promise<string> {
     const rt = await this.#runtime(accountId);
+    if (peerId === rt.session.userId) return ensureSelfChat(rt);
     const chatId = rt.directory.chatIdFor(peerId);
     if (!(await rt.directory.user(peerId))) {
       await rt.directory.refresh();
@@ -459,53 +553,7 @@ export class FamilyChatCore {
     let limit = MESSAGES_PAGE;
     let serverDone = false;
     const reload = writable(0);
-    const query = async (): Promise<MessageView[]> => {
-      const account = await db.accounts.get(accountId);
-      const me = account?.userId ?? '';
-      const rows = await db.messages
-        .where('[accountId+chatId+gseq]')
-        .between([accountId, chatId, Dexie.minKey], [accountId, chatId, Dexie.maxKey])
-        .reverse()
-        .limit(limit)
-        .toArray();
-      rows.reverse();
-      const out: MessageView[] = rows.map((m) => ({
-        key: `${m.senderId}/${m.msgId}`,
-        accountId,
-        chatId,
-        msgId: m.msgId,
-        senderId: m.senderId,
-        outgoing: m.senderId === me,
-        kind: m.kind,
-        body: m.body,
-        reply: m.reply,
-        gseq: m.gseq,
-        time: m.time,
-        status: 'on-server',
-        error: null,
-      }));
-      const pending = (await db.outbox.where('[accountId+chatId]').equals([accountId, chatId]).toArray()).sort(
-        byQueueOrder,
-      );
-      for (const o of pending) {
-        out.push({
-          key: `${me}/${o.msgId}`,
-          accountId,
-          chatId,
-          msgId: o.msgId,
-          senderId: me,
-          outgoing: true,
-          kind: 'msg',
-          body: o.body,
-          reply: o.reply,
-          gseq: null,
-          time: null,
-          status: o.status === 'failed' ? 'failed' : 'on-device',
-          error: o.error,
-        });
-      }
-      return out;
-    };
+    const query = (): Promise<MessageView[]> => chatMessages(db, accountId, chatId, limit);
     const messages = writable<MessageView[]>([], (set) => {
       let sub: { unsubscribe(): void } | undefined;
       const unsubReload = reload.subscribe(() => {
@@ -547,7 +595,8 @@ export class FamilyChatCore {
           }),
         );
         if (!page.more) serverDone = true;
-        const items = await decodeEvents(rt, page.events);
+        // Older group events of an epoch whose key never reached me cannot be read: no retry list for them.
+        const items = await decodeEvents(rt, page.events, { keepPending: false });
         await commitEvents(this.#ctx, accountId, rt.session.userId, items);
         const after = await range().count();
         limit += MESSAGES_PAGE;
@@ -574,16 +623,20 @@ export class FamilyChatCore {
     return msgId;
   }
 
-  /** Sends a failed message again. */
+  /** Sends a failed message again (failed attachment uploads are restarted). */
   async retry(accountId: string, msgId: string): Promise<void> {
     const rt = await this.#runtime(accountId);
     await retryMessage(rt, msgId);
+    await rt.transfers.retryUploads(msgId);
     rt.outbox.kick();
   }
 
-  /** Removes a message that has not reached the server. */
+  /** Removes a message that has not reached the server (its uploads are cancelled and removed). */
   async cancel(accountId: string, msgId: string): Promise<void> {
-    await cancelMessage(await this.#runtime(accountId), msgId);
+    const rt = await this.#runtime(accountId);
+    await cancelMessage(rt, msgId);
+    const uploads = await this.db.blobs.where('[accountId+msgId]').equals([accountId, msgId]).toArray();
+    for (const b of uploads) if (b.direction === 'up') await rt.transfers.cancel(b.blobId);
   }
 
   async getDraft(accountId: string, chatId: string): Promise<string> {
@@ -594,6 +647,240 @@ export class FamilyChatCore {
   async setDraft(accountId: string, chatId: string, text: string): Promise<void> {
     if (text.length === 0) await this.db.drafts.delete([accountId, chatId]);
     else await this.db.drafts.put({ accountId, chatId, text, updatedAt: this.#ctx.clock.now() });
+  }
+
+  /**
+   * Queues a message with text, attachments and/or a place. Attachment files
+   * are checked against the server limit (CoreError `too-large`), copied into
+   * app storage and uploaded in parts; the message goes out after all parts
+   * are on the server. Returns the message id.
+   */
+  async sendMessage(accountId: string, chatId: string, message: OutgoingMessage): Promise<string> {
+    const rt = await this.#runtime(accountId);
+    const files = message.attachments ?? [];
+    if (files.length === 0) {
+      const msgId = await enqueueMessage(rt, chatId, message.text ?? '', {
+        reply: message.reply,
+        ...(message.location ? { location: message.location } : {}),
+        ...(message.fwd ? { fwd: true } : {}),
+      });
+      rt.outbox.kick();
+      return msgId;
+    }
+    const chat = await this.db.chats.get([accountId, chatId]);
+    if (!chat) throw new CoreError('unknown-chat');
+    const msgId = newMessageId();
+    const { attachments, rows } = await prepareUploads(rt, this.#ctx.files, chatId, msgId, files);
+    try {
+      await enqueueMessage(rt, chatId, message.text ?? '', {
+        msgId,
+        reply: message.reply,
+        attachments,
+        ...(message.location ? { location: message.location } : {}),
+        ...(message.fwd ? { fwd: true } : {}),
+        inTransaction: async () => {
+          await this.db.blobs.bulkPut(rows);
+        },
+      });
+    } catch (e) {
+      for (const r of rows) await (await this.#ctx.files.of(r.storage ?? 'idb')).delete(`${accountId}/${r.blobId}`).catch(() => undefined);
+      throw e;
+    }
+    rt.transfers.kick();
+    return msgId;
+  }
+
+  // ---- groups ----
+
+  /** Group state as the UI shows it (live): name, members, owner, membership, mismatch with the server. */
+  group(accountId: string, chatId: string): Readable<GroupView | null> {
+    return live<GroupView | null>(null, () => groupView(this.db, accountId, chatId), (e) =>
+      void this.#ctx.diag.error('db', `group query failed: ${String((e as Error)?.name)}`, accountId),
+    );
+  }
+
+  /** Creates a group (I become the owner). Returns its chat id. */
+  async createGroup(accountId: string, name: string, memberIds: readonly string[]): Promise<string> {
+    const rt = await this.#runtime(accountId);
+    return rt.groups.change({ type: 'create', name, members: [...memberIds] });
+  }
+
+  async renameGroup(accountId: string, chatId: string, name: string): Promise<void> {
+    await (await this.#runtime(accountId)).groups.change({ type: 'rename', name }, chatId);
+  }
+
+  /**
+   * Adds members. `history: true` (default): they read the group's history of
+   * the current epoch that is still on the server; false ("without earlier
+   * history"): a new epoch starts first.
+   */
+  async addGroupMembers(accountId: string, chatId: string, userIds: readonly string[], options: { history?: boolean } = {}): Promise<void> {
+    await (await this.#runtime(accountId)).groups.change({ type: 'add', userIds: [...userIds], history: options.history ?? true }, chatId);
+  }
+
+  /** Removes members (new epoch: they cannot read anything sent afterwards). */
+  async removeGroupMembers(accountId: string, chatId: string, userIds: readonly string[]): Promise<void> {
+    await (await this.#runtime(accountId)).groups.change({ type: 'remove', userIds: [...userIds] }, chatId);
+  }
+
+  async transferGroupOwnership(accountId: string, chatId: string, to: string): Promise<void> {
+    await (await this.#runtime(accountId)).groups.change({ type: 'transfer', to }, chatId);
+  }
+
+  /** Leaves a group. The owner must name the new owner (`transferTo`), else CoreError `owner-cannot-leave`. */
+  async leaveGroup(accountId: string, chatId: string, options: { transferTo?: string } = {}): Promise<void> {
+    await (await this.#runtime(accountId)).groups.leave(chatId, options.transferTo);
+  }
+
+  /** Re-reads groups and keys from the server now (GET /v1/chats, /v1/keys). */
+  async refreshGroups(accountId: string): Promise<void> {
+    const rt = await this.#runtime(accountId);
+    await rt.groups.flushPending();
+    await rt.groups.reconcile({ full: true });
+    await rt.groups.ownerDuties();
+  }
+
+  // ---- attachments ----
+
+  /** Starts downloading a received attachment (images and voice up to 10 MB start by themselves). */
+  async downloadAttachment(accountId: string, blobId: string): Promise<void> {
+    await (await this.#runtime(accountId)).transfers.download(blobId);
+  }
+
+  /** Stops a download (back to "not downloaded") or cancels an upload (the message then fails; cancel or retry it). */
+  async cancelTransfer(accountId: string, blobId: string): Promise<void> {
+    const rt = await this.#runtime(accountId);
+    await rt.transfers.cancel(blobId);
+    rt.outbox.kick();
+  }
+
+  /** The attachment's contents as a Blob backed by app storage (never read whole into memory by the core). */
+  async attachmentBlob(accountId: string, blobId: string): Promise<Blob> {
+    return (await this.#runtime(accountId)).transfers.blob(blobId);
+  }
+
+  /** `URL.createObjectURL` of the attachment; the caller revokes it with `URL.revokeObjectURL`. */
+  async attachmentUrl(accountId: string, blobId: string): Promise<string> {
+    const blob = await this.attachmentBlob(accountId, blobId);
+    if (typeof URL.createObjectURL !== 'function') throw new CoreError('invalid-input', 'object URLs are not available here');
+    return URL.createObjectURL(blob);
+  }
+
+  // ---- profile, avatars, contacts ----
+
+  /** Uploads a prepared JPEG or WebP (at most 256 KB) and signs a profile naming it. */
+  async setAvatar(accountId: string, image: Blob | Uint8Array): Promise<AvatarRef> {
+    return setAvatar(await this.#runtime(accountId), image);
+  }
+
+  async removeAvatar(accountId: string): Promise<void> {
+    await removeAvatar(await this.#runtime(accountId));
+  }
+
+  /** A member's avatar (live; fetched with the token, checked by SHA-256 and cached). Null when none. */
+  avatar(accountId: string, userId: string): Readable<AvatarView | null> {
+    const db = this.db;
+    const fetching = new Set<string>();
+    return live<AvatarView | null>(
+      null,
+      async () => {
+        const u = await db.users.get([accountId, userId]);
+        const ref = u?.avatar;
+        if (!ref) return null;
+        const row = await db.avatars.get([accountId, userId]);
+        if (row && row.sha256 === ref.sha256) {
+          return { userId, sha256: row.sha256, type: row.type, blob: new Blob([row.bytes as Uint8Array<ArrayBuffer>], { type: row.type }) };
+        }
+        if (!fetching.has(ref.sha256)) {
+          fetching.add(ref.sha256);
+          // Outside the live query: the fetch writes the cache, which re-runs the query.
+          setTimeout(() => {
+            void this.#runtime(accountId)
+              .then((rt) => fetchAvatar(rt, userId))
+              .catch((e: unknown) => void this.#ctx.diag.info('avatar', `avatar of ${userId} not fetched: ${String((e as Error)?.name)}`, accountId));
+          }, 0);
+        }
+        return null;
+      },
+      (e) => void this.#ctx.diag.error('db', `avatar query failed: ${String((e as Error)?.name)}`, accountId),
+    );
+  }
+
+  /** A member's avatar as a Blob (fetched if needed), or null. */
+  async avatarBlob(accountId: string, userId: string): Promise<Blob | null> {
+    const row = await fetchAvatar(await this.#runtime(accountId), userId);
+    return row ? new Blob([row.bytes as Uint8Array<ArrayBuffer>], { type: row.type }) : null;
+  }
+
+  /** Marks a member's current fingerprint as verified (or clears the mark). Local only. */
+  async setVerified(accountId: string, userId: string, verified: boolean): Promise<void> {
+    await (await this.#runtime(accountId)).directory.setVerified(userId, verified);
+  }
+
+  // ---- revocation ----
+
+  /**
+   * Revokes my identity on this account's server (lost device, leaked key).
+   * Irreversible there: every device of this identity is signed out for good.
+   * The local history stays readable.
+   */
+  async revokeIdentity(accountId: string): Promise<void> {
+    const rt = await this.#runtime(accountId);
+    const keys = await this.#ctx.keys(rt.session.userId);
+    await revokeIdentity(this.#ctx, rt.session.serverUrl, keys);
+    await rt.session.markRevoked().catch(() => undefined);
+    await rt.stop();
+  }
+
+  /** Revokes an identity by its recovery phrase, without a device (the phrase is a secret, never stored). */
+  async revokeIdentityByPhrase(serverUrl: string, phrase: string): Promise<void> {
+    await revokeIdentity(this.#ctx, serverUrl, keysFromPhrase(phrase));
+    for (const rt of this.#runtimes.values()) {
+      const row = await this.db.accounts.get(rt.accountId);
+      if (row?.revoked) await rt.stop();
+    }
+  }
+
+  // ---- archive ----
+
+  /**
+   * The local history of one identity as an `.fcarchive` byte stream (header,
+   * then encrypted blocks): accounts without tokens, contacts, chats, group
+   * states with epoch secrets, verified events; attachment files with
+   * `includeFiles`. Write the chunks to a file in order.
+   */
+  async *exportArchive(options: ExportOptions = {}): AsyncGenerator<Uint8Array> {
+    const keys = await this.#identityKeys(options.userId);
+    yield* exportArchive(this.#ctx, keys, options);
+  }
+
+  /** exportArchive as a ReadableStream (for `new Response(stream).blob()` or a file writer). */
+  async exportArchiveStream(options: ExportOptions = {}): Promise<ReadableStream<Uint8Array>> {
+    const keys = await this.#identityKeys(options.userId);
+    return toReadableStream(exportArchive(this.#ctx, keys, options));
+  }
+
+  /**
+   * Imports an archive of an identity stored on this device (restore it by
+   * phrase first). Events are verified again and replayed through the sync
+   * path; known ones are skipped. CoreError `wrong-identity` for an archive of
+   * another identity, `bad-archive` for a damaged one.
+   */
+  async importArchive(source: ArchiveSource): Promise<ImportResult> {
+    this.#ensureOpen();
+    const result = await importArchive(
+      {
+        ctx: this.#ctx,
+        identities: async () => Promise.all((await this.db.identities.toArray()).map((i) => this.#ctx.keys(i.userId))),
+        runtime: (id) => this.#runtime(id),
+      },
+      source,
+    );
+    for (const id of result.newAccounts) {
+      const rt = await this.#runtime(id);
+      if (this.#started) rt.start();
+    }
+    return result;
   }
 
   // ---- administration ----
@@ -674,6 +961,13 @@ export class FamilyChatCore {
 
   // ---- internals ----
 
+  async #identityKeys(userId: string | undefined): Promise<IdentityKeys> {
+    const ids = await this.db.identities.toArray();
+    const id = userId ?? (ids.length === 1 ? ids[0]!.userId : undefined);
+    if (!id) throw new CoreError(ids.length === 0 ? 'no-identity' : 'invalid-input', 'which identity?');
+    return this.#ctx.keys(id);
+  }
+
   #ensureOpen(): void {
     if (this.#closed) throw new CoreError('closed');
   }
@@ -695,6 +989,7 @@ export class FamilyChatCore {
 
   async #adopt(row: AccountRow): Promise<AccountView> {
     const rt = await this.#runtime(row.id);
+    await ensureSelfChat(rt);
     await rt.directory.refresh().catch((e: unknown) => {
       void this.#ctx.diag.warn('directory', `first member list fetch failed: ${String((e as Error)?.name)}`, row.id);
     });
@@ -719,7 +1014,7 @@ export class FamilyChatCore {
     const items: (ChatListItem & { sortKey: number })[] = [];
     for (const c of chats) {
       const a = acc.get(c.accountId);
-      if (!a) continue;
+      if (!a || c.kind !== 'dm') continue;
       const peer = user.get(`${c.accountId}/${c.peerId}`);
       const key = `${c.accountId}/${c.chatId}`;
       items.push({

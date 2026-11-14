@@ -1,5 +1,6 @@
-//! M1 API: join, devices, users, direct chats, events, push, admin.
-//! The exact wire format is documented in docs/API.md.
+//! API: join, devices, users, profiles and avatars, revocation, chats and
+//! events, push, admin. Groups are in `groups.rs`, attachments in
+//! `blobs.rs`. The exact wire format is documented in docs/API.md.
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -11,7 +12,7 @@ use axum::Json;
 use axum::body::{Body, Bytes};
 use axum::extract::{ConnectInfo, FromRequestParts, Path as UrlPath, Query, State};
 use axum::http::request::Parts;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use http_body_util::{BodyExt, LengthLimitError, Limited};
 use serde::Deserialize;
@@ -20,11 +21,15 @@ use serde_json::{Value, json};
 
 use crate::app::{AppState, endpoint_allowed};
 use crate::datadir::now_ms;
+use crate::envelope::ImageKind;
 use crate::envelope::{self, Envelope};
 use crate::error::ApiError;
 use crate::eventlog::MAX_BODY;
 use crate::ids::{ChatId, DevId, MsgId, UserId, b64_decode, b64_encode};
-use crate::store::{Appended, Caller, Entry, Issued, JoinCode, Mem, Page, Store, User, env_error};
+use crate::store::{
+    Appended, Caller, Chat, ChatKind, Entry, Issued, JoinCode, Mem, NOTICE_SENDER, Page, Store, User, env_error,
+    invite_hash,
+};
 use crate::webpush::Subscription;
 
 /// Longest long poll, seconds.
@@ -35,6 +40,8 @@ pub const DEFAULT_HISTORY_LIMIT: usize = 200;
 pub const MAX_PAGE_BYTES: usize = 4 * 1024 * 1024;
 /// Largest JSON request body (join, profile, auth, push).
 pub const MAX_JSON_BODY: usize = 64 * 1024;
+/// Largest avatar image, bytes.
+pub const MAX_AVATAR_BYTES: usize = 256 * 1024;
 
 // ---- extractors ----
 
@@ -90,6 +97,9 @@ impl FromRequestParts<Arc<AppState>> for Auth {
             .store
             .caller(token)
             .ok_or_else(|| ApiError::unauthorized("unknown or revoked device token"))?;
+        if c.revoked {
+            return Err(ApiError::forbidden("revoked", "this identity was revoked by its owner"));
+        }
         if c.removed {
             return Err(ApiError::forbidden("removed", "removed from the family"));
         }
@@ -112,7 +122,7 @@ impl FromRequestParts<Arc<AppState>> for Admin {
     }
 }
 
-fn too_large(limit: usize) -> ApiError {
+pub fn too_large(limit: usize) -> ApiError {
     ApiError::new(
         StatusCode::PAYLOAD_TOO_LARGE,
         "too_large",
@@ -121,7 +131,15 @@ fn too_large(limit: usize) -> ApiError {
     .with("limit", limit.into())
 }
 
-async fn read_body(headers: &HeaderMap, body: Body, limit: usize) -> Result<Bytes, ApiError> {
+/// A decimal number without sign, leading zeros or other characters.
+pub fn parse_decimal(s: &str) -> Option<u64> {
+    if s.is_empty() || s.len() > 19 || !s.bytes().all(|b| b.is_ascii_digit()) || (s.len() > 1 && s.starts_with('0')) {
+        return None;
+    }
+    s.parse().ok()
+}
+
+pub async fn read_body(headers: &HeaderMap, body: Body, limit: usize) -> Result<Bytes, ApiError> {
     let declared = headers
         .get(header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
@@ -236,6 +254,7 @@ fn user_json(m: &Mem, u: &User) -> Value {
         "profile": u.profile.as_ref().map(|p| &p.envelope),
         "admin": m.is_admin(&u.id),
         "removed": u.removed_at.is_some(),
+        "revoked": u.revoked.as_ref().map(|r| &r.envelope),
     })
 }
 
@@ -276,6 +295,119 @@ pub async fn put_profile(
     Ok(Json(json!({ "profile": p.envelope })).into_response())
 }
 
+// ---- avatars ----
+
+pub async fn put_avatar(
+    State(st): State<Arc<AppState>>,
+    Auth(c): Auth,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Response, ApiError> {
+    let bytes = read_body(&headers, body, MAX_AVATAR_BYTES).await?;
+    let kind = ImageKind::sniff(&bytes)
+        .ok_or_else(|| ApiError::bad_request("the avatar must be a JPEG or WebP image").code("bad_image"))?;
+    let a = st.store.write(move |w| w.set_avatar(&c.user, &bytes, kind)).await?;
+    Ok(Json(json!({ "sha256": b64_encode(&a.sha256), "type": a.kind.mime() })).into_response())
+}
+
+pub async fn get_avatar(
+    State(st): State<Arc<AppState>>,
+    Auth(_): Auth,
+    UrlPath((user, sha)): UrlPath<(String, String)>,
+) -> Result<Response, ApiError> {
+    let user = UserId::parse(&user).ok_or_else(|| ApiError::bad_request("bad userId"))?;
+    let sha: [u8; 32] = b64_decode(&sha)
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| ApiError::bad_request("bad sha256"))?;
+    let a = st
+        .store
+        .read(|m| {
+            m.users
+                .get(&user)
+                .and_then(|u| u.avatars.iter().find(|a| a.sha256 == sha).copied())
+        })
+        .ok_or_else(|| ApiError::not_found("not_found", "no such avatar"))?;
+    let path = st.store.path().join("users").join(user.to_string()).join(a.file_name());
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ApiError::not_found("not_found", "no such avatar"));
+        }
+        Err(e) => return Err(crate::error::io_error("чтение аватара", e)),
+    };
+    let mut res = Response::new(Body::from(bytes));
+    let h = res.headers_mut();
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(a.kind.mime()));
+    h.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=31536000, immutable"),
+    );
+    Ok(res)
+}
+
+// ---- revocation ----
+
+/// `POST /v1/revoke`: no device token needed; the signature by the
+/// identity key is the authority.
+pub async fn revoke(
+    State(st): State<Arc<AppState>>,
+    ClientIp(ip): ClientIp,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Response, ApiError> {
+    st.limiter.check(ip)?;
+    let env: Envelope = read_json(&headers, body).await?;
+    let r = st.store.write(move |w| w.revoke(&env, now_ms())).await;
+    count_failure(&st, ip, r)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+// ---- invitation details ----
+
+#[derive(Deserialize)]
+struct InviteCheckBody {
+    invite: String,
+}
+
+/// `POST /v1/invites/check`: without a token; rate limited like `join`.
+pub async fn invite_check(
+    State(st): State<Arc<AppState>>,
+    ClientIp(ip): ClientIp,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Response, ApiError> {
+    st.limiter.check(ip)?;
+    let b: InviteCheckBody = read_json(&headers, body).await?;
+    let id = invite_hash(&b.invite);
+    let now = now_ms();
+    let r = st.store.read(|m| {
+        let inv = m
+            .invites
+            .get(&id)
+            .ok_or_else(|| ApiError::forbidden("invalid_invite", "unknown invitation"))?;
+        let status = if inv.used_at.is_some() {
+            "used"
+        } else if now >= inv.expires_at {
+            "expired"
+        } else {
+            "valid"
+        };
+        let name = m
+            .users
+            .get(&inv.created_by)
+            .and_then(|u| u.profile.as_ref())
+            .map(|p| p.name.clone());
+        Ok(json!({
+            "status": status,
+            "familyName": st.settings.family_name,
+            "createdBy": { "userId": inv.created_by, "name": name },
+            "createdAt": inv.created_at,
+            "expiresAt": inv.expires_at,
+        }))
+    });
+    Ok(Json(count_failure(&st, ip, r)?).into_response())
+}
+
 // ---- push subscription ----
 
 fn check_subscription(s: &Subscription) -> Result<(), ApiError> {
@@ -314,24 +446,32 @@ pub async fn delete_push(State(st): State<Arc<AppState>>, Auth(c): Auth) -> Resu
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-/// Sends `{"chatId","gseq"}` to every device with a subscription of the
-/// chat's other members. Subscriptions reported gone (404/410) are deleted.
-fn push_new_event(st: &Arc<AppState>, a: &Appended, sender: UserId) {
-    let Some(client) = st.push.clone() else { return };
-    let targets: Vec<(UserId, DevId, Subscription)> = st.store.read(|m| {
-        let mut out = Vec::new();
-        for uid in a.chat.members.iter().filter(|u| **u != sender) {
-            let Some(u) = m.users.get(uid).filter(|u| u.removed_at.is_none()) else {
+/// Devices that get a push for a new event: every subscribed device of the
+/// chat's members, the sender's other devices included, except the device
+/// that sent it. Removed and revoked users get nothing.
+pub fn push_targets(m: &Mem, chat: &Chat, sender: &UserId, sender_dev: &DevId) -> Vec<(UserId, DevId, Subscription)> {
+    let mut out = Vec::new();
+    for uid in chat.unique_members() {
+        let Some(u) = m.users.get(&uid).filter(|u| u.active()) else {
+            continue;
+        };
+        for (dev, d) in &u.devices {
+            if uid == *sender && dev == sender_dev {
                 continue;
-            };
-            for (dev, d) in &u.devices {
-                if let Some(s) = &d.push {
-                    out.push((*uid, *dev, s.clone()));
-                }
+            }
+            if let Some(s) = &d.push {
+                out.push((uid, *dev, s.clone()));
             }
         }
-        out
-    });
+    }
+    out
+}
+
+/// Sends `{"chatId","gseq"}` to the devices of [`push_targets`].
+/// Subscriptions reported gone (404/410) are deleted.
+fn push_new_event(st: &Arc<AppState>, a: &Appended, sender: UserId, sender_dev: DevId) {
+    let Some(client) = st.push.clone() else { return };
+    let targets = st.store.read(|m| push_targets(m, &a.chat, &sender, &sender_dev));
     let payload = json!({ "chatId": a.chat.id, "gseq": a.gseq }).to_string().into_bytes();
     for (uid, dev, sub) in targets {
         let st = st.clone();
@@ -356,12 +496,38 @@ fn push_new_event(st: &Arc<AppState>, a: &Appended, sender: UserId) {
 
 // ---- chats and events ----
 
-fn parse_chat(s: &str) -> Result<ChatId, ApiError> {
+pub fn parse_chat(s: &str) -> Result<ChatId, ApiError> {
     ChatId::parse(s).ok_or_else(|| ApiError::bad_request("bad chatId"))
+}
+
+/// An element of `GET /v1/chats` (also the answer of group requests).
+pub fn chat_json(ch: &Chat, last: Option<&Entry>) -> Value {
+    json!({
+        "chatId": ch.id,
+        "kind": match ch.kind { ChatKind::Dm => "dm", ChatKind::Group => "group" },
+        "members": ch.members,
+        "owner": ch.owner,
+        "version": (ch.kind == ChatKind::Group).then_some(ch.version),
+        "epoch": ch.epoch,
+        "createdAt": ch.created_at,
+        "lastGseq": last.map(|e| e.h.gseq),
+        "lastTime": last.map(|e| e.h.time),
+    })
+}
+
+fn notice_json(e: &Entry, n: &crate::notice::Notice) -> Value {
+    json!({
+        "kind": "notice",
+        "gseq": e.h.gseq,
+        "time": e.h.time,
+        "chatId": e.h.chat,
+        "notice": n.public,
+    })
 }
 
 fn event_json(e: &Entry, body: &[u8]) -> Value {
     json!({
+        "kind": "event",
         "gseq": e.h.gseq,
         "time": e.h.time,
         "chatId": e.h.chat,
@@ -373,41 +539,48 @@ fn event_json(e: &Entry, body: &[u8]) -> Value {
     })
 }
 
-async fn page_json(store: &Store, page: Page, oldest: u64, cursor_key: &str) -> Result<Response, ApiError> {
+async fn page_json(store: &Store, page: Page, oldest: (u64, Option<u64>)) -> Result<Response, ApiError> {
     let path = store.path().to_path_buf();
-    let events = page.events;
-    let bodies = tokio::task::spawn_blocking(move || Store::read_bodies(&path, &events))
+    let to_read: Vec<Entry> = page
+        .events
+        .iter()
+        .filter(|e| e.h.sender != NOTICE_SENDER)
+        .copied()
+        .collect();
+    let bodies = tokio::task::spawn_blocking(move || Store::read_bodies(&path, &to_read))
         .await
         .map_err(|_| ApiError::internal("reading events failed"))?;
-    let events: Vec<Value> = bodies.iter().map(|(e, b)| event_json(e, b)).collect();
-    let mut out = json!({
+    let mut bodies = bodies.into_iter().peekable();
+    let mut events: Vec<Value> = Vec::with_capacity(page.events.len());
+    for e in &page.events {
+        if e.h.sender == NOTICE_SENDER {
+            if let Some(n) = page.notices.get(&e.h.gseq) {
+                events.push(notice_json(e, n));
+            }
+            continue;
+        }
+        // Bodies come in the same order; one whose segment vanished is skipped.
+        if bodies.peek().is_some_and(|(b, _)| b.h.gseq == e.h.gseq) {
+            let (b, body) = bodies.next().expect("peeked");
+            events.push(event_json(&b, &body));
+        }
+    }
+    Ok(Json(json!({
         "events": events,
+        "cursor": page.cursor,
         "more": page.more,
-        "oldestGseq": oldest,
-    });
-    out[cursor_key] = json!(page.cursor);
-    Ok(Json(out).into_response())
+        "oldestGseq": oldest.0,
+        "oldestTime": oldest.1,
+    }))
+    .into_response())
 }
 
 pub async fn chats(State(st): State<Arc<AppState>>, Auth(c): Auth) -> Response {
     let list: Vec<Value> = st.store.read(|m| {
         let last = m.last_events();
-        let mut v: Vec<_> = m.chats.values().filter(|ch| ch.members.contains(&c.user)).collect();
+        let mut v: Vec<_> = m.chats.values().filter(|ch| ch.is_member(&c.user)).collect();
         v.sort_by_key(|ch| ch.id.to_string());
-        v.into_iter()
-            .map(|ch| {
-                let l = last.get(&ch.id);
-                json!({
-                    "chatId": ch.id,
-                    "kind": "dm",
-                    "members": ch.members,
-                    "epoch": ch.epoch,
-                    "createdAt": ch.created_at,
-                    "lastGseq": l.map(|e| e.h.gseq),
-                    "lastTime": l.map(|e| e.h.time),
-                })
-            })
-            .collect()
+        v.into_iter().map(|ch| chat_json(ch, last.get(&ch.id))).collect()
     });
     Json(json!({ "chats": list })).into_response()
 }
@@ -439,7 +612,7 @@ pub async fn post_event(
         .write(move |w| w.append(chat, c.user, c.dev, epoch, msg, &body, now_ms()))
         .await?;
     if !a.duplicate {
-        push_new_event(&st, &a, c.user);
+        push_new_event(&st, &a, c.user, c.dev);
     }
     Ok(Json(json!({ "gseq": a.gseq, "time": a.time, "duplicate": a.duplicate })).into_response())
 }
@@ -465,19 +638,25 @@ pub async fn events(
     let mut shutdown = st.shutdown.clone();
     let (page, oldest) = loop {
         changes.borrow_and_update();
-        let (removed, page, oldest) = st.store.read(|m| {
-            let gone = m
-                .users
-                .get(&c.user)
-                .is_none_or(|u| u.removed_at.is_some() || !u.devices.contains_key(&c.dev));
+        let (gone, page, oldest) = st.store.read(|m| {
+            let gone = match m.users.get(&c.user) {
+                Some(u) if u.revoked.is_some() => Some("revoked"),
+                Some(u) if u.removed_at.is_some() || !u.devices.contains_key(&c.dev) => Some("removed"),
+                Some(_) => None,
+                None => Some("removed"),
+            };
             (
                 gone,
                 m.events_after(&c.user, after, limit, MAX_PAGE_BYTES),
-                m.oldest_gseq(),
+                (m.oldest_gseq(), m.oldest_time()),
             )
         });
-        if removed {
-            return Err(ApiError::forbidden("removed", "removed from the family"));
+        match gone {
+            Some("revoked") => {
+                return Err(ApiError::forbidden("revoked", "this identity was revoked by its owner"));
+            }
+            Some(_) => return Err(ApiError::forbidden("removed", "removed from the family")),
+            None => {}
         }
         if !page.events.is_empty() || tokio::time::Instant::now() >= deadline || *shutdown.borrow() {
             break (page, oldest);
@@ -488,7 +667,7 @@ pub async fn events(
             _ = shutdown.wait_for(|v| *v) => {}
         }
     };
-    page_json(&st.store, page, oldest, "cursor").await
+    page_json(&st.store, page, oldest).await
 }
 
 #[derive(Deserialize)]
@@ -510,14 +689,17 @@ pub async fn chat_events(
     let server_id = st.server_id.clone();
     let (page, oldest) = st.store.read(|m| {
         match m.chats.get(&chat) {
-            Some(ch) if ch.members.contains(&c.user) => {}
+            Some(ch) if ch.is_member(&c.user) => {}
             Some(_) => return Err(ApiError::forbidden("not_member", "not a member of this chat")),
             None if m.derive_direct(&server_id, &c.user, &chat).is_some() => {}
             None => return Err(ApiError::not_found("chat_not_found", "no such chat")),
         }
-        Ok((m.chat_history(&chat, before, limit, MAX_PAGE_BYTES), m.oldest_gseq()))
+        Ok((
+            m.chat_history(&c.user, &chat, before, limit, MAX_PAGE_BYTES),
+            (m.oldest_gseq(), m.oldest_time()),
+        ))
     })?;
-    page_json(&st.store, page, oldest, "cursor").await
+    page_json(&st.store, page, oldest).await
 }
 
 // ---- admin ----
@@ -582,6 +764,8 @@ pub async fn admin_users(State(st): State<Arc<AppState>>, Admin(_): Admin) -> Re
                     "admin": m.is_admin(&u.id),
                     "removed": u.removed_at.is_some(),
                     "removedAt": u.removed_at,
+                    "revoked": u.revoked.is_some(),
+                    "revokedAt": u.revoked.as_ref().map(|r| r.at),
                     "devices": devices.into_iter().map(|(id, d)| json!({
                         "devId": id,
                         "createdAt": d.created_at,
@@ -638,6 +822,7 @@ pub async fn stats(State(st): State<Arc<AppState>>, Admin(_): Admin) -> Result<R
             "users": m.users.values().filter(|u| u.removed_at.is_none()).count(),
             "removedUsers": m.users.values().filter(|u| u.removed_at.is_some()).count(),
             "chats": m.chats.len(),
+            "groups": m.chats.values().filter(|c| c.kind == ChatKind::Group).count(),
             "retentionDays": st.settings.retention_days,
             "push": st.settings.push,
         })

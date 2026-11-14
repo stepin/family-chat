@@ -9,8 +9,10 @@
 import {
   deriveDmKeys,
   dmChatId,
+  fingerprint,
   verifyIdentityEnvelope,
   verifyProfileEnvelope,
+  verifyRevocationEnvelope,
   type DmKeys,
   type Identity,
 } from '@family-chat/protocol';
@@ -89,6 +91,9 @@ export class Directory {
             admin: entry.admin,
             removed: entry.removed,
             keyChange: null,
+            avatar: null,
+            revoked: null,
+            verifiedFingerprint: null,
           };
         } else {
           row = { ...old, admin: entry.admin, removed: entry.removed };
@@ -110,9 +115,19 @@ export class Directory {
               row.profile = profile.envelope;
               row.name = profile.name;
               row.rev = profile.rev;
+              row.avatar = profile.avatar;
             }
           } catch (e) {
             reports.push(`profile of ${entry.userId} rejected: ${describeError(e)}`);
+          }
+        }
+        if (entry.revoked && !row.revoked) {
+          try {
+            const r = verifyRevocationEnvelope(entry.revoked, identityOf(row));
+            row.revoked = { revokedAt: r.revokedAt, envelope: r.envelope, detectedAt: this.ctx.clock.now() };
+            reports.push(`identity of ${entry.userId} was revoked`);
+          } catch (e) {
+            reports.push(`revocation of ${entry.userId} rejected: ${describeError(e)}`);
           }
         }
         await db.users.put(row);
@@ -141,6 +156,7 @@ export class Directory {
         profile: null,
         name: null,
         rev: -1,
+        avatar: null,
       });
     });
     this.#keys.delete(userId);
@@ -158,21 +174,35 @@ export class Directory {
     return row ? identityOf(row) : undefined;
   }
 
+  /** Direct chat id with `peerId`; with my own userId it is the chat with myself ("Избранное"). */
   chatIdFor(peerId: string): string {
-    if (peerId === this.session.userId) throw new CoreError('self-chat');
     return dmChatId(this.session.serverId, this.session.userId, peerId);
+  }
+
+  /** The chat with myself. */
+  selfChatId(): string {
+    return this.chatIdFor(this.session.userId);
+  }
+
+  /** Marks (or unmarks) a member's current keys as verified by comparing fingerprints. */
+  async setVerified(userId: string, verified: boolean): Promise<void> {
+    const { db } = this.ctx;
+    await db.transaction('rw', db.users, async () => {
+      const row = await db.users.get([this.accountId, userId]);
+      if (!row) throw new CoreError('unknown-user');
+      await db.users.put({ ...row, verifiedFingerprint: verified ? fingerprint(row) : null });
+    });
   }
 
   /** The other member of a direct chat, found among known users (as the server does). */
   async peerForChat(chatId: string): Promise<string | undefined> {
     const chat = await this.ctx.db.chats.get([this.accountId, chatId]);
-    if (chat) return chat.peerId;
+    if (chat) return chat.kind === 'group' ? undefined : chat.peerId;
     if (!this.#chatIndex) {
       const index = new Map<string, string>();
       const users = await this.ctx.db.users.where('accountId').equals(this.accountId).toArray();
-      for (const u of users) {
-        if (u.userId !== this.session.userId) index.set(this.chatIdFor(u.userId), u.userId);
-      }
+      for (const u of users) index.set(this.chatIdFor(u.userId), u.userId);
+      index.set(this.selfChatId(), this.session.userId);
       this.#chatIndex = index;
     }
     return this.#chatIndex.get(chatId);

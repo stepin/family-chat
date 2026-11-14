@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { MessageView } from '@family-chat/core';
+  import AttachmentItem from './AttachmentItem.svelte';
+  import Avatar from './Avatar.svelte';
   import Icon from './Icon.svelte';
   import { formatTime } from '../lib/format.ts';
   import { linkify } from '../lib/linkify.ts';
@@ -7,24 +9,40 @@
   import { t } from '../lib/strings.ts';
 
   // One message. The text is plain text: rendered as text nodes, links only
-  // for http, https, mailto and tel (lib/linkify.ts). Never {@html}.
+  // for http, https, mailto and tel (lib/linkify.ts). Never {@html}. In
+  // groups others' messages carry the author's name and avatar on the first
+  // message of a run.
   let {
     message,
     continued = false,
     fresh = false,
+    author = null,
+    now = Date.now(),
     onretry,
     oncancel,
+    onopen,
   }: {
     message: MessageView;
     continued?: boolean;
     /** Arrived while the chat was open: the one intended animation. */
     fresh?: boolean;
+    /** Group chats, others' messages: who wrote it. */
+    author?: { readonly userId: string; readonly name: string; readonly hasAvatar: boolean } | null;
+    now?: number;
     onretry: (m: MessageView) => void;
     oncancel: (m: MessageView) => void;
+    onopen?: ((blobId: string) => void) | undefined;
   } = $props();
 
   const segments = $derived(message.kind === 'msg' ? linkify(message.body) : []);
   const status = $derived(message.outgoing ? sendStatus(message.status) : null);
+  const attachments = $derived(message.attachments ?? []);
+  const uploadPercent = $derived(
+    message.upload && message.status === 'on-device' && message.upload.total > 0
+      ? Math.floor((message.upload.done / message.upload.total) * 100)
+      : null,
+  );
+  const uploading = $derived(uploadPercent !== null && message.upload !== null && message.upload !== undefined && message.upload.done < message.upload.total);
 </script>
 
 <div
@@ -32,48 +50,67 @@
   class:out={message.outgoing}
   class:continued
   class:fresh
+  class:with-author={author !== null}
   class:failed={message.status === 'failed'}
   data-status={message.status}
   data-testid="message"
 >
-  <div class="bubble">
-    {#if message.kind === 'update-required'}
-      <p class="text muted">{t.chat.updateRequired}</p>
-    {:else}
-      <!-- prettier-ignore -->
-      <p class="text">{#each segments as s, i (i)}{#if s.kind === 'link'}<a href={s.href} target="_blank" rel="noopener noreferrer nofollow">{s.text}</a>{:else}{s.text}{/if}{/each}</p>
-    {/if}
-    <span class="meta">
-      {#if message.time !== null}<time class="tabular" datetime={new Date(message.time).toISOString()}>{formatTime(message.time)}</time>{/if}
-      {#if status}
-        <span class="status" title={status.hint}>
-          <Icon name={status.icon} size={14} />
-          <span class={message.status === 'on-server' ? 'visually-hidden' : 'status-text'}>{status.label}</span>
-        </span>
-      {/if}
-    </span>
-  </div>
-  {#if status && status.actions.length > 0 && message.status === 'failed'}
-    <div class="actions">
-      {#if status.actions.includes('retry')}
-        <button class="btn small" type="button" onclick={() => onretry(message)}>{t.chat.retry}</button>
-      {/if}
-      {#if status.actions.includes('cancel')}
-        <button class="btn secondary small" type="button" onclick={() => oncancel(message)}>{t.chat.cancelSend}</button>
-      {/if}
-    </div>
-  {:else if message.status === 'on-device'}
-    <div class="actions">
-      <button class="link-btn small" type="button" onclick={() => oncancel(message)}>{t.chat.cancelSend}</button>
-    </div>
+  {#if author && !continued}
+    <span class="author-avatar"><Avatar accountId={message.accountId} userId={author.userId} name={author.name} hasAvatar={author.hasAvatar} size={32} /></span>
   {/if}
+  <div class="col">
+    {#if author && !continued}<span class="author" data-testid="message-author">{author.name}</span>{/if}
+    <div class="bubble">
+      {#if attachments.length > 0}
+        <div class="attachments">
+          {#each attachments as a (a.blobId)}
+            <AttachmentItem accountId={message.accountId} attachment={a} sentAt={message.time} {now} {onopen} />
+          {/each}
+        </div>
+      {/if}
+      {#if message.kind === 'update-required'}
+        <p class="text muted">{t.chat.updateRequired}</p>
+      {:else if message.body.length > 0}
+        <!-- prettier-ignore -->
+        <p class="text">{#each segments as s, i (i)}{#if s.kind === 'link'}<a href={s.href} target="_blank" rel="noopener noreferrer nofollow">{s.text}</a>{:else}{s.text}{/if}{/each}</p>
+      {/if}
+      <span class="meta">
+        {#if uploading}
+          <span class="upload tabular" data-testid="upload-progress">{t.attach.uploading(uploadPercent ?? 0)}</span>
+        {/if}
+        {#if message.time !== null}<time class="tabular" datetime={new Date(message.time).toISOString()}>{formatTime(message.time)}</time>{/if}
+        {#if status}
+          <span class="status" title={status.hint}>
+            <Icon name={status.icon} size={14} />
+            <span class={message.status === 'on-server' ? 'visually-hidden' : 'status-text'}>{status.label}</span>
+          </span>
+        {/if}
+      </span>
+    </div>
+    {#if status && status.actions.length > 0 && message.status === 'failed'}
+      <div class="actions">
+        {#if status.actions.includes('retry')}
+          <button class="btn small" type="button" onclick={() => onretry(message)}>{t.chat.retry}</button>
+        {/if}
+        {#if status.actions.includes('cancel')}
+          <button class="btn secondary small" type="button" onclick={() => oncancel(message)}>{t.chat.cancelSend}</button>
+        {/if}
+      </div>
+    {:else if message.status === 'on-device'}
+      <div class="actions">
+        <button class="link-btn small" type="button" onclick={() => oncancel(message)}>
+          {uploading ? t.attach.cancelUpload : t.chat.cancelSend}
+        </button>
+      </div>
+    {/if}
+  </div>
 </div>
 
 <style>
   .msg {
     display: flex;
-    flex-direction: column;
     align-items: flex-start;
+    gap: var(--sp-2);
     margin-top: var(--sp-2);
     padding: 0 var(--sp-3);
   }
@@ -82,12 +119,40 @@
     margin-top: 2px;
   }
 
+  .msg.with-author.continued {
+    padding-left: calc(var(--sp-3) + 32px + var(--sp-2));
+  }
+
   .msg.out {
+    justify-content: flex-end;
+  }
+
+  .col {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 0;
+    max-width: min(36rem, 82%);
+  }
+
+  .out .col {
     align-items: flex-end;
   }
 
+  .author-avatar {
+    display: inline-flex;
+    margin-top: 2px;
+  }
+
+  .author {
+    padding: 0 var(--sp-2) 2px;
+    font-size: var(--text-xs);
+    font-weight: 700;
+    color: var(--accent);
+  }
+
   .bubble {
-    max-width: min(36rem, 82%);
+    max-width: 100%;
     padding: var(--sp-2) var(--sp-3);
     border-radius: var(--r-l);
     background: var(--surface);
@@ -101,6 +166,13 @@
 
   .failed .bubble {
     outline: 1px solid var(--error);
+  }
+
+  .attachments {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    margin-bottom: var(--sp-1);
   }
 
   .text {

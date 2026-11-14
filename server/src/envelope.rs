@@ -24,6 +24,7 @@ pub enum Kind {
     Identity,
     Profile,
     Auth,
+    Revoked,
 }
 
 impl Kind {
@@ -32,6 +33,7 @@ impl Kind {
             Kind::Identity => "identity",
             Kind::Profile => "profile",
             Kind::Auth => "auth",
+            Kind::Revoked => "revoked",
         }
     }
 }
@@ -171,10 +173,99 @@ pub fn name_problem(name: &str) -> Option<String> {
     None
 }
 
+/// Image formats accepted for avatars (checked by signature bytes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ImageKind {
+    Jpeg,
+    Webp,
+}
+
+impl ImageKind {
+    pub fn mime(self) -> &'static str {
+        match self {
+            ImageKind::Jpeg => "image/jpeg",
+            ImageKind::Webp => "image/webp",
+        }
+    }
+
+    pub fn ext(self) -> &'static str {
+        match self {
+            ImageKind::Jpeg => "jpg",
+            ImageKind::Webp => "webp",
+        }
+    }
+
+    pub fn from_mime(s: &str) -> Option<Self> {
+        match s {
+            "image/jpeg" => Some(ImageKind::Jpeg),
+            "image/webp" => Some(ImageKind::Webp),
+            _ => None,
+        }
+    }
+
+    pub fn from_ext(s: &str) -> Option<Self> {
+        match s {
+            "jpg" => Some(ImageKind::Jpeg),
+            "webp" => Some(ImageKind::Webp),
+            _ => None,
+        }
+    }
+
+    /// JPEG starts with `FF D8 FF`; WebP is `RIFF <size> WEBP`.
+    pub fn sniff(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() >= 3 && bytes[..3] == [0xFF, 0xD8, 0xFF] {
+            return Some(ImageKind::Jpeg);
+        }
+        if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+            return Some(ImageKind::Webp);
+        }
+        None
+    }
+}
+
+/// The `avatar` field of a profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AvatarRef {
+    /// `null`.
+    None,
+    /// `{"sha256":"<base64url>","type":"image/jpeg"|"image/webp"}`, exactly
+    /// these two keys (docs/PROTOCOL.md 4.3).
+    Image { sha256: [u8; 32], kind: ImageKind },
+    /// Anything else the M1 server accepted (a short string). Kept when
+    /// loading old data; new profiles must use `null` or an image.
+    Legacy,
+}
+
+fn parse_avatar(v: Option<&Value>) -> Result<AvatarRef, EnvError> {
+    match v {
+        Some(Value::Null) => Ok(AvatarRef::None),
+        Some(Value::String(s)) if s.len() <= 128 => Ok(AvatarRef::Legacy),
+        Some(Value::Object(o)) => {
+            if o.len() != 2 {
+                return Err(malformed("avatar must have exactly the keys sha256 and type"));
+            }
+            let sha256 = o
+                .get("sha256")
+                .and_then(Value::as_str)
+                .and_then(b64_decode)
+                .and_then(|b| <[u8; 32]>::try_from(b).ok())
+                .ok_or_else(|| malformed("avatar.sha256 must be 32 bytes in base64url"))?;
+            let kind = o
+                .get("type")
+                .and_then(Value::as_str)
+                .and_then(ImageKind::from_mime)
+                .ok_or_else(|| malformed("avatar.type must be image/jpeg or image/webp"))?;
+            Ok(AvatarRef::Image { sha256, kind })
+        }
+        _ => Err(malformed("avatar must be null or {sha256, type}")),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Profile {
     pub rev: i64,
     pub name: String,
+    pub avatar: AvatarRef,
     pub envelope: Envelope,
 }
 
@@ -190,11 +281,7 @@ pub fn verify_profile(env: &Envelope, user: &UserId, key: &VerifyingKey) -> Resu
     if let Some(problem) = name_problem(name) {
         return Err(malformed(problem));
     }
-    match m.get("avatar") {
-        Some(Value::Null) => {}
-        Some(Value::String(s)) if s.len() <= 128 => {}
-        _ => return Err(malformed("avatar must be null or a short string")),
-    }
+    let avatar = parse_avatar(m.get("avatar"))?;
     let rev = int_field(&m, "rev")?;
     if rev < 0 {
         return Err(malformed("rev must not be negative"));
@@ -204,6 +291,7 @@ pub fn verify_profile(env: &Envelope, user: &UserId, key: &VerifyingKey) -> Resu
     Ok(Profile {
         rev,
         name: name.to_string(),
+        avatar,
         envelope: env.clone(),
     })
 }
@@ -235,6 +323,34 @@ pub fn verify_auth(env: &Envelope, req: &AuthRequest, key: &VerifyingKey) -> Res
     env.verify(Kind::Auth, &req.bytes, key)
 }
 
+/// A parsed `revoked` envelope: `{"v":1,"userId","revokedAt"}`.
+#[derive(Debug, Clone)]
+pub struct Revocation {
+    pub user_id: UserId,
+    pub revoked_at: i64,
+    bytes: Vec<u8>,
+}
+
+/// Parses a `revoked` envelope (no signature check yet: the key is found
+/// by `userId`, then [`verify_revocation`]).
+pub fn parse_revocation(env: &Envelope) -> Result<Revocation, EnvError> {
+    let (bytes, m) = env.decode()?;
+    check_version(&m)?;
+    let revoked_at = int_field(&m, "revokedAt")?;
+    if revoked_at < 0 {
+        return Err(malformed("revokedAt must not be negative"));
+    }
+    Ok(Revocation {
+        user_id: user_field(&m)?,
+        revoked_at,
+        bytes,
+    })
+}
+
+pub fn verify_revocation(env: &Envelope, r: &Revocation, key: &VerifyingKey) -> Result<(), EnvError> {
+    env.verify(Kind::Revoked, &r.bytes, key)
+}
+
 #[doc(hidden)]
 pub mod testkit {
     //! Signing side, for tests (unit and integration).
@@ -262,6 +378,16 @@ pub mod testkit {
     pub fn profile(key: &SigningKey, uid: &UserId, name: &str, rev: i64) -> Envelope {
         let p = json!({"v":1,"userId":uid.to_string(),"name":name,"avatar":null,"rev":rev,"updated":2});
         seal(key, Kind::Profile, &p.to_string())
+    }
+
+    pub fn profile_with_avatar(key: &SigningKey, uid: &UserId, name: &str, rev: i64, avatar: Value) -> Envelope {
+        let p = json!({"v":1,"userId":uid.to_string(),"name":name,"avatar":avatar,"rev":rev,"updated":2});
+        seal(key, Kind::Profile, &p.to_string())
+    }
+
+    pub fn revocation(key: &SigningKey, uid: &UserId, at: i64) -> Envelope {
+        let p = json!({"v":1,"userId":uid.to_string(),"revokedAt":at});
+        seal(key, Kind::Revoked, &p.to_string())
     }
 }
 
@@ -351,6 +477,65 @@ mod tests {
             verify_profile(&seal(&k, Kind::Profile, &p), &uid, &id.key),
             Err(EnvError::Malformed(_))
         ));
+    }
+
+    #[test]
+    fn avatar_field() {
+        let k = SigningKey::from_bytes(&[7; 32]);
+        let (uid, env) = identity(&k);
+        let id = verify_identity(&env).unwrap();
+        let check =
+            |a: Value| verify_profile(&profile_with_avatar(&k, &uid, "x", 1, a), &uid, &id.key).map(|p| p.avatar);
+        assert_eq!(check(Value::Null).unwrap(), AvatarRef::None);
+        let sha = b64_encode(&[3u8; 32]);
+        assert_eq!(
+            check(serde_json::json!({"sha256": sha, "type": "image/webp"})).unwrap(),
+            AvatarRef::Image {
+                sha256: [3; 32],
+                kind: ImageKind::Webp
+            }
+        );
+        // M1 accepted short strings; they still load.
+        assert_eq!(check(serde_json::json!("x")).unwrap(), AvatarRef::Legacy);
+        for bad in [
+            serde_json::json!({"sha256": sha, "type": "image/png"}),
+            serde_json::json!({"sha256": sha, "type": "image/jpeg", "extra": 1}),
+            serde_json::json!({"sha256": b64_encode(&[3u8; 31]), "type": "image/jpeg"}),
+            serde_json::json!({"type": "image/jpeg"}),
+            serde_json::json!(5),
+            serde_json::json!("y".repeat(129)),
+        ] {
+            assert!(matches!(check(bad.clone()), Err(EnvError::Malformed(_))), "{bad}");
+        }
+    }
+
+    #[test]
+    fn image_signatures() {
+        assert_eq!(ImageKind::sniff(&[0xFF, 0xD8, 0xFF, 0xDB]), Some(ImageKind::Jpeg));
+        assert_eq!(ImageKind::sniff(b"RIFF\x10\0\0\0WEBPVP8 "), Some(ImageKind::Webp));
+        assert_eq!(ImageKind::sniff(b"RIFF1234WEBP"), Some(ImageKind::Webp));
+        assert_eq!(ImageKind::sniff(b"RIFF1234WAVE"), None);
+        assert_eq!(ImageKind::sniff(b"\x89PNG\r\n"), None);
+        assert_eq!(ImageKind::sniff(&[0xFF, 0xD8]), None);
+    }
+
+    #[test]
+    fn revocation_payload() {
+        let k = SigningKey::from_bytes(&[8; 32]);
+        let (uid, _) = identity(&k);
+        let env = revocation(&k, &uid, 42);
+        let r = parse_revocation(&env).unwrap();
+        assert_eq!((r.user_id, r.revoked_at), (uid, 42));
+        verify_revocation(&env, &r, &k.verifying_key()).unwrap();
+        let other = SigningKey::from_bytes(&[9; 32]);
+        assert_eq!(
+            verify_revocation(&env, &r, &other.verifying_key()).unwrap_err(),
+            EnvError::BadSignature
+        );
+        let p = format!(r#"{{"v":1,"userId":"{uid}"}}"#);
+        assert!(parse_revocation(&seal(&k, Kind::Revoked, &p)).is_err());
+        let p = format!(r#"{{"v":1,"userId":"{uid}","revokedAt":-1}}"#);
+        assert!(parse_revocation(&seal(&k, Kind::Revoked, &p)).is_err());
     }
 
     #[test]

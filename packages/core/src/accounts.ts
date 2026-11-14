@@ -7,22 +7,26 @@ import {
   base32Encode,
   createIdentityEnvelope,
   createProfileEnvelope,
+  createRevocationEnvelope,
   deriveIdentityKeys,
   newDevId,
   newSeed,
   phraseToSeed,
   randomBytes,
   seedToPhrase,
+  type AvatarRef,
   type IdentityKeys,
 } from '@family-chat/protocol';
 import { isApiError } from './api/errors.ts';
 import { normalizeServerUrl, type Transport } from './api/transport.ts';
-import type { Hello, IssuedToken, JoinCode } from './api/types.ts';
-import type { AccountRuntimeLike } from './apply.ts';
+import type { Hello, InviteCheck, IssuedToken, JoinCode } from './api/types.ts';
+import { retryPendingEvents, type AccountRuntimeLike } from './apply.ts';
+import { Transfers } from './attachments.ts';
 import type { CoreContext } from './context.ts';
 import type { AccountRow } from './db/schema.ts';
 import { Directory } from './directory.ts';
 import { CoreError } from './errors.ts';
+import { Groups } from './groups.ts';
 import { OutboxSender } from './outbox.ts';
 import { authenticateDevice, Session } from './session.ts';
 import { SyncEngine } from './sync.ts';
@@ -32,9 +36,12 @@ export const SUPPORTED_PROTOCOL = 1;
 export class AccountRuntime implements AccountRuntimeLike {
   readonly session: Session;
   readonly directory: Directory;
+  readonly groups: Groups;
   readonly sync: SyncEngine;
   readonly outbox: OutboxSender;
+  readonly transfers: Transfers;
   #started = false;
+  #connectedOnce = false;
 
   constructor(
     readonly ctx: CoreContext,
@@ -42,9 +49,29 @@ export class AccountRuntime implements AccountRuntimeLike {
   ) {
     this.session = new Session(ctx, account);
     this.directory = new Directory(ctx, this.session);
+    this.groups = new Groups({
+      ctx,
+      session: this.session,
+      directory: this.directory,
+      retryPending: async (chatIds) => {
+        await retryPendingEvents(this, chatIds);
+      },
+    });
     this.outbox = new OutboxSender(this);
-    this.sync = new SyncEngine(this, { onConnected: () => this.outbox.kick() });
+    this.transfers = new Transfers(this, ctx.files, { onUploaded: () => this.outbox.kick() });
+    this.sync = new SyncEngine(this, {
+      onConnected: () => {
+        this.outbox.kick();
+        this.transfers.kick();
+        if (!this.#connectedOnce) {
+          this.#connectedOnce = true;
+          this.groups.kick({ full: true });
+        }
+      },
+    });
   }
+
+  readonly onAttachments = (): void => this.transfers.kick();
 
   get accountId(): string {
     return this.session.accountId;
@@ -53,15 +80,30 @@ export class AccountRuntime implements AccountRuntimeLike {
   start(): void {
     if (this.#started) return;
     this.#started = true;
+    void ensureSelfChat(this).catch(() => undefined);
     this.sync.start();
     this.outbox.start();
+    this.groups.start();
+    this.transfers.start();
   }
 
   async stop(): Promise<void> {
     if (!this.#started) return;
     this.#started = false;
-    await Promise.all([this.sync.stop(), this.outbox.stop()]);
+    await Promise.all([this.sync.stop(), this.outbox.stop(), this.groups.stop(), this.transfers.stop()]);
   }
+}
+
+/** The chat with myself ("Избранное") exists on every account. Returns its id. */
+export async function ensureSelfChat(rt: AccountRuntimeLike): Promise<string> {
+  const { db, clock } = rt.ctx;
+  const acc = rt.session.accountId;
+  const chatId = rt.directory.selfChatId();
+  await db.transaction('rw', db.chats, async () => {
+    if (await db.chats.get([acc, chatId])) return;
+    await db.chats.put({ accountId: acc, chatId, kind: 'self', peerId: rt.session.userId, createdAt: clock.now(), last: null, readGseq: 0, unread: 0 });
+  });
+  return chatId;
 }
 
 /** A new identity; the seed is stored on this device. Returns its userId. */
@@ -213,6 +255,7 @@ async function addDevice(
   } catch (e) {
     if (isApiError(e, 'unknown_user')) throw new CoreError('unknown-user', 'this identity is not a member of the server');
     if (isApiError(e, 'removed')) throw new CoreError('removed');
+    if (isApiError(e, 'revoked')) throw new CoreError('revoked', 'this identity was revoked on the server');
     throw e;
   }
   if (seedToStore) await storeSeed(ctx, seedToStore);
@@ -226,8 +269,18 @@ async function storeSeed(ctx: CoreContext, seed: Uint8Array): Promise<string> {
   return keys.userId;
 }
 
-/** Signs and uploads a new profile (rev = stored + 1; one retry on 409 stale_rev). */
-export async function updateProfile(rt: AccountRuntime, name: string): Promise<void> {
+export interface ProfileChange {
+  readonly name?: string;
+  /** New avatar reference (after PUT /v1/me/avatar), or null to remove it. */
+  readonly avatar?: AvatarRef | null;
+}
+
+/**
+ * Signs and uploads a new profile (rev = stored + 1; one retry on 409
+ * stale_rev). Fields not given keep their current values.
+ */
+export async function updateProfile(rt: AccountRuntimeLike, changeOrName: string | ProfileChange): Promise<void> {
+  const change: ProfileChange = typeof changeOrName === 'string' ? { name: changeOrName } : changeOrName;
   const { ctx, session, directory } = rt;
   const keys = await ctx.keys(session.userId);
   let me = await directory.user(session.userId);
@@ -236,14 +289,18 @@ export async function updateProfile(rt: AccountRuntime, name: string): Promise<v
     me = await directory.user(session.userId);
     if (!me) throw new CoreError('unknown-user');
   }
+  const name = change.name ?? me.name;
+  if (name === null) throw new CoreError('invalid-input', 'no name');
+  const avatar = change.avatar !== undefined ? change.avatar : (me.avatar ?? null);
   let rev = Math.max(me.rev, 0) + 1;
   for (let attempt = 0; ; attempt++) {
-    const env = createProfileEnvelope(keys, { name, rev, updated: ctx.clock.now() });
+    const env = createProfileEnvelope(keys, { name, rev, updated: ctx.clock.now(), avatar });
     try {
       const stored = await session.call((t) => session.transport.putProfile(t, env));
       await directory.ingest([
         { userId: me.userId, identity: me.identity, profile: stored, admin: me.admin, removed: me.removed },
       ]);
+      void ctx.diag.info('auth', `profile updated (rev ${rev})`, session.accountId);
       return;
     } catch (e) {
       if (isApiError(e, 'stale_rev') && attempt === 0) {
@@ -253,4 +310,44 @@ export async function updateProfile(rt: AccountRuntime, name: string): Promise<v
       throw e;
     }
   }
+}
+
+/** `POST /v1/invites/check`: who invites into which family; 'invalid' for an unknown code. */
+export async function checkInvite(
+  ctx: CoreContext,
+  serverUrl: string,
+  code: string,
+): Promise<InviteCheck | { readonly status: 'invalid' }> {
+  try {
+    return await ctx.transport(normalizeServerUrl(serverUrl)).inviteCheck(code.trim().toLowerCase());
+  } catch (e) {
+    if (isApiError(e, 'invalid_invite')) return { status: 'invalid' };
+    throw e;
+  }
+}
+
+/**
+ * Revokes an identity on one server by its own signature (no token needed).
+ * Every account of that identity on that server becomes 'removed' with the
+ * `revoked` flag. Irreversible: the identity can never sign in there again.
+ */
+export async function revokeIdentity(ctx: CoreContext, serverUrl: string, keys: IdentityKeys): Promise<void> {
+  const url = normalizeServerUrl(serverUrl);
+  const env = createRevocationEnvelope(keys, ctx.clock.now());
+  try {
+    await ctx.transport(url).revoke(env);
+  } catch (e) {
+    if (isApiError(e, 'unknown_user')) throw new CoreError('unknown-user', 'this identity is not a member of the server');
+    throw e;
+  }
+  const rows = await ctx.db.accounts.where('serverId').equals((await fetchHello(ctx, url)).serverId).toArray();
+  for (const r of rows) {
+    if (r.userId === keys.userId) await ctx.db.accounts.update(r.id, { status: 'removed', revoked: true });
+  }
+  void ctx.diag.warn('auth', `identity ${keys.userId} revoked on ${url}`);
+}
+
+/** Identity keys from a recovery phrase (for revoking without a device). The phrase is a secret. */
+export function keysFromPhrase(phrase: string): IdentityKeys {
+  return deriveIdentityKeys(phraseToSeed(phrase));
 }

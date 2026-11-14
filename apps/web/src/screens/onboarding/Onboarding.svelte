@@ -6,6 +6,7 @@
   import JoinFamily from './JoinFamily.svelte';
   import AdminSetup from './AdminSetup.svelte';
   import Restore from './Restore.svelte';
+  import RevokeByPhrase from './RevokeByPhrase.svelte';
 </script>
 
 <div class="onboarding">
@@ -19,6 +20,8 @@
     <AdminSetup />
   {:else if nav.top.name === 'restore'}
     <Restore />
+  {:else if nav.top.name === 'revoke-phrase'}
+    <RevokeByPhrase />
   {:else}
     <Welcome />
   {/if}

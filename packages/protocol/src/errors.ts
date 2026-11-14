@@ -34,7 +34,20 @@ export type ProtocolErrorCode =
   // Event: author is not known to the caller (not a member of the chat).
   | 'unknown-author'
   // Event: author inside the ciphertext differs from the sender reported by the server.
-  | 'sender-mismatch';
+  | 'sender-mismatch'
+  // Group state or sealed key signed by someone other than the owner the ownership chain yields,
+  // or a change not authorised by the owner of the previous accepted state.
+  | 'not-owner'
+  // Group: the chat id is not derived from the creator key, or the ownership transfer chain is broken.
+  | 'bad-chain'
+  // Group: the state does not follow the previous accepted state (version, prev hash, epoch rules).
+  | 'invalid-transition'
+  // Group: the state differs from the one a sealed key refers to (version or hash).
+  | 'state-mismatch'
+  // Sealed group key addressed to another member.
+  | 'wrong-recipient'
+  // Archive: the file was written by another identity (or is not an archive of this identity).
+  | 'wrong-identity';
 
 export class ProtocolError extends Error {
   override readonly name = 'ProtocolError';

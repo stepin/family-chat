@@ -14,6 +14,8 @@
   const invite = app.invite;
   const branch = gatewayBranch(app.platform);
   let family = $state<string | null>(null);
+  /** A used or expired invitation is reported before any installation steps. */
+  let problem = $state<'used' | 'expired' | 'invalid' | null>(null);
   let copied = $state<string | null>(null);
 
   /** What to copy: the invitation link, or the page address when there is none. */
@@ -26,8 +28,14 @@
     }
     if (invite) {
       app.core
-        .serverInfo(invite.serverUrl)
-        .then((h) => (family = h.familyName))
+        .checkInvite(invite.serverUrl, invite.code)
+        .then((c) => {
+          if (c.status === 'invalid') problem = 'invalid';
+          else {
+            family = c.familyName;
+            if (c.status !== 'valid') problem = c.status;
+          }
+        })
         .catch(() => undefined);
     }
   });
@@ -50,7 +58,13 @@
   const back = nav.stack.length > 1 ? () => nav.back() : undefined;
 </script>
 
-{#if branch === 'in-app'}
+{#if problem}
+  <Page title={family ? t.gateway.title(family) : t.join.titleUnknown} onback={back} narrow>
+    <div class="stack">
+      <p class="notice warn" role="alert">{problem === 'used' ? t.join.used : problem === 'expired' ? t.join.expired : t.join.invalid}</p>
+    </div>
+  </Page>
+{:else if branch === 'in-app'}
   <Page title={t.gateway.inAppTitle} onback={back} narrow>
     <div class="stack">
       {#if invite}<p class="lead">{t.gateway.title(family)}</p>{/if}

@@ -1,12 +1,14 @@
-// @family-chat/core: the client core for stage M1 (no UI, no DOM).
+// @family-chat/core: the client core (stage M2; no UI, no DOM).
 // API client, local database, session and identity, sync engine, outbox,
-// directory, administration, push, and the facade for the UI.
+// directory, groups, attachments, avatars, revocation, archive,
+// administration, push, and the facade for the UI.
 
 // The facade (start here).
 export { createCore, FamilyChatCore, handlePushPayload, MESSAGES_PAGE, HISTORY_PAGE } from './core.ts';
 export type {
   CoreOptions,
   AccountView,
+  JoinResult,
   Member,
   ChatListItem,
   ChatView,
@@ -16,7 +18,24 @@ export type {
   DraftItem,
   DiagnosticEntry,
   CreatedInvite,
+  OutgoingMessage,
+  AvatarView,
 } from './core.ts';
+export type {
+  ChatSummary,
+  GroupView,
+  GroupMemberView,
+  AttachmentView,
+  AttachmentStatus,
+  TransferView,
+} from './views.ts';
+export type { AttachmentInput } from './attachments.ts';
+export type { ExportOptions, ImportResult, ArchiveSource } from './archive.ts';
+export { SETTING_AUTO_DOWNLOAD, AUTO_DOWNLOAD_MAX_BYTES } from './apply.ts';
+export { MAX_AVATAR_BYTES } from './avatars.ts';
+// Attachment limits and types of the protocol, for the UI's own checks.
+export { IMAGE_TYPES, MAX_ATTACHMENTS, MAX_THUMB_BYTES } from '@family-chat/protocol';
+export type { FileStore, FileStoreKind, FileStorePreference, OpfsDirectory } from './files.ts';
 export type { JoinInput, RestoreInput } from './accounts.ts';
 export type { ConnectionState } from './sync.ts';
 export type { PushNotice } from './push.ts';
@@ -58,6 +77,14 @@ export type {
   DraftRow,
   DiagnosticRow,
   DiagnosticLevel,
+  ChatKind,
+  ServiceEntry,
+  ServerLimits,
+  GroupRow,
+  GroupStateRow,
+  GroupOp,
+  BlobRow,
+  BlobStatus,
 } from './db/schema.ts';
 export { MAX_DIAGNOSTICS } from './db/diagnostics.ts';
 

@@ -377,9 +377,8 @@ async fn foreign_chat_is_forbidden() {
     assert_eq!(res.status, 404);
     assert_eq!(res.json()["error"], "chat_not_found");
     assert_eq!(son.get(&srv, &format!("/v1/chats/{random}/events")).await.status, 404);
-    // Self chat is not a direct chat.
-    let selfchat = ChatId::direct(&sid, &son.user, &son.user);
-    assert_eq!(son.post_event(&srv, &selfchat, &new_msg_id(), b"x").await.status, 404);
+    // (The chat with oneself exists since M2: tests/m2.rs.)
+    let _ = sid;
     assert_eq!(son.get(&srv, "/v1/chats/NOT-AN-ID/events").await.status, 400);
 
     // Without or with a wrong token.
@@ -1020,6 +1019,47 @@ async fn push_on_new_event() {
     // DELETE /v1/me/push.
     assert_eq!(mama.send(&srv, "DELETE", "/v1/me/push", None).await.status, 204);
     assert_eq!(mama.get(&srv, "/v1/me").await.json()["push"], false);
+}
+
+/// M2: the sender's other devices are notified too, the sending device is not.
+#[tokio::test]
+async fn push_reaches_senders_other_devices() {
+    let (service, fake) = fake_push().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let (mama, papa) = family(&srv).await;
+    let tablet = second_device(&srv, &mama).await;
+    for (m, name) in [(&mama, "mama-phone"), (&tablet, "mama-tablet"), (&papa, "papa")] {
+        let (_, _, sub) = subscription(&format!("{service}/push/{name}"));
+        assert_eq!(m.send(&srv, "PUT", "/v1/me/push", Some(&sub)).await.status, 204);
+    }
+    let names = || {
+        let mut v: Vec<String> = fake.got.lock().unwrap().iter().map(|(n, _)| n.clone()).collect();
+        v.sort();
+        v
+    };
+    let chat = mama.chat_with(&srv.server_id(), &papa);
+    mama.post_event(&srv, &chat, &new_msg_id(), b"hi").await;
+    wait_for(|| fake.got.lock().unwrap().len() == 2).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(names(), vec!["mama-tablet", "papa"]);
+
+    // The chat with oneself: only the other device.
+    fake.got.lock().unwrap().clear();
+    let me = mama.chat_with(&srv.server_id(), &mama);
+    tablet.post_event(&srv, &me, &new_msg_id(), b"note").await;
+    wait_for(|| !fake.got.lock().unwrap().is_empty()).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(names(), vec!["mama-phone"]);
+
+    // A duplicate sends nothing.
+    fake.got.lock().unwrap().clear();
+    let key = new_msg_id();
+    mama.post_event(&srv, &chat, &key, b"x").await;
+    wait_for(|| fake.got.lock().unwrap().len() == 2).await;
+    mama.post_event(&srv, &chat, &key, b"x").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(fake.got.lock().unwrap().len(), 2);
 }
 
 #[tokio::test]

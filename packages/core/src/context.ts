@@ -7,6 +7,7 @@ import { Transport, type FetchFn } from './api/transport.ts';
 import { Diagnostics } from './db/diagnostics.ts';
 import type { CoreDb } from './db/schema.ts';
 import { CoreError } from './errors.ts';
+import { FileStores, type FileStorePreference, type OpfsDirectory } from './files.ts';
 import { DEFAULT_BACKOFF, type BackoffOptions } from './util/backoff.ts';
 import { systemClock, type Clock } from './util/clock.ts';
 import { LeaseLocks, webLocks, type LockManagerLike } from './util/locks.ts';
@@ -24,6 +25,10 @@ export interface ContextOptions {
   readonly waitSeconds?: number;
   /** Timeout of ordinary requests, ms. */
   readonly timeoutMs?: number;
+  /** Where attachment files are kept: 'auto' (OPFS when available, else IndexedDB), 'opfs' or 'idb'. */
+  readonly fileStore?: FileStorePreference;
+  /** OPFS root (tests); defaults to navigator.storage.getDirectory(). */
+  readonly opfsRoot?: () => Promise<OpfsDirectory>;
 }
 
 export class CoreContext {
@@ -34,6 +39,7 @@ export class CoreContext {
   readonly backoff: BackoffOptions;
   readonly waitSeconds: number;
   readonly diag: Diagnostics;
+  readonly files: FileStores;
   readonly #fetch: FetchFn | undefined;
   readonly #timeoutMs: number | undefined;
   readonly #transports = new Map<string, Transport>();
@@ -47,6 +53,7 @@ export class CoreContext {
     this.backoff = o.backoff ?? DEFAULT_BACKOFF;
     this.waitSeconds = o.waitSeconds ?? 25;
     this.diag = new Diagnostics(o.db, this.clock);
+    this.files = new FileStores(o.db, o.fileStore ?? 'auto', o.opfsRoot);
     this.#fetch = o.fetch;
     this.#timeoutMs = o.timeoutMs;
   }

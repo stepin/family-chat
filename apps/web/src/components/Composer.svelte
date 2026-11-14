@@ -12,16 +12,66 @@
     chatId,
     autofocus = false,
     onsend,
-  }: { accountId: string; chatId: string; autofocus?: boolean; onsend: (text: string) => Promise<boolean> } = $props();
+    onfiles,
+  }: {
+    accountId: string;
+    chatId: string;
+    autofocus?: boolean;
+    onsend: (text: string) => Promise<boolean>;
+    /** Files picked, pasted or taken with the camera; the current text goes along as the caption. */
+    onfiles?: ((files: File[], text: string) => void) | undefined;
+  } = $props();
 
   const MAX_BYTES = 16 * 1024;
   let text = $state('');
   let field: HTMLTextAreaElement | undefined = $state();
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
-  let sending = $state(false);
+  /** Sends go out one after another, in the order they were typed (a quick second Enter is not lost). */
+  let chain: Promise<void> = Promise.resolve();
   // Phones and tablets: Enter inserts a new line, the button sends.
   const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
   const tooLong = $derived(new TextEncoder().encode(text).length > MAX_BYTES);
+  let menuOpen = $state(false);
+  let attachBtn: HTMLButtonElement | undefined = $state();
+  let photoInput: HTMLInputElement | undefined = $state();
+  let cameraInput: HTMLInputElement | undefined = $state();
+  let fileInput: HTMLInputElement | undefined = $state();
+
+  /** Clears the text and the draft (after the text went out as a caption). */
+  export function clear(): void {
+    text = '';
+    clearTimeout(saveTimer);
+    saveDraft();
+    queueMicrotask(resize);
+  }
+
+  function pick(input: HTMLInputElement | undefined): void {
+    menuOpen = false;
+    input?.click();
+  }
+
+  function onPicked(e: Event): void {
+    const input = e.currentTarget as HTMLInputElement;
+    const files = [...(input.files ?? [])];
+    input.value = '';
+    if (files.length > 0) onfiles?.(files, text);
+  }
+
+  /** Pasted pictures and files (desktop): the clipboard's files go to the preview. */
+  function onPaste(e: ClipboardEvent): void {
+    const files = [...(e.clipboardData?.files ?? [])];
+    if (files.length === 0 || !onfiles) return;
+    e.preventDefault();
+    onfiles(files, text);
+  }
+
+  function onMenuKey(e: KeyboardEvent): void {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      menuOpen = false;
+      attachBtn?.focus();
+    }
+  }
 
   function saveDraft(): void {
     clearTimeout(saveTimer);
@@ -40,21 +90,23 @@
     field.style.setProperty('height', `${Math.min(field.scrollHeight, 160)}px`);
   }
 
-  async function send(): Promise<void> {
+  function send(): Promise<void> {
     const value = text.trim();
-    if (value.length === 0 || tooLong || sending) return;
-    sending = true;
+    if (value.length === 0 || tooLong) return chain;
     clearTimeout(saveTimer);
     const before = text;
     text = '';
-    try {
-      const ok = await onsend(value);
-      if (!ok) text = before;
-    } finally {
-      sending = false;
-      queueMicrotask(resize);
-      field?.focus();
-    }
+    queueMicrotask(resize);
+    field?.focus();
+    chain = chain.then(async () => {
+      const ok = await onsend(value).catch(() => false);
+      // On failure the text comes back, unless something new was typed meanwhile.
+      if (!ok && text === '') {
+        text = before;
+        queueMicrotask(resize);
+      }
+    });
+    return chain;
   }
 
   function onKeydown(e: KeyboardEvent): void {
@@ -83,7 +135,32 @@
   });
 </script>
 
+{#if menuOpen}
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div class="attach-menu" role="group" aria-label={t.attach.menu} onkeydown={onMenuKey}>
+    <button class="btn secondary small" type="button" onclick={() => pick(photoInput)}><Icon name="image" />{t.attach.photo}</button>
+    {#if coarse}
+      <button class="btn secondary small" type="button" onclick={() => pick(cameraInput)}><Icon name="camera" />{t.attach.camera}</button>
+    {/if}
+    <button class="btn secondary small" type="button" onclick={() => pick(fileInput)}><Icon name="file" />{t.attach.file}</button>
+  </div>
+{/if}
+<input bind:this={photoInput} class="visually-hidden" type="file" accept="image/*" multiple tabindex="-1" aria-hidden="true" onchange={onPicked} data-testid="photo-input" />
+<input bind:this={cameraInput} class="visually-hidden" type="file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true" onchange={onPicked} />
+<input bind:this={fileInput} class="visually-hidden" type="file" multiple tabindex="-1" aria-hidden="true" onchange={onPicked} data-testid="file-input" />
 <div class="composer">
+  {#if onfiles}
+    <button
+      bind:this={attachBtn}
+      class="attach"
+      type="button"
+      aria-label={t.attach.button}
+      aria-expanded={menuOpen}
+      onclick={() => (menuOpen = !menuOpen)}
+    >
+      <Icon name="clip" />
+    </button>
+  {/if}
   <label for="composer-{chatId}" class="visually-hidden">{t.chat.composerLabel}</label>
   <textarea
     id="composer-{chatId}"
@@ -97,6 +174,7 @@
     aria-invalid={tooLong ? 'true' : undefined}
     oninput={onInput}
     onkeydown={onKeydown}
+    onpaste={onPaste}
     onblur={saveDraft}
   ></textarea>
   {#if !coarse}<span id="composer-hint-{chatId}" class="visually-hidden">{t.chat.sendHintDesktop}</span>{/if}
@@ -142,6 +220,35 @@
     outline: 2px solid var(--focus);
     outline-offset: 0;
     border-color: transparent;
+  }
+
+  .attach {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: var(--touch);
+    height: var(--touch);
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  .attach:hover,
+  .attach[aria-expanded='true'] {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+
+  .attach-menu {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    border-top: 1px solid var(--line);
+    background: var(--surface);
   }
 
   .send {

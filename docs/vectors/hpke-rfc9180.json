@@ -1,0 +1,39 @@
+{
+  "note": "RFC 9180 known answers for DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 with AES-128-GCM (aead_id 1, the suite of RFC 9180 appendix A.1) and AES-256-GCM (aead_id 2, the suite used by this protocol). The fields mode..enc are the official CFRG test vectors (github.com/cfrg/draft-irtf-cfrg-hpke, test-vectors.json). The two accumulated values replace the long encryption and export lists; they come from the Go standard library (src/crypto/hpke/testdata/rfc9180.json, BSD licence) and are computed as described in \"accumulated\".",
+  "accumulated": {
+    "source": "SHAKE128 with empty input, read as a byte stream: each draw reads one length byte n, then n bytes",
+    "encryptions": "With one sender and one recipient context: 1000 times draw aad, then draw plaintext; ct = sender.Seal(aad, plaintext) (sequence numbers 0..999); recipient.Open must return plaintext. Absorb every ct into a second SHAKE128; encryptions_accumulated is its first 16 output bytes",
+    "exports": "For L = 0..999: draw exporter_context; value = Export(exporter_context, L) (both sides equal); absorb value into a second SHAKE128; exports_accumulated is its first 16 output bytes",
+    "derandomizedEncap": "The ephemeral key pair is DeriveKeyPair(ikmE); skRm/pkRm equal DeriveKeyPair(ikmR)"
+  },
+  "vectors": [
+    {
+      "mode": 0,
+      "kem_id": 32,
+      "kdf_id": 1,
+      "aead_id": 1,
+      "info": "4f6465206f6e2061204772656369616e2055726e",
+      "ikmE": "7268600d403fce431561aef583ee1613527cff655c1343f29812e66706df3234",
+      "ikmR": "6db9df30aa07dd42ee5e8181afdb977e538f5e1fec8a06223f33f7013e525037",
+      "skRm": "4612c550263fc8ad58375df3f557aac531d26850903e55a9f23f21d8534e8ac8",
+      "pkRm": "3948cfe0ad1ddb695d780e59077195da6c56506b027329794ab02bca80815c4d",
+      "enc": "37fda3567bdbd628e88668c3c8d7e97d1d1253b6d4ea6d44c150f741f1bf4431",
+      "encryptions_accumulated": "dcabb32ad8e8acea785275323395abd0",
+      "exports_accumulated": "45db490fc51c86ba46cca1217f66a75e"
+    },
+    {
+      "mode": 0,
+      "kem_id": 32,
+      "kdf_id": 1,
+      "aead_id": 2,
+      "info": "4f6465206f6e2061204772656369616e2055726e",
+      "ikmE": "2cd7c601cefb3d42a62b04b7a9041494c06c7843818e0ce28a8f704ae7ab20f9",
+      "ikmR": "dac33b0e9db1b59dbbea58d59a14e7b5896e9bdf98fad6891e99d1686492b9ee",
+      "skRm": "497b4502664cfea5d5af0b39934dac72242a74f8480451e1aee7d6a53320333d",
+      "pkRm": "430f4b9859665145a6b1ba274024487bd66f03a2dd577d7753c68d7d7d00c00c",
+      "enc": "6c93e09869df3402d7bf231bf540fadd35cd56be14f97178f0954db94b7fc256",
+      "encryptions_accumulated": "1702e73e1e71705faa8241022af1deea",
+      "exports_accumulated": "5cb678bf1c52afbd9afb58b8f7c1ced3"
+    }
+  ]
+}
