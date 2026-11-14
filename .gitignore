@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.vite/
+coverage/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+.gstack/
+.claude/worktrees/
+target/
+playwright-report-fcd/

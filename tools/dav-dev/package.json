@@ -1,0 +1,12 @@
+{
+  "name": "@family-chat/dav-dev",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "up": "docker compose up -d --remove-orphans && node wait.mjs",
+    "down": "docker compose down -v",
+    "logs": "docker compose logs --tail 100"
+  }
+}

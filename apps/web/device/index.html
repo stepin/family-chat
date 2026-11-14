@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Проверка устройства · Family Chat</title>
+    <link rel="icon" href="../icon.svg" type="image/svg+xml" />
+    <style>
+      .checks { list-style: none; padding: 0; }
+      .checks li { display: flex; gap: 0.6rem; padding: 0.5rem 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+      .mark { flex: 0 0 1.5rem; height: 1.5rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; border: 1px solid currentColor; }
+      li.ok .mark { color: var(--ok); }
+      li.fail .mark { color: var(--fail); }
+      li.info .mark { color: var(--muted); }
+      textarea { width: 100%; font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem; background: var(--bg); color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Проверка устройства</h1>
+      <p class="muted">
+        Проверяет возможности браузера, от которых зависит клиент: хранилище, OPFS, кодирование картинок, фон. На iPhone
+        запустите её дважды: в Safari и из установленного приложения.
+      </p>
+      <p><button id="run" type="button">Проверить устройство</button></p>
+      <ul id="list" class="checks card"></ul>
+      <p><button id="copy" type="button" hidden>Скопировать отчёт</button> <span id="status" role="status"></span></p>
+      <details class="card"><summary>Текст отчёта</summary><textarea id="report" rows="12" readonly></textarea></details>
+    </main>
+    <script type="module" src="../src/device/main.ts"></script>
+  </body>
+</html>

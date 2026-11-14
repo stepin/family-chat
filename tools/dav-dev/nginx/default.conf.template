@@ -1,0 +1,17 @@
+# Test instance of docs/recipes/nginx: same fc-location.conf, plain HTTP.
+# ${FC_CLIENT_ORIGIN} is substituted by the nginx image at start-up.
+map $http_origin $fc_cors_origin {
+    default "";
+    "${FC_CLIENT_ORIGIN}" $http_origin;
+}
+
+upstream fc_webdav {
+    server nocors:80;
+    keepalive 8;
+}
+
+server {
+    listen 80 default_server;
+    server_name _;
+    include family-chat/fc-location.conf;
+}
