@@ -41,7 +41,7 @@
     editing?: { readonly key: string; readonly body: string; readonly allowEmpty: boolean } | null;
     onedit?: ((text: string) => Promise<boolean>) | undefined;
     oncanceledit?: (() => void) | undefined;
-    /** The emoji button: opens the picker (the chosen emoji comes back through `insert`). */
+    /** The emoji button: opens the picker (the chosen emoji comes back through `pickEmoji`). */
     onemoji?: (() => void) | undefined;
   } = $props();
   /** The text typed before editing started; it comes back afterwards. */
@@ -68,23 +68,51 @@
   /** Clears the text and the draft (after the text went out as a caption). */
   export function clear(): void {
     text = '';
+    caret = null;
     clearTimeout(saveTimer);
     saveDraft();
     queueMicrotask(resize);
   }
 
-  /** Inserts text at the caret (the emoji picker), keeping the draft. */
+  /**
+   * Inserts text at the caret, replacing a selection, and puts the focus
+   * back into the field with the caret after it (the emoji picker, shared
+   * text). The caret was remembered when the field lost the focus, which on
+   * phones happens as soon as the emoji button is touched.
+   */
   export function insert(value: string): void {
-    const at = caret ?? { start: text.length, end: text.length };
-    text = text.slice(0, at.start) + value + text.slice(at.end);
-    const pos = at.start + value.length;
+    const len = text.length;
+    const start = Math.min(caret?.start ?? len, len);
+    const end = Math.min(Math.max(caret?.end ?? len, start), len);
+    text = text.slice(0, start) + value + text.slice(end);
+    const pos = start + value.length;
     caret = { start: pos, end: pos };
-    queueMicrotask(() => {
-      field?.focus();
-      field?.setSelectionRange(pos, pos);
-      resize();
-    });
+    if (field) {
+      field.value = text;
+      field.focus({ preventScroll: true });
+      field.setSelectionRange(pos, pos);
+    }
+    queueMicrotask(resize);
     if (!editing) onInput();
+  }
+
+  /**
+   * An emoji from the picker, as in Telegram: into an empty field (not
+   * editing) it goes out at once as a message of its own (as the reply, if
+   * one is being written); otherwise it is inserted at the caret.
+   */
+  export function pickEmoji(emoji: string): void {
+    if (!editing && text.trim().length === 0) {
+      if (text !== '') {
+        text = '';
+        saveDraft();
+      }
+      caret = null;
+      void sendText(emoji);
+      if (!coarse) field?.focus({ preventScroll: true });
+      return;
+    }
+    insert(emoji);
   }
 
   /** Puts the focus into the field (after choosing "Ответить"). */
@@ -103,6 +131,7 @@
       if (editingKey === null) stash = text;
       editingKey = e.key;
       text = e.body;
+      caret = null;
       queueMicrotask(() => {
         resize();
         field?.focus();
@@ -112,6 +141,7 @@
       editingKey = null;
       text = stash ?? '';
       stash = null;
+      caret = null;
       queueMicrotask(resize);
     }
   });
@@ -178,12 +208,18 @@
     clearTimeout(saveTimer);
     const before = text;
     text = '';
+    caret = null;
     queueMicrotask(resize);
     field?.focus();
+    return sendText(value, before);
+  }
+
+  /** Queues `value` after earlier sends; on failure `before` comes back into the empty field. */
+  function sendText(value: string, before = ''): Promise<void> {
     chain = chain.then(async () => {
       const ok = await onsend(value).catch(() => false);
       // On failure the text comes back, unless something new was typed meanwhile.
-      if (!ok && text === '') {
+      if (!ok && text === '' && before !== '') {
         text = before;
         queueMicrotask(resize);
       }
@@ -210,6 +246,7 @@
     void app.core.getDraft(accountId, chatId).then((d) => {
       if (d && text === '') {
         text = d;
+        caret = null;
         queueMicrotask(resize);
       }
     });

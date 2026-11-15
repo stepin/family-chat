@@ -39,7 +39,7 @@ export { unreadTotal, badgeAfterPush, titleWithUnread, SETTING_BADGE_COUNT, MAX_
 export { parseShared, sharedText, SETTING_SHARE_PENDING, MAX_SHARED_FILES, MAX_SHARED_BYTES, MAX_SHARED_TEXT } from './share.ts';
 export type { SharedContent, ShareProblem } from './share.ts';
 export { MAX_PACK_STICKERS, MAX_PACK_BYTES, MAX_WEBP_STICKER_BYTES, MAX_TGS_STICKER_BYTES, MAX_PACK_NAME_CHARS } from '@family-chat/protocol';
-export type { PackSticker, StickerRef, StickerType } from '@family-chat/protocol';
+export type { Gender, PackSticker, StickerRef, StickerType } from '@family-chat/protocol';
 export type {
   ChatSummary,
   GroupView,

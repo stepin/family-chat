@@ -1,8 +1,18 @@
 /*
  * Design tokens (docs/PLAN.md 8.8). Colours only through these variables.
- * Light and dark follow the system. Contrast of text >= 4.5:1 and of large
- * text and icons >= 3:1 in both themes (docs/PLAN.md 8.7).
- * The system font stack: nothing is downloaded.
+ * Contrast of text >= 4.5:1 and of large text and icons >= 3:1 in both
+ * themes (docs/PLAN.md 8.7). The system font stack: nothing is downloaded.
+ *
+ * M7, appearance (Settings, "Оформление"): attributes on <html> set before
+ * the first paint (public/early.js) and by src/lib/appearance.ts:
+ *   data-theme    system (absent) | light | dark
+ *   data-palette  green (absent) | blue | violet | rose | orange | graphite
+ *   data-radius   small | medium (absent) | large   (message corners)
+ *   data-chat-bg  plain (absent) | tint | dots | grid | diagonal | waves
+ *   --chat-scale  text size in chats, a factor of the rem size, so the
+ *                 browser's and the system's text size still count.
+ * Each palette is a full set of light (--l-*) and dark (--d-*) colours,
+ * checked for contrast; the theme picks one of the two sets below.
  */
 :root {
   color-scheme: light dark;
@@ -16,6 +26,7 @@
   --text-l: 1.25rem; /* 20 */
   --text-xl: 1.5rem; /* 24 */
   --line-height: 1.4;
+  --chat-scale: 1;
 
   /* Space: 4 px steps */
   --sp-1: 0.25rem;
@@ -30,57 +41,277 @@
   --r-s: 4px;
   --r-m: 8px;
   --r-l: 16px;
+  --bubble-radius: 16px;
 
   --touch: 44px;
   --list-width: 360px;
   --content-max: 44rem;
+}
 
-  /* Colours: light */
-  --bg: #f6f3ee;
-  --surface: #ffffff;
-  --surface-2: #ece7df;
-  --text: #1c211e;
-  --muted: #59615b;
-  --line: #d9d1c5;
-  --accent: #2f5d50;
-  --accent-hover: #264d42;
-  --on-accent: #ffffff;
-  --accent-soft: #dcebe5;
-  --on-accent-soft: #163b31;
-  --on-accent-soft-muted: #2f5d50;
+:root[data-radius='small'] {
+  --bubble-radius: 6px;
+}
+
+:root[data-radius='large'] {
+  --bubble-radius: 22px;
+}
+
+/* Palettes */
+:root,
+:root[data-palette='green'] {
+  --l-bg: #f6f3ee;
+  --l-surface: #ffffff;
+  --l-surface-2: #ece7df;
+  --l-text: #1c211e;
+  --l-muted: #59615b;
+  --l-line: #d9d1c5;
+  --l-accent: #2f5d50;
+  --l-accent-hover: #264d42;
+  --l-on-accent: #ffffff;
+  --l-accent-soft: #dcebe5;
+  --l-on-accent-soft: #163b31;
+  --l-on-accent-soft-muted: #2f5d50;
+  --l-selection: #bfd9cf;
+  --d-bg: #131715;
+  --d-surface: #1c211f;
+  --d-surface-2: #262c29;
+  --d-text: #ecebe7;
+  --d-muted: #a7aea9;
+  --d-line: #353c38;
+  --d-accent: #7fb8a6;
+  --d-accent-hover: #93c8b7;
+  --d-on-accent: #0f1412;
+  --d-accent-soft: #23443a;
+  --d-on-accent-soft: #e6f2ed;
+  --d-on-accent-soft-muted: #a9d3c5;
+  --d-selection: #2f5d50;
+}
+
+:root[data-palette='blue'] {
+  --l-bg: #f3f5f8;
+  --l-surface: #ffffff;
+  --l-surface-2: #e6ebf1;
+  --l-text: #1a1f26;
+  --l-muted: #56606c;
+  --l-line: #d3dae3;
+  --l-accent: #1e5aa0;
+  --l-accent-hover: #184a85;
+  --l-on-accent: #ffffff;
+  --l-accent-soft: #dbe8f7;
+  --l-on-accent-soft: #0f3460;
+  --l-on-accent-soft-muted: #1e5aa0;
+  --l-selection: #bcd3ef;
+  --d-bg: #12161c;
+  --d-surface: #1a2029;
+  --d-surface-2: #242c37;
+  --d-text: #e9edf2;
+  --d-muted: #a5afbb;
+  --d-line: #333d4a;
+  --d-accent: #8bb8ec;
+  --d-accent-hover: #a3c7f0;
+  --d-on-accent: #0d1420;
+  --d-accent-soft: #1f3a5c;
+  --d-on-accent-soft: #e4eefa;
+  --d-on-accent-soft-muted: #a9c9ee;
+  --d-selection: #2a4c78;
+}
+
+:root[data-palette='violet'] {
+  --l-bg: #f6f4f9;
+  --l-surface: #ffffff;
+  --l-surface-2: #ebe6f2;
+  --l-text: #1f1b26;
+  --l-muted: #5e5869;
+  --l-line: #dcd5e6;
+  --l-accent: #5b3d99;
+  --l-accent-hover: #4c3282;
+  --l-on-accent: #ffffff;
+  --l-accent-soft: #e8e0f5;
+  --l-on-accent-soft: #35215e;
+  --l-on-accent-soft-muted: #5b3d99;
+  --l-selection: #d3c6ec;
+  --d-bg: #16131b;
+  --d-surface: #1f1b26;
+  --d-surface-2: #2a2533;
+  --d-text: #ece9f1;
+  --d-muted: #ada6b8;
+  --d-line: #3a3346;
+  --d-accent: #b9a0ec;
+  --d-accent-hover: #c8b4f0;
+  --d-on-accent: #150f20;
+  --d-accent-soft: #3a2c58;
+  --d-on-accent-soft: #f0eafb;
+  --d-on-accent-soft-muted: #c9b8ee;
+  --d-selection: #4a3772;
+}
+
+:root[data-palette='rose'] {
+  --l-bg: #f9f4f5;
+  --l-surface: #ffffff;
+  --l-surface-2: #f1e6e9;
+  --l-text: #261b1e;
+  --l-muted: #6a585d;
+  --l-line: #e6d5da;
+  --l-accent: #a3325a;
+  --l-accent-hover: #8a2a4c;
+  --l-on-accent: #ffffff;
+  --l-accent-soft: #f7e0e8;
+  --l-on-accent-soft: #5c1a32;
+  --l-on-accent-soft-muted: #a3325a;
+  --l-selection: #f0c9d6;
+  --d-bg: #1b1315;
+  --d-surface: #251b1e;
+  --d-surface-2: #31252a;
+  --d-text: #f2e9eb;
+  --d-muted: #bba8ad;
+  --d-line: #45343a;
+  --d-accent: #f095b3;
+  --d-accent-hover: #f4abc3;
+  --d-on-accent: #22101a;
+  --d-accent-soft: #52273a;
+  --d-on-accent-soft: #fbe8ef;
+  --d-on-accent-soft-muted: #f2b5c9;
+  --d-selection: #6a3049;
+}
+
+:root[data-palette='orange'] {
+  --l-bg: #f9f5f0;
+  --l-surface: #ffffff;
+  --l-surface-2: #f1e8dd;
+  --l-text: #261f18;
+  --l-muted: #67594b;
+  --l-line: #e5d7c6;
+  --l-accent: #a34a12;
+  --l-accent-hover: #8a3e0f;
+  --l-on-accent: #ffffff;
+  --l-accent-soft: #f8e4d3;
+  --l-on-accent-soft: #5a2a08;
+  --l-on-accent-soft-muted: #a34a12;
+  --l-selection: #f2cfb2;
+  --d-bg: #1a1510;
+  --d-surface: #241d16;
+  --d-surface-2: #30271e;
+  --d-text: #f2ece5;
+  --d-muted: #baac9c;
+  --d-line: #43372a;
+  --d-accent: #f0a46a;
+  --d-accent-hover: #f4b787;
+  --d-on-accent: #1f130a;
+  --d-accent-soft: #4d3018;
+  --d-on-accent-soft: #fbeee2;
+  --d-on-accent-soft-muted: #f2bf95;
+  --d-selection: #6a4220;
+}
+
+:root[data-palette='graphite'] {
+  --l-bg: #f4f4f5;
+  --l-surface: #ffffff;
+  --l-surface-2: #e7e7ea;
+  --l-text: #1b1c1f;
+  --l-muted: #5a5c63;
+  --l-line: #d6d7db;
+  --l-accent: #3d4250;
+  --l-accent-hover: #2f333e;
+  --l-on-accent: #ffffff;
+  --l-accent-soft: #e2e4ea;
+  --l-on-accent-soft: #22252d;
+  --l-on-accent-soft-muted: #3d4250;
+  --l-selection: #c9ccd6;
+  --d-bg: #141517;
+  --d-surface: #1c1d21;
+  --d-surface-2: #26282d;
+  --d-text: #ececee;
+  --d-muted: #a9abb2;
+  --d-line: #36383f;
+  --d-accent: #c3c7d2;
+  --d-accent-hover: #d4d7df;
+  --d-on-accent: #15161a;
+  --d-accent-soft: #33363f;
+  --d-on-accent-soft: #eeeff3;
+  --d-on-accent-soft-muted: #c6c9d3;
+  --d-selection: #454955;
+}
+
+/* Light (the default, and the system's light mode) */
+:root {
+  --bg: var(--l-bg);
+  --surface: var(--l-surface);
+  --surface-2: var(--l-surface-2);
+  --text: var(--l-text);
+  --muted: var(--l-muted);
+  --line: var(--l-line);
+  --accent: var(--l-accent);
+  --accent-hover: var(--l-accent-hover);
+  --on-accent: var(--l-on-accent);
+  --accent-soft: var(--l-accent-soft);
+  --on-accent-soft: var(--l-on-accent-soft);
+  --on-accent-soft-muted: var(--l-on-accent-soft-muted);
+  --selection: var(--l-selection);
+  --focus: var(--l-accent);
+  --pattern: color-mix(in srgb, var(--l-accent) 9%, transparent);
   --error: #a3302a;
   --error-soft: #f8e3e1;
   --warn: #7f5300;
   --warn-soft: #fbefd5;
   --ok: #2e6b3f;
-  --focus: #1d5fd1;
-  --selection: #bfd9cf;
   --scrim: rgb(20 24 22 / 0.45);
   --shadow: 0 1px 2px rgb(0 0 0 / 0.08);
 }
 
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+/* Dark: the system's dark mode unless light is chosen, or dark chosen. Keep both blocks the same. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #131715;
-    --surface: #1c211f;
-    --surface-2: #262c29;
-    --text: #ecebe7;
-    --muted: #a7aea9;
-    --line: #353c38;
-    --accent: #7fb8a6;
-    --accent-hover: #93c8b7;
-    --on-accent: #0f1412;
-    --accent-soft: #23443a;
-    --on-accent-soft: #e6f2ed;
-    --on-accent-soft-muted: #a9d3c5;
+  :root:not([data-theme='light']) {
+    --bg: var(--d-bg);
+    --surface: var(--d-surface);
+    --surface-2: var(--d-surface-2);
+    --text: var(--d-text);
+    --muted: var(--d-muted);
+    --line: var(--d-line);
+    --accent: var(--d-accent);
+    --accent-hover: var(--d-accent-hover);
+    --on-accent: var(--d-on-accent);
+    --accent-soft: var(--d-accent-soft);
+    --on-accent-soft: var(--d-on-accent-soft);
+    --on-accent-soft-muted: var(--d-on-accent-soft-muted);
+    --selection: var(--d-selection);
+    --focus: var(--d-accent);
+    --pattern: color-mix(in srgb, var(--d-accent) 14%, transparent);
     --error: #f08a82;
     --error-soft: #3d2120;
     --warn: #e6b85f;
     --warn-soft: #3a2f17;
     --ok: #7cc48f;
-    --focus: #8ab4ff;
-    --selection: #2f5d50;
     --scrim: rgb(0 0 0 / 0.6);
     --shadow: none;
   }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: var(--d-bg);
+  --surface: var(--d-surface);
+  --surface-2: var(--d-surface-2);
+  --text: var(--d-text);
+  --muted: var(--d-muted);
+  --line: var(--d-line);
+  --accent: var(--d-accent);
+  --accent-hover: var(--d-accent-hover);
+  --on-accent: var(--d-on-accent);
+  --accent-soft: var(--d-accent-soft);
+  --on-accent-soft: var(--d-on-accent-soft);
+  --on-accent-soft-muted: var(--d-on-accent-soft-muted);
+  --selection: var(--d-selection);
+  --focus: var(--d-accent);
+  --pattern: color-mix(in srgb, var(--d-accent) 14%, transparent);
+  --error: #f08a82;
+  --error-soft: #3d2120;
+  --warn: #e6b85f;
+  --warn-soft: #3a2f17;
+  --ok: #7cc48f;
+  --scrim: rgb(0 0 0 / 0.6);
+  --shadow: none;
 }

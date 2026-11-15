@@ -11,6 +11,7 @@ import {
   waitSecondsFromQuery,
   type Hello,
 } from './check.ts';
+import { setPageLang } from '../lib/page-lang.ts';
 
 const hello: Hello = {
   protocol: 1,
@@ -92,6 +93,33 @@ describe('server check', () => {
     expect(report).not.toContain(code);
     expect(report).not.toContain('secret-token');
     expect(report).not.toContain('wait=2');
+  });
+
+  it('M7: the report in English when the page speaks English', () => {
+    setPageLang('en');
+    try {
+      const report = formatReport({
+        now: new Date(1_700_000_000_000),
+        pageUrl: 'https://chat.example.net/server/',
+        server: 'https://chat.example.net',
+        userAgent: 'UA',
+        standalone: false,
+        secureContext: true,
+        notificationPermission: 'default',
+        pushSupported: false,
+        pushService: pushServiceHost(undefined),
+        hello: { ok: true, value: hello, ms: 12 },
+        clockOffsetSec: 1,
+        log: [],
+      });
+      expect(report).toContain('Family Chat: server check (M0v2)');
+      expect(report).toContain('Opened as an installed app: no');
+      expect(report).toContain('family “Ивановы”');
+      expect(report).toContain('Check log:');
+      expect(report).not.toMatch(/Время|Страница|Журнал/);
+    } finally {
+      setPageLang('ru');
+    }
   });
 
   it('reads the long-request duration from the query', () => {

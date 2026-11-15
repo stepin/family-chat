@@ -878,6 +878,27 @@ const archives = {};
   for (const c of sv.negativeMessages) eq(msgError(c.text), c.expectedError, c.name);
 }
 
+// ---- profile-gender.json (M7) ----
+{
+  const pg = load('profile-gender.json');
+  /** The gender rule of docs/PROTOCOL.md 4.3, written again here: absent means "m". */
+  const genderOf = (json) => (json.gender === undefined ? 'm' : json.gender === 'm' || json.gender === 'f' ? json.gender : null);
+  for (const p of pg.profiles) {
+    const r = openEnvelope(p.envelope, 'profile', users[p.signer].signPub);
+    check(!r.error, `profile (M7) ${p.name} verifies (${r.error ?? 'ok'})`);
+    if (r.error) continue;
+    eq(r.payload.toString('utf8'), p.payloadText, `profile (M7) ${p.name} payload text`);
+    eq(hex(r.input), p.signingInputHex, `profile (M7) ${p.name} signing input`);
+    eq(genderOf(r.json), p.gender, `profile (M7) ${p.name} gender`);
+    const order = r.json.gender === undefined ? 'v,userId,name,avatar,rev,updated' : 'v,userId,name,avatar,gender,rev,updated';
+    eq(Object.keys(r.json).join(','), order, `profile (M7) ${p.name} field order`);
+  }
+  for (const c of pg.negative) {
+    const r = openEnvelope(c.envelope, 'profile', users.alice.signPub);
+    eq(r.error ?? (genderOf(r.json) === null ? 'malformed' : 'ok'), c.expectedError, `profile (M7) ${c.name}`);
+  }
+}
+
 if (failures > 0) {
   console.error(`${failures} of ${checks} checks failed`);
   process.exit(1);

@@ -699,11 +699,22 @@ impl Store {
                     // A bug in one request must not stop all writing.
                     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| job(&mut writer)));
                     if r.is_err() {
-                        tracing::error!("ошибка в потоке записи, запрос отклонён");
+                        tracing::error!(
+                            "{}",
+                            tr!(
+                                "ошибка в потоке записи, запрос отклонён",
+                                "error in the writer thread, request refused"
+                            )
+                        );
                     }
                 }
             })
-            .map_err(|e| format!("не удалось запустить поток записи: {e}"))?;
+            .map_err(|e| {
+                tr!(
+                    "не удалось запустить поток записи: {e}",
+                    "could not start the writer thread: {e}"
+                )
+            })?;
         Ok(Store { shared, jobs: tx })
     }
 
@@ -782,7 +793,14 @@ impl Store {
                 Ok(b) if eventlog::is_erased(&b) => out.push((Entry { deleted: true, ..*e }, Vec::new())),
                 Ok(b) => out.push((*e, b)),
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-                Err(err) => tracing::error!("не удалось прочитать событие {}: {err}", e.h.gseq),
+                Err(err) => tracing::error!(
+                    "{}",
+                    tr!(
+                        "не удалось прочитать событие {}: {err}",
+                        "could not read event {}: {err}",
+                        e.h.gseq
+                    )
+                ),
             }
         }
         out
@@ -794,7 +812,13 @@ impl Store {
 fn load_users(root: &Path, mem: &mut Mem) {
     for (name, dir) in dir_entries(&root.join("users")) {
         let Some(id) = UserId::parse(&name) else {
-            tracing::warn!("users/{name}: не userId, пропускаю");
+            tracing::warn!(
+                "{}",
+                tr!(
+                    "users/{name}: не userId, пропускаю",
+                    "users/{name}: not a userId, skipping"
+                )
+            );
             continue;
         };
         let identity = match read_json::<Envelope>(&dir.join("identity.json"))
@@ -802,11 +826,23 @@ fn load_users(root: &Path, mem: &mut Mem) {
         {
             Ok(i) if i.user_id == id => i,
             Ok(_) => {
-                tracing::warn!("users/{name}/identity.json: чужой userId, пропускаю");
+                tracing::warn!(
+                    "{}",
+                    tr!(
+                        "users/{name}/identity.json: чужой userId, пропускаю",
+                        "users/{name}/identity.json: another userId, skipping"
+                    )
+                );
                 continue;
             }
             Err(e) => {
-                tracing::warn!("users/{name}/identity.json: {e}, пропускаю");
+                tracing::warn!(
+                    "{}",
+                    tr!(
+                        "users/{name}/identity.json: {e}, пропускаю",
+                        "users/{name}/identity.json: {e}, skipping"
+                    )
+                );
                 continue;
             }
         };
@@ -838,7 +874,13 @@ fn load_users(root: &Path, mem: &mut Mem) {
                         at: f.received_at,
                     }),
                     _ => {
-                        tracing::warn!("users/{name}/revoked.json: подпись или userId не сходятся, пропускаю");
+                        tracing::warn!(
+                            "{}",
+                            tr!(
+                                "users/{name}/revoked.json: подпись или userId не сходятся, пропускаю",
+                                "users/{name}/revoked.json: signature or userId do not match, skipping"
+                            )
+                        );
                         None
                     }
                 }
@@ -873,7 +915,13 @@ fn load_users(root: &Path, mem: &mut Mem) {
                             },
                         );
                     }
-                    None => tracing::warn!("users/{name}/devices/{fname}: повреждён хэш токена"),
+                    None => tracing::warn!(
+                        "{}",
+                        tr!(
+                            "users/{name}/devices/{fname}: повреждён хэш токена",
+                            "users/{name}/devices/{fname}: damaged token hash"
+                        )
+                    ),
                 },
                 Err(e) => tracing::warn!("users/{name}/devices/{fname}: {e}"),
             }
@@ -964,7 +1012,14 @@ fn load_chats(root: &Path, mem: &mut Mem) {
                     },
                 );
             }
-            Ok(m) => tracing::warn!("chats/{name}: вид чата {} не поддерживается этой версией", m.kind),
+            Ok(m) => tracing::warn!(
+                "{}",
+                tr!(
+                    "chats/{name}: вид чата {} не поддерживается этой версией",
+                    "chats/{name}: chat kind {} is not supported by this version",
+                    m.kind
+                )
+            ),
             Err(e) => tracing::warn!("chats/{name}/meta.json: {e}"),
         }
     }
@@ -1002,10 +1057,22 @@ fn load_keys(root: &Path, mem: &mut Mem) {
                     key,
                 }),
                 (false, _) => {
-                    tracing::warn!("users/{uid}/keys/{fname}: изменение группы не завершено, удаляю ключ");
+                    tracing::warn!(
+                        "{}",
+                        tr!(
+                            "users/{uid}/keys/{fname}: изменение группы не завершено, удаляю ключ",
+                            "users/{uid}/keys/{fname}: group change not finished, removing the key"
+                        )
+                    );
                     let _ = fs::remove_file(&p);
                 }
-                (true, None) => tracing::warn!("users/{uid}/keys/{fname}: повреждён ключ"),
+                (true, None) => tracing::warn!(
+                    "{}",
+                    tr!(
+                        "users/{uid}/keys/{fname}: повреждён ключ",
+                        "users/{uid}/keys/{fname}: damaged key"
+                    )
+                ),
             }
         }
         list.sort_by_key(|k| k.n);
@@ -1023,7 +1090,13 @@ fn load_log(root: &Path, mem: &mut Mem) -> Result<Option<OpenSegment>, String> {
         if let Some(stem) = name.strip_suffix(".seg") {
             match parse_day_name(stem) {
                 Some(d) => days.push(d),
-                None => tracing::warn!("log/{name}: имя не по формату ГГГГ-ММ-ДД, пропускаю"),
+                None => tracing::warn!(
+                    "{}",
+                    tr!(
+                        "log/{name}: имя не по формату ГГГГ-ММ-ДД, пропускаю",
+                        "log/{name}: the name is not YYYY-MM-DD, skipping"
+                    )
+                ),
             }
         }
     }
@@ -1032,30 +1105,43 @@ fn load_log(root: &Path, mem: &mut Mem) -> Result<Option<OpenSegment>, String> {
     let mut open = None;
     for (i, &day) in days.iter().enumerate() {
         let path = segment_path(root, day);
-        let mut bytes = fs::read(&path).map_err(|e| format!("не удалось прочитать {}: {e}", path.display()))?;
+        let mut bytes = fs::read(&path)
+            .map_err(|e| tr!("не удалось прочитать {}: {e}", "could not read {}: {e}", path.display()))?;
         let dels = apply_deletions(root, day, &mut bytes)?;
         let (found, valid) = eventlog::scan(&bytes);
         let newest = i + 1 == days.len();
         if valid < bytes.len() {
             if newest {
                 tracing::warn!(
-                    "{}: оборванная запись в конце ({} байт) отброшена",
-                    path.display(),
-                    bytes.len() - valid
+                    "{}",
+                    tr!(
+                        "{}: оборванная запись в конце ({} байт) отброшена",
+                        "{}: a cut-off record at the end ({} bytes) dropped",
+                        path.display(),
+                        bytes.len() - valid
+                    )
                 );
                 let f = fs::OpenOptions::new()
                     .write(true)
                     .open(&path)
-                    .map_err(|e| format!("не удалось открыть {}: {e}", path.display()))?;
-                f.set_len(valid as u64)
-                    .and_then(|_| f.sync_all())
-                    .map_err(|e| format!("не удалось обрезать {}: {e}", path.display()))?;
+                    .map_err(|e| tr!("не удалось открыть {}: {e}", "could not open {}: {e}", path.display()))?;
+                f.set_len(valid as u64).and_then(|_| f.sync_all()).map_err(|e| {
+                    tr!(
+                        "не удалось обрезать {}: {e}",
+                        "could not truncate {}: {e}",
+                        path.display()
+                    )
+                })?;
             } else {
                 tracing::warn!(
-                    "{}: повреждённые данные после {} записей ({} байт) пропущены",
-                    path.display(),
-                    found.len(),
-                    bytes.len() - valid
+                    "{}",
+                    tr!(
+                        "{}: повреждённые данные после {} записей ({} байт) пропущены",
+                        "{}: damaged data after {} records ({} bytes) skipped",
+                        path.display(),
+                        found.len(),
+                        bytes.len() - valid
+                    )
                 );
             }
         }
@@ -1067,7 +1153,15 @@ fn load_log(root: &Path, mem: &mut Mem) -> Result<Option<OpenSegment>, String> {
                     Some(n) => {
                         mem.notices.insert(f.header.gseq, Arc::new(n));
                     }
-                    None => tracing::warn!("{}: повреждено служебное событие {}", path.display(), f.header.gseq),
+                    None => tracing::warn!(
+                        "{}",
+                        tr!(
+                            "{}: повреждено служебное событие {}",
+                            "{}: damaged service event {}",
+                            path.display(),
+                            f.header.gseq
+                        )
+                    ),
                 }
             } else {
                 deleted = dels.contains(&f.header.gseq)
@@ -1085,7 +1179,7 @@ fn load_log(root: &Path, mem: &mut Mem) -> Result<Option<OpenSegment>, String> {
             let file = fs::OpenOptions::new()
                 .append(true)
                 .open(&path)
-                .map_err(|e| format!("не удалось открыть {}: {e}", path.display()))?;
+                .map_err(|e| tr!("не удалось открыть {}: {e}", "could not open {}: {e}", path.display()))?;
             open = Some(OpenSegment {
                 day,
                 file,
@@ -1098,8 +1192,12 @@ fn load_log(root: &Path, mem: &mut Mem) -> Result<Option<OpenSegment>, String> {
     entries.dedup_by_key(|e| e.h.gseq);
     if entries.len() != before {
         tracing::warn!(
-            "в журнале повторяются номера событий: {} повторов пропущено",
-            before - entries.len()
+            "{}",
+            tr!(
+                "в журнале повторяются номера событий: {} повторов пропущено",
+                "repeated event numbers in the log: {} repeats skipped",
+                before - entries.len()
+            )
         );
     }
     for e in entries.iter().filter(|e| e.h.sender != NOTICE_SENDER) {
@@ -1118,37 +1216,72 @@ fn apply_deletions(root: &Path, day: i64, seg: &mut [u8]) -> Result<HashSet<u64>
     let bytes = match fs::read(&path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashSet::new()),
-        Err(e) => return Err(format!("не удалось прочитать {}: {e}", path.display())),
+        Err(e) => {
+            return Err(tr!(
+                "не удалось прочитать {}: {e}",
+                "could not read {}: {e}",
+                path.display()
+            ));
+        }
     };
     let (dels, valid) = eventlog::scan_del(&bytes);
     if valid < bytes.len() {
-        tracing::warn!("{}: оборванная запись в конце отброшена", path.display());
+        tracing::warn!(
+            "{}",
+            tr!(
+                "{}: оборванная запись в конце отброшена",
+                "{}: a cut-off record at the end dropped",
+                path.display()
+            )
+        );
         let f = fs::OpenOptions::new()
             .write(true)
             .open(&path)
-            .map_err(|e| format!("не удалось открыть {}: {e}", path.display()))?;
-        f.set_len(valid as u64)
-            .and_then(|_| f.sync_all())
-            .map_err(|e| format!("не удалось обрезать {}: {e}", path.display()))?;
+            .map_err(|e| tr!("не удалось открыть {}: {e}", "could not open {}: {e}", path.display()))?;
+        f.set_len(valid as u64).and_then(|_| f.sync_all()).map_err(|e| {
+            tr!(
+                "не удалось обрезать {}: {e}",
+                "could not truncate {}: {e}",
+                path.display()
+            )
+        })?;
     }
     let changed = eventlog::repair(seg, &dels);
     if !changed.is_empty() {
         let seg_path = segment_path(root, day);
         tracing::warn!(
-            "{}: доделываю удаление {} записей, прерванное остановкой",
-            seg_path.display(),
-            changed.len()
+            "{}",
+            tr!(
+                "{}: доделываю удаление {} записей, прерванное остановкой",
+                "{}: finishing the deletion of {} records interrupted by a stop",
+                seg_path.display(),
+                changed.len()
+            )
         );
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .open(&seg_path)
-            .map_err(|e| format!("не удалось открыть {}: {e}", seg_path.display()))?;
+        let mut f = fs::OpenOptions::new().write(true).open(&seg_path).map_err(|e| {
+            tr!(
+                "не удалось открыть {}: {e}",
+                "could not open {}: {e}",
+                seg_path.display()
+            )
+        })?;
         for d in &changed {
             let rec = &seg[d.offset as usize..(d.offset + d.size as u64) as usize];
-            write_at(&mut f, d.offset, rec).map_err(|e| format!("не удалось записать {}: {e}", seg_path.display()))?;
+            write_at(&mut f, d.offset, rec).map_err(|e| {
+                tr!(
+                    "не удалось записать {}: {e}",
+                    "could not write {}: {e}",
+                    seg_path.display()
+                )
+            })?;
         }
-        f.sync_data()
-            .map_err(|e| format!("не удалось записать {}: {e}", seg_path.display()))?;
+        f.sync_data().map_err(|e| {
+            tr!(
+                "не удалось записать {}: {e}",
+                "could not write {}: {e}",
+                seg_path.display()
+            )
+        })?;
     }
     Ok(dels.into_iter().map(|d| d.gseq).collect())
 }
@@ -1183,7 +1316,8 @@ impl Writer {
     }
 
     pub(crate) fn write_file(&self, target: &Path, bytes: &[u8]) -> Result<(), ApiError> {
-        write_atomic_io(self.root(), target, bytes).map_err(|e| io_error("запись файла", e))
+        write_atomic_io(self.root(), target, bytes)
+            .map_err(|e| io_error(crate::lang::l("запись файла", "writing a file"), e))
     }
 
     pub(crate) fn chat_dir(&self, c: &ChatId) -> PathBuf {
@@ -1192,7 +1326,8 @@ impl Writer {
 
     pub(crate) fn write_meta(&self, c: &Chat) -> Result<(), ApiError> {
         let dir = self.chat_dir(&c.id);
-        create_private_dir(&dir).map_err(|e| io_error("создание папки чата", e))?;
+        create_private_dir(&dir)
+            .map_err(|e| io_error(crate::lang::l("создание папки чата", "creating a chat folder"), e))?;
         self.write_file(&dir.join("meta.json"), &to_json(&ChatMeta::of(c)))
     }
 
@@ -1210,7 +1345,8 @@ impl Writer {
         for (u, key) in keys {
             let n = self.mem().keys.get(u).and_then(|v| v.last()).map_or(0, |k| k.n) + 1;
             let dir = self.user_dir(u).join("keys");
-            create_private_dir(&dir).map_err(|e| io_error("создание папки ключей", e))?;
+            create_private_dir(&dir)
+                .map_err(|e| io_error(crate::lang::l("создание папки ключей", "creating a keys folder"), e))?;
             let f = KeyFile {
                 chat_id: *chat,
                 epoch,
@@ -1250,7 +1386,7 @@ impl Writer {
 
     fn write_device(&self, u: &UserId, dev: &DevId, d: &Device) -> Result<(), ApiError> {
         let dir = self.user_dir(u).join("devices");
-        create_private_dir(&dir).map_err(|e| io_error("создание папки", e))?;
+        create_private_dir(&dir).map_err(|e| io_error(crate::lang::l("создание папки", "creating a folder"), e))?;
         let f = DeviceFile {
             token_hash: hex(&d.token_hash),
             created_at: d.created_at,
@@ -1284,7 +1420,14 @@ impl Writer {
         if let Some((free, _)) = disk_space(self.root())
             && free < self.config.min_free_mb.saturating_mul(1024 * 1024)
         {
-            tracing::warn!("мало места на диске: свободно {} МБ", free / (1024 * 1024));
+            tracing::warn!(
+                "{}",
+                tr!(
+                    "мало места на диске: свободно {} МБ",
+                    "low disk space: {} MB free",
+                    free / (1024 * 1024)
+                )
+            );
             return Err(ApiError::storage_full());
         }
         Ok(())
@@ -1383,7 +1526,13 @@ impl Writer {
             s.admins.push(uid.to_string());
             self.write_server(&s)?;
             self.mem_mut().server = s;
-            tracing::info!("первый администратор вошёл, код администратора больше не действует");
+            tracing::info!(
+                "{}",
+                tr!(
+                    "первый администратор вошёл, код администратора больше не действует",
+                    "the first administrator joined, the admin code no longer works"
+                )
+            );
         }
 
         let dir = self.user_dir(&uid);
@@ -1392,7 +1541,8 @@ impl Writer {
             let _ = fs::remove_dir_all(dir.join("devices"));
             let _ = fs::remove_file(dir.join("removed"));
         }
-        create_private_dir(&dir.join("devices")).map_err(|e| io_error("создание папки", e))?;
+        create_private_dir(&dir.join("devices"))
+            .map_err(|e| io_error(crate::lang::l("создание папки", "creating a folder"), e))?;
         self.write_file(&dir.join("identity.json"), &to_json(&identity.envelope))?;
         self.write_file(&dir.join("profile.json"), &to_json(&profile.envelope))?;
         {
@@ -1419,7 +1569,13 @@ impl Writer {
         }
         let token = self.issue_device(&uid, dev, now)?;
         let admin = self.mem().is_admin(&uid);
-        tracing::info!("новый участник {uid} (устройство {dev})");
+        tracing::info!(
+            "{}",
+            tr!(
+                "новый участник {uid} (устройство {dev})",
+                "new member {uid} (device {dev})"
+            )
+        );
         Ok(Issued {
             token,
             user: uid,
@@ -1459,7 +1615,15 @@ impl Writer {
         }
         envelope::verify_auth(env, req, &key).map_err(|e| env_error(e, "auth"))?;
         let token = self.issue_device(&req.user_id, req.dev_id, now)?;
-        tracing::info!("участник {} вошёл с устройства {}", req.user_id, req.dev_id);
+        tracing::info!(
+            "{}",
+            tr!(
+                "участник {} вошёл с устройства {}",
+                "member {} signed in from device {}",
+                req.user_id,
+                req.dev_id
+            )
+        );
         Ok(Issued {
             token,
             user: req.user_id,
@@ -1573,7 +1737,13 @@ impl Writer {
                 at: now,
             });
         }
-        tracing::info!("участник {user} отозвал свою идентичность");
+        tracing::info!(
+            "{}",
+            tr!(
+                "участник {user} отозвал свою идентичность",
+                "member {user} revoked their identity"
+            )
+        );
         self.notify_group_owners(&user, "member_revoked", now);
         self.notify();
         Ok(())
@@ -1654,13 +1824,15 @@ impl Writer {
             msg,
         };
         let rec = eventlog::encode(&header, body);
-        let seg = self.open_segment(day).map_err(|e| io_error("открытие журнала", e))?;
+        let seg = self
+            .open_segment(day)
+            .map_err(|e| io_error(crate::lang::l("открытие журнала", "opening the log"), e))?;
         let offset = seg.len;
         let written = seg.file.write_all(&rec).and_then(|_| seg.file.sync_data());
         if let Err(e) = written {
             // Leave no partial record behind.
             let _ = seg.file.set_len(offset);
-            return Err(io_error("запись в журнал", e));
+            return Err(io_error(crate::lang::l("запись в журнал", "writing to the log"), e));
         }
         seg.len += rec.len() as u64;
         {
@@ -1731,7 +1903,14 @@ impl Writer {
             }
             let n = Notice::member_event(kind, user, to);
             if let Err(e) = self.write_notice(chat, epoch, n, now) {
-                tracing::error!("не удалось записать служебное событие для группы {chat}: {}", e.message);
+                tracing::error!(
+                    "{}",
+                    tr!(
+                        "не удалось записать служебное событие для группы {chat}: {}",
+                        "could not write a service event for group {chat}: {}",
+                        e.message
+                    )
+                );
             }
         }
     }
@@ -1892,7 +2071,12 @@ impl Writer {
             .append(true)
             .open(&del_file)
             .and_then(|mut f| f.write_all(&del.encode()).and_then(|_| f.sync_data()));
-        written.map_err(|e| io_error("запись списка удалённых", e))?;
+        written.map_err(|e| {
+            io_error(
+                crate::lang::l("запись списка удалённых", "writing the deletion list"),
+                e,
+            )
+        })?;
         if fresh {
             datadir::sync_dir(&self.root().join("log"));
         }
@@ -1925,20 +2109,33 @@ impl Writer {
             // On failure the intent stays in `.del` and the next start
             // finishes the overwrite; the record counts as deleted already.
             if let Err(e) = erased {
-                tracing::error!("не удалось затереть событие {gseq}: {e}; будет доделано при запуске");
+                tracing::error!(
+                    "{}",
+                    tr!(
+                        "не удалось затереть событие {gseq}: {e}; будет доделано при запуске",
+                        "could not wipe event {gseq}: {e}; it will be finished at start"
+                    )
+                );
             }
             let mut m = self.mem_mut();
             if let Ok(i) = m.log.binary_search_by_key(&gseq, |e| e.h.gseq) {
                 m.log[i].deleted = true;
             }
         }
-        tracing::info!("событие {gseq} удалено у всех");
+        tracing::info!(
+            "{}",
+            tr!("событие {gseq} удалено у всех", "event {gseq} deleted for everyone")
+        );
         // 3. Tell the members.
         let n = Notice::event_deleted(&entry.h, &by, chat.unique_members());
         if let Err(e) = self.write_notice(chat_id, chat.epoch, n, now) {
             tracing::error!(
-                "не удалось записать служебное событие об удалении {gseq}: {}",
-                e.message
+                "{}",
+                tr!(
+                    "не удалось записать служебное событие об удалении {gseq}: {}",
+                    "could not write the service event about deleting {gseq}: {}",
+                    e.message
+                )
             );
             self.notify();
         }
@@ -1968,7 +2165,7 @@ impl Writer {
         if let Some(u) = self.mem_mut().users.get_mut(user) {
             u.removed_at = Some(now);
         }
-        tracing::info!("участник {user} исключён");
+        tracing::info!("{}", tr!("участник {user} исключён", "member {user} removed"));
         self.notify_group_owners(user, "member_removed", now);
         self.notify();
         Ok(())
@@ -1998,7 +2195,12 @@ impl Writer {
         match fs::remove_file(&p) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(io_error("удаление приглашения", e)),
+            Err(e) => {
+                return Err(io_error(
+                    crate::lang::l("удаление приглашения", "deleting an invitation"),
+                    e,
+                ));
+            }
         }
         self.mem_mut().invites.remove(id);
         Ok(())
@@ -2028,7 +2230,10 @@ impl Writer {
                     gone_days.insert(day);
                     report.segments.push(name);
                 }
-                Err(e) => tracing::error!("не удалось удалить {}: {e}", path.display()),
+                Err(e) => tracing::error!(
+                    "{}",
+                    tr!("не удалось удалить {}: {e}", "could not delete {}: {e}", path.display())
+                ),
             }
         }
         if !gone_days.is_empty() {
@@ -2055,10 +2260,14 @@ impl Writer {
         }
         if !report.segments.is_empty() || !report.blob_days.is_empty() {
             tracing::info!(
-                "очистка: удалено дней журнала {}, событий {}, папок вложений {}",
-                report.segments.len(),
-                report.events,
-                report.blob_days.len()
+                "{}",
+                tr!(
+                    "очистка: удалено дней журнала {}, событий {}, папок вложений {}",
+                    "cleanup: removed {} log days, {} events, {} attachment folders",
+                    report.segments.len(),
+                    report.events,
+                    report.blob_days.len()
+                )
             );
         }
         report

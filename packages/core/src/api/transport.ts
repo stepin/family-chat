@@ -285,7 +285,8 @@ export class Transport {
     return {
       status,
       familyName: str(o, 'familyName'),
-      createdBy: { userId: str(by, 'userId'), name: nullableStr(by, 'name') },
+      // M7: servers before it send no gender.
+      createdBy: { userId: str(by, 'userId'), name: nullableStr(by, 'name'), gender: by.gender === 'f' ? 'f' : 'm' },
       createdAt: num(o, 'createdAt'),
       expiresAt: num(o, 'expiresAt'),
     };

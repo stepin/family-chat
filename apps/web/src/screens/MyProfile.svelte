@@ -1,15 +1,17 @@
 <script lang="ts">
   import Avatar from '../components/Avatar.svelte';
   import AvatarCrop from '../components/AvatarCrop.svelte';
+  import GenderPicker from '../components/GenderPicker.svelte';
   import Page from '../components/Page.svelte';
   import { app } from '../lib/app.svelte.ts';
   import { errorText } from '../lib/errors.ts';
   import { fingerprintLines } from '../lib/names.ts';
   import { nav } from '../lib/nav.svelte.ts';
-  import { t } from '../lib/strings.ts';
+  import { t, type Gender } from '../lib/strings.ts';
 
   // My profile (docs/PLAN.md screen 19): avatar (pick, square crop, 256 px),
-  // name, and my fingerprint for relatives to compare.
+  // name, gender (M7: for the wording of messages about me), and my
+  // fingerprint for relatives to compare.
   const account = $derived(app.account!);
   const me = $derived(app.members.find((m) => m.isMe));
   const removed = $derived(account.status === 'removed');
@@ -38,6 +40,22 @@
       app.log('warn', 'profile', 'profile update failed', err);
     } finally {
       saving = false;
+    }
+  }
+
+  let genderBusy = $state(false);
+
+  /** A new gender is signed into the profile at once (no separate save button). */
+  async function saveGender(g: Gender): Promise<void> {
+    genderBusy = true;
+    try {
+      await app.core.updateProfile(account.id, { gender: g });
+      app.notify(t.gender.saved);
+    } catch (err) {
+      app.notify(errorText(err));
+      app.log('warn', 'profile', 'gender update failed', err);
+    } finally {
+      genderBusy = false;
     }
   }
 
@@ -117,6 +135,12 @@
   </section>
 
   {#if me}
+    <section class="section" aria-label={t.gender.label}>
+      {#key me.gender}
+        <GenderPicker id="profile" value={me.gender} disabled={removed || genderBusy} onchange={saveGender} />
+      {/key}
+    </section>
+
     <section class="section" aria-labelledby="profile-fp">
       <h2 id="profile-fp">{t.profile.fingerprint}</h2>
       <p class="fp mono tabular" data-testid="my-fingerprint">

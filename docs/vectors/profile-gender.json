@@ -1,0 +1,57 @@
+{
+  "note": "Test vectors for docs/PROTOCOL.md 4.3 (M7): the optional \"gender\" field of a profile. Users are the ones of identity.json. A profile without the field means \"m\".",
+  "rule": "gender is absent, \"m\" or \"f\"; anything else (another string, another case, null, a number) is malformed. Field order when writing: v, userId, name, avatar, gender, rev, updated.",
+  "profiles": [
+    {
+      "name": "female",
+      "signer": "alice",
+      "gender": "f",
+      "payloadText": "{\"v\":1,\"userId\":\"bv2upztgktzihpyf7mtd6wkqam\",\"name\":\"Алиса\",\"avatar\":null,\"gender\":\"f\",\"rev\":3,\"updated\":1767225603000}",
+      "signingInputHex": "66632f76312f70726f66696c650a7b2276223a312c22757365724964223a2262763275707a74676b747a6968707966376d746436776b71616d222c226e616d65223a22d090d0bbd0b8d181d0b0222c22617661746172223a6e756c6c2c2267656e646572223a2266222c22726576223a332c2275706461746564223a313736373232353630333030307d",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQkNC70LjRgdCwIiwiYXZhdGFyIjpudWxsLCJnZW5kZXIiOiJmIiwicmV2IjozLCJ1cGRhdGVkIjoxNzY3MjI1NjAzMDAwfQ\",\"sig\":\"swmFVHe2kwJaimy2plBHe9aIQGPxLHlwx83dY9a5He-ejEodrJnUTRWp6CISpuSQ-TWvdnjtxQIGcVMDUD-PCw\"}"
+    },
+    {
+      "name": "male",
+      "signer": "alice",
+      "gender": "m",
+      "payloadText": "{\"v\":1,\"userId\":\"bv2upztgktzihpyf7mtd6wkqam\",\"name\":\"Алиса\",\"avatar\":null,\"gender\":\"m\",\"rev\":3,\"updated\":1767225603000}",
+      "signingInputHex": "66632f76312f70726f66696c650a7b2276223a312c22757365724964223a2262763275707a74676b747a6968707966376d746436776b71616d222c226e616d65223a22d090d0bbd0b8d181d0b0222c22617661746172223a6e756c6c2c2267656e646572223a226d222c22726576223a332c2275706461746564223a313736373232353630333030307d",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQkNC70LjRgdCwIiwiYXZhdGFyIjpudWxsLCJnZW5kZXIiOiJtIiwicmV2IjozLCJ1cGRhdGVkIjoxNzY3MjI1NjAzMDAwfQ\",\"sig\":\"V7gK0YR432xkFiint_LPlIbu_I_UC-RbcZm0Aps_lwBPuKCslEahQe3Jz68GBc8bgcsw13DiUwVzlAHqhUD-Ag\"}"
+    },
+    {
+      "name": "no field (before M7)",
+      "signer": "alice",
+      "gender": "m",
+      "payloadText": "{\"v\":1,\"userId\":\"bv2upztgktzihpyf7mtd6wkqam\",\"name\":\"Алиса\",\"avatar\":null,\"rev\":3,\"updated\":1767225603000}",
+      "signingInputHex": "66632f76312f70726f66696c650a7b2276223a312c22757365724964223a2262763275707a74676b747a6968707966376d746436776b71616d222c226e616d65223a22d090d0bbd0b8d181d0b0222c22617661746172223a6e756c6c2c22726576223a332c2275706461746564223a313736373232353630333030307d",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQkNC70LjRgdCwIiwiYXZhdGFyIjpudWxsLCJyZXYiOjMsInVwZGF0ZWQiOjE3NjcyMjU2MDMwMDB9\",\"sig\":\"pLejLyRAF2FokG3hv77PDJzcr4TwN1dBFZroQ4gxoRONohuC0f9cq-BKmeoRHiWOzApvRoExnuEWpe0kKVSrDQ\"}"
+    }
+  ],
+  "negative": [
+    {
+      "name": "unknown value",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQkNC70LjRgdCwIiwiYXZhdGFyIjpudWxsLCJnZW5kZXIiOiJ4IiwicmV2IjozLCJ1cGRhdGVkIjoxNzY3MjI1NjAzMDAwfQ\",\"sig\":\"JWulhQmcb5TRzUE8_eFbrPk6uLi9xMzBpMmH-39qXT_zevnX4LXEA9BQhj5oddaQRk6KBCrl8lEx5fhSZbInDA\"}",
+      "expectedError": "malformed"
+    },
+    {
+      "name": "upper case",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQkNC70LjRgdCwIiwiYXZhdGFyIjpudWxsLCJnZW5kZXIiOiJGIiwicmV2IjozLCJ1cGRhdGVkIjoxNzY3MjI1NjAzMDAwfQ\",\"sig\":\"yiD3iaBLViCAEkAzKZB1rU-X3V3QnZFujMEtY_dXj0PyfVAzIgLa-EcUZP-TenRDWAVCoHX-Cg1hqZvDpr1ODw\"}",
+      "expectedError": "malformed"
+    },
+    {
+      "name": "null",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQkNC70LjRgdCwIiwiYXZhdGFyIjpudWxsLCJnZW5kZXIiOm51bGwsInJldiI6MywidXBkYXRlZCI6MTc2NzIyNTYwMzAwMH0\",\"sig\":\"D1juLr7wxRvvQqdJJm9Ks6hQN40g-mRvqj7xKGVnKjpzUDj-I9ntJ_2pv_UH3_nlFXLaAq5Womc5TeVDO6MYBw\"}",
+      "expectedError": "malformed"
+    },
+    {
+      "name": "a number",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQkNC70LjRgdCwIiwiYXZhdGFyIjpudWxsLCJnZW5kZXIiOjEsInJldiI6MywidXBkYXRlZCI6MTc2NzIyNTYwMzAwMH0\",\"sig\":\"WLB74QL-U5pda9Qhqi-d2MEdJLvcc8Cd3iG4gp7ws9rhA71AfUQSKyD0DLcVOGli06k7AwyI9Z6C5vfcdh36CA\"}",
+      "expectedError": "malformed"
+    },
+    {
+      "name": "empty string",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQkNC70LjRgdCwIiwiYXZhdGFyIjpudWxsLCJnZW5kZXIiOiIiLCJyZXYiOjMsInVwZGF0ZWQiOjE3NjcyMjU2MDMwMDB9\",\"sig\":\"D4gOpP_c_pli_ryYFQeNe0dAfsdU3fn_U9AiKwLvjfWIf9a5c8qyfp2G75LmNmcpmh_QwoP9jFV5gGa8FG2oCw\"}",
+      "expectedError": "malformed"
+    }
+  ]
+}

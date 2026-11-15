@@ -31,7 +31,7 @@ test.beforeAll(async ({ browser }) => {
   await fcd.start();
   const context = await browser.newContext({ locale: 'ru-RU' });
   const page = await context.newPage();
-  inviteLink = (await setupAdmin(page, fcd)).inviteLink;
+  inviteLink = (await setupAdmin(page, fcd, 'Мама', 'Ивановы', 'f')).inviteLink;
   await context.close();
 });
 
@@ -81,7 +81,7 @@ test('iOS installed app: the first screen pastes the invitation', async ({ newUs
   await expect(page.getByRole('button', { name: 'Вставить приглашение' })).toBeVisible();
   await page.getByLabel('Ссылка-приглашение').fill(`Вот приглашение: ${link()}`);
   await page.getByRole('button', { name: 'Дальше' }).click();
-  await expect(page.getByRole('heading', { name: 'Вас пригласил(а) Мама в «Ивановы»' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Вас пригласила Мама в «Ивановы»' })).toBeVisible();
   await expect(page.getByLabel('Как вас зовут')).toBeVisible();
 });
 
@@ -114,7 +114,7 @@ test('Android Chrome: installation offered, joining continues in the browser', a
 test('desktop: straight to the name', async ({ newUser }) => {
   const { page } = await newUser();
   await page.goto(link());
-  await expect(page.getByRole('heading', { name: 'Вас пригласил(а) Мама в «Ивановы»' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Вас пригласила Мама в «Ивановы»' })).toBeVisible();
   await expect(page.getByLabel('Как вас зовут')).toBeVisible();
   expect(page.url()).toBe(`${fcd.url}/`);
 });

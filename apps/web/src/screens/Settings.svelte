@@ -6,13 +6,28 @@
   import Page from '../components/Page.svelte';
   import { app } from '../lib/app.svelte.ts';
   import { nav } from '../lib/nav.svelte.ts';
+  import { LANG_PREFS, systemLanguages, detectLang, type LangPref } from '../lib/locale.ts';
   import { t } from '../lib/strings.ts';
 
   // Settings (docs/PLAN.md screen 20): profile, notifications, recovery
   // phrase, storage and archive, security, family and server, diagnostics.
+  // M7: the interface language (applies at once) and the appearance screen.
   const account = $derived(app.account!);
   const me = $derived(app.members.find((m) => m.isMe));
   let server = $state<{ version: string; commit: string | null } | null>(null);
+
+  let langBusy = $state(false);
+
+  async function chooseLang(pref: LangPref): Promise<void> {
+    langBusy = true;
+    try {
+      await app.setLanguage(pref);
+      // The screens render again in the new language; the focus goes back to the chosen option.
+      requestAnimationFrame(() => document.getElementById(`lang-${pref}`)?.focus());
+    } finally {
+      langBusy = false;
+    }
+  }
 
   onMount(() => {
     app.core
@@ -37,7 +52,35 @@
     <NotificationSettings />
   </section>
 
+  <section class="section" aria-labelledby="set-lang">
+    <h2 id="set-lang">{t.lang.title}</h2>
+    <div class="choices" role="radiogroup" aria-labelledby="set-lang" data-testid="language">
+      {#each LANG_PREFS as pref (pref)}
+        <label class="choice">
+          <input
+            id="lang-{pref}"
+            type="radio"
+            name="lang"
+            value={pref}
+            checked={app.langPref === pref}
+            disabled={langBusy}
+            onchange={() => chooseLang(pref)}
+          />
+          {#if pref === 'system'}
+            <span>{t.lang.system}<span class="sub">{t.lang.systemNow(t.lang.names[detectLang(systemLanguages())])}</span></span>
+          {:else}
+            <span lang={pref}>{t.lang.names[pref]}</span>
+          {/if}
+        </label>
+      {/each}
+    </div>
+  </section>
+
   <section class="section links" aria-label={t.settings.title}>
+    <button class="item" type="button" onclick={() => nav.push({ name: 'appearance' })}>
+      <span class="label">{t.settings.appearance}<span class="sub">{t.settings.appearanceSub}</span></span>
+      <Icon name="chevron" size={20} />
+    </button>
     <button class="item" type="button" onclick={() => nav.push({ name: 'phrase' })}>
       <span class="label">{t.settings.phrase}<span class="sub">{t.phrase.status(app.flags.phraseConfirmed)}</span></span>
       <Icon name="chevron" size={20} />
@@ -78,6 +121,31 @@
 </Page>
 
 <style>
+  .choices {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .choice {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    min-height: var(--touch);
+    cursor: pointer;
+  }
+
+  .choice input {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    accent-color: var(--accent);
+  }
+
+  .choice > span {
+    display: flex;
+    flex-direction: column;
+  }
+
   .links {
     gap: 0;
     padding: 0;

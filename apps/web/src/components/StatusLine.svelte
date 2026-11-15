@@ -16,7 +16,7 @@
         ? ({ kind: 'login-invalid' } as const)
         : app.connection[account.id],
   );
-  const line = $derived(statusLine(conn, account.familyName, queued));
+  const line = $derived(statusLine(conn, app.familyLabel(account.familyName), queued));
 
   async function relogin(): Promise<void> {
     busy = true;

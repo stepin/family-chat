@@ -122,6 +122,10 @@ struct Proc {
 impl Proc {
     fn spawn(args: &[&str]) -> Proc {
         let mut child = Command::new(env!("CARGO_BIN_EXE_fcd"))
+            .env_remove("LANG")
+            .env_remove("LC_ALL")
+            .env_remove("LC_MESSAGES")
+            .env_remove("FCD_LANG")
             .args(args)
             .env("NO_COLOR", "1")
             .env_remove("RUST_LOG")
@@ -209,6 +213,10 @@ fn binary_prints_code_once_locks_folder_and_stops_on_sigterm() {
         .to_string();
     let check = |port: &str| {
         Command::new(env!("CARGO_BIN_EXE_fcd"))
+            .env_remove("LANG")
+            .env_remove("LC_ALL")
+            .env_remove("LC_MESSAGES")
+            .env_remove("FCD_LANG")
             .args(["healthcheck", "--data", data, "--listen", "127.0.0.1", "--port", port])
             .output()
             .unwrap()
@@ -277,6 +285,10 @@ fn reset_admin_code_replaces_the_code() {
     let old = dir.new_admin_code.clone().unwrap();
     drop(dir);
     let out = Command::new(env!("CARGO_BIN_EXE_fcd"))
+        .env_remove("LANG")
+        .env_remove("LC_ALL")
+        .env_remove("LC_MESSAGES")
+        .env_remove("FCD_LANG")
         .args(["reset-admin-code", "--data", tmp.path().to_str().unwrap()])
         .output()
         .unwrap();

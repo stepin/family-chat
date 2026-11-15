@@ -5,7 +5,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import Icon from './Icon.svelte';
-  import { QUICK_REACTIONS } from '../lib/reactions.ts';
+  import { quickReactions } from '../lib/reactions.ts';
   import { t } from '../lib/strings.ts';
 
   // The one menu of a message (long press, right click, the "⋯" button or the
@@ -138,7 +138,7 @@
   <div bind:this={menu} class="menu" role="menu" aria-label={t.msg.menu} tabindex="-1" onkeydown={onKey} data-testid="message-menu">
     {#if reactions}
       <div class="reactions" role="group" aria-label={t.msg.reactions}>
-        {#each QUICK_REACTIONS as [emoji, name] (emoji)}
+        {#each quickReactions() as [emoji, name] (emoji)}
           <button
             class="reaction"
             class:on={mine.includes(emoji)}

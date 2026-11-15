@@ -93,7 +93,7 @@
           <span class="who">
             <span class="name">{m.name ?? t.common.unknownName}</span>
             <span class="muted small">
-              {[m.isMe ? t.server.me : null, m.admin ? t.server.admin : null, m.removed ? t.server.removed : null]
+              {[m.isMe ? t.server.me : null, m.admin ? t.server.admin : null, m.removed ? t.server.removed(m.gender) : null]
                 .filter(Boolean)
                 .join(', ')}
             </span>
@@ -135,7 +135,7 @@
   {#if toRemove}
     <div class="stack">
       <h2 id="remove-title">{t.server.removeTitle(toRemove.name ?? t.common.unknownName)}</h2>
-      <p>{t.server.removeText}</p>
+      <p>{t.server.removeText(toRemove.gender)}</p>
       <div class="row end">
         <button class="btn secondary" type="button" onclick={closeDialog}>{t.common.cancel}</button>
         <button class="btn danger" type="button" disabled={removing} onclick={confirmRemove}>{t.server.removeConfirm}</button>

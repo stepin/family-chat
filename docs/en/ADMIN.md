@@ -3,8 +3,8 @@
 This page is for the administrator: the person who runs the `fcd` server for their family. You need to be able to
 open a terminal and run a few commands. What the other family members do is in the [family guide](FAMILY.md).
 
-The app itself is in Russian for now; server messages in the terminal are in Russian too. The examples below
-quote them as they appear.
+The app speaks English and Russian. Server messages in the terminal are in English or Russian too (see
+“Language” under Settings below); the examples below show the Russian output.
 
 ## What you need
 
@@ -76,14 +76,14 @@ INFO откройте http://192.168.1.10:8787/ (приложение)
 INFO откройте http://192.168.1.10:8787/server/ (проверка сервера)
 INFO первый запуск: папка данных создана
 INFO код администратора: 7K3D-XXXX-XXXX-XXXX
-INFO дальше: откройте приложение, нажмите «Настроить для своей семьи» и введите этот код
+INFO дальше: откройте приложение, нажмите “Set up for my family” и введите этот код
 ```
 
 The **administrator code** (`код администратора`) is shown once; keep it. Then:
 
 1. Set up HTTPS (next section) and open the server address in a phone or computer browser. Without HTTPS the app
    works only on the same computer at `http://localhost:8787/`.
-2. Press «Настроить для своей семьи» (set up for your family), enter the server address and the code.
+2. Press “Set up for my family”, enter the server address and the code.
 3. Enter your name, write down the 24 recovery words (the app checks three of them) and create the first
    invitation. Whoever joins with the code becomes the administrator.
 
@@ -116,22 +116,39 @@ fcd admin add <userId> --data /var/lib/family-chat
 
 ## Settings
 
-Settings come from flags or from `config.toml` in the data folder. The file is written on first start; flags win
-over the file. Restart the server after editing it.
+Every setting can be given in three ways: a command-line flag, an environment variable, or a key in
+`config.toml` in the data folder. Order of precedence: **flag, then environment variable, then `config.toml`, then
+the default**. An environment variable behaves exactly like its flag: both win over the file, and on the first start
+the effective values (from flags, variables and defaults) are written into the new `config.toml`; later changes of a
+flag or a variable are not written there. An empty variable counts as not set. Booleans take `true`, `false`, `1` or
+`0`; a wrong value stops the server with an error that names the variable. Restart the server after changing
+anything.
 
-| Flag | In `config.toml` | Default | Meaning |
-|---|---|---|---|
-| `--port` | `port` | `8787` | port |
-| `--listen` | `listen` | `0.0.0.0` | address; `127.0.0.1` when the proxy is on the same computer |
-| `--family-name` | `family_name` | `Семья` | family name everyone sees |
-| `--retention-days` | `retention_days` | `90` | how many days the server keeps messages and files (7 to 90) |
-| `--max-file-mb` | `max_file_mb` | `200` | size limit of one file, MB |
-| `--push` | `push` | `true` | notifications; `false`: the server never contacts outside addresses |
-| `--trust-forwarded-for` | `trust_forwarded_for` | `false` | take the client address from `X-Forwarded-For` (only behind a proxy) |
-| | `push_subject` | `mailto:fcd-admin@example.org` | contact for the Apple, Google and Mozilla push services |
-| | `min_free_mb` | `100` | below this much free space the server refuses new data |
-| `--tls-cert`, `--tls-key` | | | HTTPS with your own certificate files |
-| `--m0` | | | check endpoints of the `/server/` page |
+| Flag | Environment variable | In `config.toml` | Default | Meaning |
+|---|---|---|---|---|
+| `--data` | `FCD_DATA` | | | data folder (needed to start; in the Docker image `/data`) |
+| `--port` | `FCD_PORT` | `port` | `8787` | port |
+| `--listen` | `FCD_LISTEN` | `listen` | `0.0.0.0` | address; `127.0.0.1` when the proxy is on the same computer |
+| `--family-name` | `FCD_FAMILY_NAME` | `family_name` | `Семья` (`Family` in English) | family name everyone sees |
+| `--retention-days` | `FCD_RETENTION_DAYS` | `retention_days` | `90` | how many days the server keeps messages and files (7 to 90) |
+| `--max-file-mb` | `FCD_MAX_FILE_MB` | `max_file_mb` | `200` | size limit of one file, MB |
+| `--push` | `FCD_PUSH` | `push` | `true` | notifications; `false`: the server never contacts outside addresses |
+| `--trust-forwarded-for` | `FCD_TRUST_FORWARDED_FOR` | `trust_forwarded_for` | `false` | take the client address from `X-Forwarded-For` (only behind a proxy) |
+| `--lang` | `FCD_LANG` | `lang` | see below | language of the server's messages: `ru` or `en` |
+| `--tls-cert`, `--tls-key` | `FCD_TLS_CERT`, `FCD_TLS_KEY` | | | HTTPS with your own certificate files (both are needed) |
+| `--web-dir` | `FCD_WEB_DIR` | | | serve the app from a folder (development) |
+| `--m0` | `FCD_M0` | | `false` | check endpoints of the `/server/` page |
+| | | `push_subject` | `mailto:fcd-admin@example.org` | contact for the Apple, Google and Mozilla push services |
+| | | `min_free_mb` | `100` | below this much free space the server refuses new data |
+
+The commands `healthcheck`, `reset-admin-code` and `admin` read the same variables where they apply (`FCD_DATA`,
+`FCD_PORT`, `FCD_LISTEN`, `FCD_LANG`). Other `FCD_*` names are ignored (`FCD_GIT_COMMIT` and `FCD_BIN` belong to the
+build and the tests).
+
+**Language.** Everything the server prints (the start-up lines, the log, `fcd --help`, errors, `reset-admin-code`,
+`admin`, `healthcheck`) is in Russian or English: `--lang`, else `FCD_LANG`, else `lang` in `config.toml`, else the
+system locale (`LC_ALL`, `LC_MESSAGES`, `LANG`), else Russian. The examples in this guide show the Russian output. A
+few lines come from the `clap` library and stay in English in the Russian help: some rare command-line errors.
 
 The full list with explanations: `fcd --help`. Detailed log: environment variable `RUST_LOG=debug`.
 
@@ -228,9 +245,10 @@ docker run -d --name fcd --restart unless-stopped \
 docker logs fcd 2>&1 | grep 'код администратора'
 ```
 
-Server flags go after the image name, for example `... fcd:latest --trust-forwarded-for true`. If you change the
-port with a flag rather than in `config.toml`, the health check does not know it: change the port in `config.toml`
-or set your own check `fcd healthcheck --data /data --port <port>`.
+Settings are passed as environment variables, for example `-e FCD_TRUST_FORWARDED_FOR=true` (flags after the image
+name work too: `... fcd:latest --trust-forwarded-for true`). The image sets `FCD_DATA=/data`. The built-in health
+check `fcd healthcheck` reads the same variables, so a port changed with `-e FCD_PORT=...` is checked as well; a port
+changed with a flag is not, so prefer the variable.
 
 A named volume (`fcd-data`) is easier than a folder: Docker gives it the right owner. If you want a folder on disk,
 make user 65534 its owner: `sudo chown 65534:65534 /srv/family-chat`.
@@ -246,6 +264,10 @@ services:
       - "127.0.0.1:8787:8787"
     volumes:
       - fcd-data:/data
+    environment:
+      # Server settings (fcd --help lists them all); the health check reads them too.
+      FCD_LANG: "ru"
+      # FCD_TRUST_FORWARDED_FOR: "true"
     stop_grace_period: 20s
 
 volumes:
@@ -278,7 +300,10 @@ ContainerName=fcd
 PublishPort=127.0.0.1:8787:8787
 Volume=fcd-data:/data
 AutoUpdate=registry
-HealthCmd=["/fcd", "healthcheck", "--data", "/data"]
+# Server settings (fcd --help lists them all); the health check reads them too.
+Environment=FCD_LANG=ru
+# Environment=FCD_TRUST_FORWARDED_FOR=true
+HealthCmd=["/fcd", "healthcheck"]
 HealthInterval=30s
 HealthTimeout=15s
 HealthStartPeriod=10s
@@ -328,7 +353,11 @@ Wants=network-online.target
 [Service]
 User=fcd
 Group=fcd
-ExecStart=/usr/local/bin/fcd --data /var/lib/family-chat --listen 127.0.0.1
+Environment=FCD_DATA=/var/lib/family-chat
+Environment=FCD_LISTEN=127.0.0.1
+# More settings, one VARIABLE=value per line (fcd --help lists them all); the file may be absent.
+EnvironmentFile=-/etc/family-chat/fcd.env
+ExecStart=/usr/local/bin/fcd
 Restart=on-failure
 TimeoutStopSec=20
 NoNewPrivileges=yes
@@ -341,9 +370,10 @@ ReadWritePaths=/var/lib/family-chat
 WantedBy=multi-user.target
 ```
 
-`--listen 127.0.0.1` fits when the proxy is on the same computer; otherwise drop the flag. Commands with the
-service stopped: `sudo systemctl stop fcd`, then `sudo -u fcd fcd reset-admin-code --data /var/lib/family-chat`,
-then `sudo systemctl start fcd`.
+`FCD_LISTEN=127.0.0.1` fits when the proxy is on the same computer; otherwise drop that line. Further settings go
+into `/etc/family-chat/fcd.env`, one `FCD_...=value` per line. Commands with the service stopped:
+`sudo systemctl stop fcd`, then `sudo -u fcd fcd reset-admin-code --data /var/lib/family-chat`, then
+`sudo systemctl start fcd`.
 
 ## Windows and macOS
 
@@ -403,12 +433,11 @@ lives only on phones and in archive files ([family guide](FAMILY.md#message-arch
 - Files decide the space. For example, a family that sends 50 photos a day at 300 KB needs about 1.3 GB for 90 days.
 - When free space falls below `min_free_mb` (100 MB by default), the server refuses new messages, files and joins;
   the app says the family server is running out of space. Free some space or shorten the retention.
-- Used and free space are shown to the administrator in the app: «Настройки», «Семья и сервер» (Settings, Family
-  and server).
+- Used and free space are shown to the administrator in the app: “Settings”, “Family and server”.
 
 ## Members
 
-- **Invitations** are issued by an administrator under «Настройки», «Семья и сервер», «Приглашения». Each works for
+- **Invitations** are issued by an administrator under “Settings”, “Family and server”, “Invitations”. Each works for
   one person for 7 days and only once. A revoked invitation stops working at once.
 - **Disconnecting a member** happens there too. Their devices stop receiving and sending at once; history already
   received stays with everyone. Owners of groups they were in get a service message.

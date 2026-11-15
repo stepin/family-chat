@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import type { CreatedInvite, InviteInfo } from '@family-chat/core';
   import QrCode from './QrCode.svelte';
   import { app } from '../lib/app.svelte.ts';
@@ -9,6 +9,10 @@
 
   // Create an invitation (QR and link), list issued ones, revoke
   // (docs/PLAN-v2.md 8, screen 5). The code is shown once and never logged.
+  // M7: the flow says plainly that an invitation lets in one person, that
+  // the visible link is the newest one, and that the button makes another
+  // one for the next relative ("Создать ещё одно приглашение"); the older
+  // invitation keeps working.
   let { accountId, showList = true }: { accountId: string; showList?: boolean } = $props();
 
   let created = $state<CreatedInvite | null>(null);
@@ -39,6 +43,10 @@
     try {
       created = await app.core.admin.createInvite(accountId);
       await load();
+      status = null;
+      // The new invitation replaces the one shown: the focus goes to it, so a screen reader hears it.
+      await tick();
+      document.getElementById('new-invite-title')?.focus();
     } catch (e) {
       error = errorText(e);
       app.log('warn', 'admin', 'creating an invitation failed', e);
@@ -85,7 +93,7 @@
 <div class="stack">
   {#if created}
     <section class="created stack" aria-labelledby="new-invite-title">
-      <h3 id="new-invite-title">{t.invites.newTitle}</h3>
+      <h3 id="new-invite-title" tabindex="-1">{t.invites.newTitle}</h3>
       <p>{t.invites.newLead}</p>
       <div class="qr-wrap"><QrCode text={created.link} label={t.invites.qrLabel} /></div>
       <div class="field">
@@ -101,9 +109,12 @@
       <p class="muted small">{t.invites.expires(created.expiresAt)}. {t.invites.secretNote}</p>
     </section>
   {/if}
-  <button class="btn" class:secondary={!!created} type="button" disabled={busy} onclick={create}>
-    {busy ? t.invites.creating : t.invites.create}
-  </button>
+  <div class="create stack">
+    <button class="btn" class:secondary={!!created} type="button" disabled={busy} onclick={create} aria-describedby="invite-create-hint" data-testid="create-invite">
+      {busy ? t.invites.creating : created ? t.invites.createAnother : t.invites.create}
+    </button>
+    <p id="invite-create-hint" class="muted small">{created ? t.invites.createAnotherHint : t.invites.oneEach}</p>
+  </div>
   {#if status}<p role="status">{status}</p>{/if}
   {#if error}<p class="error-text" role="alert">{error}</p>{/if}
 
@@ -138,6 +149,23 @@
 
   .created .muted {
     color: var(--on-accent-soft-muted);
+  }
+
+  .create {
+    gap: var(--sp-1);
+  }
+
+  .create .btn {
+    align-self: flex-start;
+  }
+
+  #new-invite-title:focus {
+    outline: none;
+  }
+
+  #new-invite-title:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
   }
 
   .qr-wrap {

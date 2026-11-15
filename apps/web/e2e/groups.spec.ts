@@ -37,12 +37,12 @@ function blocked(page: Page) {
 test('groups, profiles and "Избранное"', async ({ newUser }) => {
   test.setTimeout(420_000);
   const mama = await newUser(wide);
-  const { inviteLink } = await setupAdmin(mama.page, fcd);
+  const { inviteLink } = await setupAdmin(mama.page, fcd, 'Мама', 'Ивановы', 'f');
 
   const people: Record<string, User> = {};
   async function join(name: string, link: string): Promise<User> {
     const u = await newUser(wide);
-    await joinByLink(u.page, link, name);
+    await joinByLink(u.page, link, name, name === 'Катя' ? 'f' : 'm');
     people[name] = u;
     return u;
   }
@@ -87,7 +87,7 @@ test('groups, profiles and "Избранное"', async ({ newUser }) => {
       await openChat(u.page, 'Семья');
       await expect(message(u.page, 'Привет всем')).toBeVisible({ timeout: 30_000 });
       await expect(message(u.page, 'Привет всем').getByTestId('message-author')).toHaveText('Мама');
-      await expect(u.page.getByTestId('service-line').first()).toContainText('Мама создал(а) группу «Семья»');
+      await expect(u.page.getByTestId('service-line').first()).toContainText('Мама создала группу «Семья»');
     }
     await send(vasya.page, 'Привет от Васи');
     await send(vasya.page, 'И ещё одно');
@@ -153,7 +153,7 @@ test('groups, profiles and "Избранное"', async ({ newUser }) => {
 
     await send(mama.page, 'Без Васи');
     await expect(message(petya.page, 'Без Васи')).toBeVisible({ timeout: 30_000 });
-    await expect(petya.page.getByTestId('service-line').filter({ hasText: 'Мама удалил(а) из группы Вася' })).toBeVisible();
+    await expect(petya.page.getByTestId('service-line').filter({ hasText: 'Мама удалила из группы Вася' })).toBeVisible();
     await vasya.page.waitForTimeout(1500);
     await expect(message(vasya.page, 'Без Васи')).toHaveCount(0);
   });
@@ -181,7 +181,7 @@ test('groups, profiles and "Избранное"', async ({ newUser }) => {
     await petya.page.getByRole('button', { name: 'Назад' }).click();
 
     await expect(mama.page.getByRole('heading', { name: 'Родные', exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(mama.page.getByTestId('service-line').filter({ hasText: 'Петя переименовал(а) группу в «Родные»' })).toBeVisible();
+    await expect(mama.page.getByTestId('service-line').filter({ hasText: 'Петя переименовал группу в «Родные»' })).toBeVisible();
     await expect(mama.page.getByTestId('service-line').filter({ hasText: 'Новый владелец: Петя' })).toBeVisible();
   });
 
@@ -191,7 +191,7 @@ test('groups, profiles and "Избранное"', async ({ newUser }) => {
     await katya.page.getByRole('button', { name: 'Выйти из группы' }).click();
     await katya.page.getByRole('dialog').getByRole('button', { name: 'Выйти', exact: true }).click();
     await expect(blocked(katya.page)).toContainText('Вы больше не участник', { timeout: 30_000 });
-    await expect(mama.page.getByTestId('service-line').filter({ hasText: 'Катя вышел(а) из группы' })).toBeVisible({ timeout: 30_000 });
+    await expect(mama.page.getByTestId('service-line').filter({ hasText: 'Катя вышла из группы' })).toBeVisible({ timeout: 30_000 });
     await send(mama.page, 'После Кати');
     await expect(message(dima.page, 'После Кати')).toBeVisible({ timeout: 30_000 });
   });
@@ -248,7 +248,7 @@ test('groups, profiles and "Избранное"', async ({ newUser }) => {
     const dialog = dima.page.getByRole('dialog');
     await dialog.getByRole('checkbox', { name: 'Я понимаю, что это нельзя отменить' }).check();
     await dialog.getByRole('button', { name: 'Отозвать навсегда' }).click();
-    await expect(dima.page.getByText('Вы отозвали свою идентичность в «Ивановы»').first()).toBeVisible({ timeout: 30_000 });
+    await expect(dima.page.getByText('Вы отозвали свою идентичность', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
 
     // Petya owns the group: his app removes the revoked member by itself.
     await openChat(petya.page, 'Родные');

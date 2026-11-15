@@ -14,6 +14,7 @@ export default defineConfig({
   forbidOnly: !!process.env['CI'],
   reporter: 'list',
   globalSetup: './e2e/support/global-setup.ts',
-  use: { trace: 'off' },
+  // M7: Russian interface (the tests use Russian names).
+  use: { trace: 'off', locale: 'ru-RU' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], launchOptions: { args: MEDIA_ARGS } } }],
 });

@@ -41,7 +41,7 @@ await core.sendMessage(acc.id, chatId, { text: 'Фото', attachments: [{ data:
 | `core.chats` | `ChatListItem[]`: прежний список M1, только личные чаты с другими людьми. Оставлен для совместимости; `apps/web` с M2 берёт `chatList` |
 | `core.chat(acc, chat).messages` | `MessageView[]`: сообщения чата, новые в конце, затем очередь отправки |
 | `core.group(acc, chat)` | `GroupView \| null`: название, владелец, участники, членство, расхождение с сервером |
-| `core.members(acc)` | `Member[]`: участники семьи. Новое: `revoked`, `verified`, `avatar` |
+| `core.members(acc)` | `Member[]`: участники семьи. Новое: `revoked`, `verified`, `avatar`; M7: `gender` (`'m'` или `'f'`, `'m'`, если в профиле нет) |
 | `core.avatar(acc, userId)` | `AvatarView \| null`: аватар как `Blob` (сам скачивается и кэшируется) |
 | `core.transfers` | `TransferView[]`: загрузки и скачивания в очереди, в работе и с ошибкой |
 | `core.outbox`, `core.drafts`, `core.diagnostics` | как в M1 |
@@ -155,7 +155,7 @@ await core.sendMessage(acc.id, chatId, { location: { lat: 55.7558, lon: 37.6173,
 
 ## Профиль, аватары, контакты
 
-- `core.updateProfile(acc, name)`: имя (аватар сохраняется).
+- `core.updateProfile(acc, name)`: имя (аватар сохраняется). M7: `core.updateProfile(acc, { name?, gender? })` меняет имя и/или пол, остальное сохраняется; `core.join({ …, gender })` пишет пол в первый профиль (по умолчанию `'m'`). `InviteCheck.createdBy.gender` для текста приглашения. База данных версии 5: `UserRow.gender`, при обновлении читается из уже сохранённых профилей.
 - `core.setAvatar(acc, imageBlobOrBytes)`: готовый JPEG или WebP до 256 КБ (уменьшение и EXIF на стороне интерфейса). Ядро загружает картинку, сверяет SHA-256 и подписывает профиль с её ссылкой. `core.removeAvatar(acc)`.
 - `core.avatar(acc, userId)`: живой `AvatarView` (`blob`, `type`, `sha256`) или `null`; чужие аватары скачиваются с токеном, проверяются по SHA-256 из подписанного профиля и кэшируются. `core.avatarBlob(acc, userId)` то же разово.
 - `core.setVerified(acc, userId, true | false)`: локальная отметка «проверен» по отпечатку (`Member.fingerprint`); если ключи участника сменятся, `Member.verified` станет `false`.

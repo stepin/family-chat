@@ -111,7 +111,13 @@ impl PackStore {
             {
                 Some(m) => m,
                 None => {
-                    tracing::warn!("packs/{id_s}: нет meta.json, пропускаю");
+                    tracing::warn!(
+                        "{}",
+                        tr!(
+                            "packs/{id_s}: нет meta.json, пропускаю",
+                            "packs/{id_s}: no meta.json, skipping"
+                        )
+                    );
                     continue;
                 }
             };
@@ -123,7 +129,13 @@ impl PackStore {
                         .ok()
                         .and_then(|b| serde_json::from_slice::<Envelope>(&b).ok());
                     if manifest.is_none() {
-                        tracing::warn!("packs/{id_s}/pack.json повреждён, набор считается черновиком");
+                        tracing::warn!(
+                            "{}",
+                            tr!(
+                                "packs/{id_s}/pack.json повреждён, набор считается черновиком",
+                                "packs/{id_s}/pack.json is damaged, the pack counts as a draft"
+                            )
+                        );
                     }
                     continue;
                 }
@@ -188,14 +200,21 @@ impl PackStore {
             published_at: p.published_at,
         };
         write_atomic_io(&self.data, &self.dir(id).join("meta.json"), &to_json(&meta))
-            .map_err(|e| io_error("запись набора стикеров", e))
+            .map_err(|e| io_error(crate::lang::l("запись набора стикеров", "writing a sticker pack"), e))
     }
 
     fn check_space(&self, incoming: u64) -> Result<(), ApiError> {
         if let Some((free, _)) = disk_space(&self.root)
             && free < self.min_free.saturating_add(incoming)
         {
-            tracing::warn!("мало места на диске для стикеров: свободно {} МБ", free / (1024 * 1024));
+            tracing::warn!(
+                "{}",
+                tr!(
+                    "мало места на диске для стикеров: свободно {} МБ",
+                    "low disk space for stickers: {} MB free",
+                    free / (1024 * 1024)
+                )
+            );
             return Err(ApiError::storage_full());
         }
         Ok(())
@@ -265,7 +284,8 @@ impl PackStore {
         self.check_space(size)?;
         let dir = self.dir(id);
         if creating {
-            create_private_dir(&dir).map_err(|e| io_error("создание папки набора", e))?;
+            create_private_dir(&dir)
+                .map_err(|e| io_error(crate::lang::l("создание папки набора", "creating a pack folder"), e))?;
             let p = Pack {
                 owner: *user,
                 created_at: now,
@@ -277,7 +297,7 @@ impl PackStore {
             idx.insert(*id, p);
         }
         write_atomic_io(&self.data, &dir.join(file_name(hash, kind)), bytes)
-            .map_err(|e| io_error("запись стикера", e))?;
+            .map_err(|e| io_error(crate::lang::l("запись стикера", "writing a sticker"), e))?;
         idx.get_mut(id).expect("present").files.insert(*hash, (kind, size));
         Ok((kind, size))
     }
@@ -325,7 +345,7 @@ impl PackStore {
             .collect();
         let envelope_json = serde_json::to_vec(&m.envelope).expect("serialisable");
         write_atomic_io(&self.data, &dir.join("pack.json"), &envelope_json)
-            .map_err(|e| io_error("запись набора стикеров", e))?;
+            .map_err(|e| io_error(crate::lang::l("запись набора стикеров", "writing a sticker pack"), e))?;
         let mut next = p.clone();
         next.manifest = Some(m.envelope.clone());
         next.published_at = Some(now);
@@ -356,7 +376,12 @@ impl PackStore {
         match std::fs::remove_dir_all(self.dir(id)) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(io_error("удаление набора стикеров", e)),
+            Err(e) => {
+                return Err(io_error(
+                    crate::lang::l("удаление набора стикеров", "deleting a sticker pack"),
+                    e,
+                ));
+            }
         }
         idx.remove(id);
         Ok(())
@@ -378,7 +403,13 @@ impl PackStore {
                 Err(e) if e.kind() == io::ErrorKind::NotFound => {
                     idx.remove(id);
                 }
-                Err(e) => tracing::error!("не удалось удалить черновик набора {id}: {e}"),
+                Err(e) => tracing::error!(
+                    "{}",
+                    tr!(
+                        "не удалось удалить черновик набора {id}: {e}",
+                        "could not delete the pack draft {id}: {e}"
+                    )
+                ),
             }
         }
         stale.len()
@@ -464,7 +495,10 @@ pub async fn publish(
     envelope::verify_sticker_pack(&env, &bytes, &key).map_err(pack_error)?;
     let st2 = st.clone();
     let p = blocking(move || st2.packs.publish(&c.user, &id, &manifest, now_ms())).await?;
-    tracing::info!("опубликован набор стикеров {id}");
+    tracing::info!(
+        "{}",
+        tr!("опубликован набор стикеров {id}", "sticker pack {id} published")
+    );
     Ok(Json(pack_json(&id, &p)).into_response())
 }
 
@@ -509,7 +543,7 @@ pub async fn get_file(
     let bytes = match tokio::fs::read(&path).await {
         Ok(b) => b,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Err(missing()),
-        Err(e) => return Err(io_error("чтение стикера", e)),
+        Err(e) => return Err(io_error(crate::lang::l("чтение стикера", "reading a sticker"), e)),
     };
     let mut res = Response::new(Body::from(bytes));
     let h = res.headers_mut();
@@ -534,6 +568,6 @@ pub async fn delete(
     let id = parse_pack(&id)?;
     let st2 = st.clone();
     blocking(move || st2.packs.delete(&c.user, &id)).await?;
-    tracing::info!("удалён набор стикеров {id}");
+    tracing::info!("{}", tr!("удалён набор стикеров {id}", "sticker pack {id} deleted"));
     Ok(StatusCode::NO_CONTENT.into_response())
 }

@@ -304,7 +304,12 @@ fn check_push_request(headers: &HeaderMap, body: &[u8], service: &str, vapid_pub
     assert_eq!(claims["sub"], fcd::config::DEFAULT_PUSH_SUBJECT);
     let payload: serde_json::Value = serde_json::from_slice(&decrypt(ua, auth, body)).unwrap();
     assert_eq!(payload["kind"], "m0-test");
-    assert_eq!(payload["title"], "Family Chat");
+    // M7: no human text in the payload; the service worker words it in the app's language.
+    assert!(
+        payload.get("body").is_none() && payload.get("title").is_none(),
+        "{payload}"
+    );
+    assert!(payload["delay"].is_u64() && payload["sentAt"].is_u64(), "{payload}");
 }
 
 #[tokio::test]

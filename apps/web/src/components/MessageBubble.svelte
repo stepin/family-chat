@@ -531,7 +531,7 @@
     max-width: 100%;
     min-width: 0;
     padding: var(--sp-2) var(--sp-3);
-    border-radius: var(--r-l);
+    border-radius: var(--bubble-radius);
     background: var(--surface);
     box-shadow: var(--shadow);
   }

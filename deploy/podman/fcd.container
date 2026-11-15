@@ -7,7 +7,10 @@ ContainerName=fcd
 PublishPort=127.0.0.1:8787:8787
 Volume=fcd-data:/data
 AutoUpdate=registry
-HealthCmd=["/fcd", "healthcheck", "--data", "/data"]
+# Server settings (fcd --help lists them all); the health check reads them too.
+Environment=FCD_LANG=ru
+# Environment=FCD_TRUST_FORWARDED_FOR=true
+HealthCmd=["/fcd", "healthcheck"]
 HealthInterval=30s
 HealthTimeout=15s
 HealthStartPeriod=10s

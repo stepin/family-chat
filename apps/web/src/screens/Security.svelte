@@ -63,7 +63,7 @@
   <section class="section" aria-labelledby="sec-revoke">
     <h2 id="sec-revoke">{t.security.revokeTitle}</h2>
     {#if account.revoked}
-      <p>{t.status.revoked(account.familyName)}</p>
+      <p>{t.status.revoked(app.familyLabel(account.familyName))}</p>
     {:else}
       <p>{t.security.revokeLead}</p>
       <button class="btn danger" type="button" disabled={removed} onclick={ask}>{t.security.revokeButton}</button>

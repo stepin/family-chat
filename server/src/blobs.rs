@@ -95,7 +95,13 @@ impl BlobStore {
                 {
                     Some(m) => m,
                     None => {
-                        tracing::warn!("blobs/{day_s}/{id_s}: нет meta.json, пропускаю");
+                        tracing::warn!(
+                            "{}",
+                            tr!(
+                                "blobs/{day_s}/{id_s}: нет meta.json, пропускаю",
+                                "blobs/{day_s}/{id_s}: no meta.json, skipping"
+                            )
+                        );
                         continue;
                     }
                 };
@@ -147,7 +153,14 @@ impl BlobStore {
         if let Some((free, _)) = disk_space(&self.root)
             && free < self.min_free.saturating_add(incoming)
         {
-            tracing::warn!("мало места на диске для вложения: свободно {} МБ", free / (1024 * 1024));
+            tracing::warn!(
+                "{}",
+                tr!(
+                    "мало места на диске для вложения: свободно {} МБ",
+                    "low disk space for an attachment: {} MB free",
+                    free / (1024 * 1024)
+                )
+            );
             return Err(ApiError::storage_full());
         }
         Ok(())
@@ -202,14 +215,19 @@ impl BlobStore {
                 self.check_total(None, part, size)?;
                 let day = day_of_ms(now);
                 let dir = self.dir(day, id);
-                create_private_dir(&dir).map_err(|e| io_error("создание папки вложения", e))?;
+                create_private_dir(&dir).map_err(|e| {
+                    io_error(
+                        crate::lang::l("создание папки вложения", "creating an attachment folder"),
+                        e,
+                    )
+                })?;
                 let meta = BlobMeta {
                     owner: *user,
                     created_at: now,
                 };
                 let data = self.root.parent().unwrap_or(&self.root);
                 write_atomic_io(data, &dir.join("meta.json"), &to_json(&meta))
-                    .map_err(|e| io_error("запись вложения", e))?;
+                    .map_err(|e| io_error(crate::lang::l("запись вложения", "writing an attachment"), e))?;
                 idx.insert(
                     *id,
                     Blob {
@@ -222,7 +240,8 @@ impl BlobStore {
                 dir
             }
         };
-        std::fs::rename(tmp, dir.join(part_name(part))).map_err(|e| io_error("запись части вложения", e))?;
+        std::fs::rename(tmp, dir.join(part_name(part)))
+            .map_err(|e| io_error(crate::lang::l("запись части вложения", "writing an attachment part"), e))?;
         sync_dir(&dir);
         let b = idx.get_mut(id).expect("inserted above");
         b.parts.insert(part, size);
@@ -248,7 +267,12 @@ impl BlobStore {
         match std::fs::remove_dir_all(&dir) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(io_error("удаление вложения", e)),
+            Err(e) => {
+                return Err(io_error(
+                    crate::lang::l("удаление вложения", "deleting an attachment"),
+                    e,
+                ));
+            }
         }
         idx.remove(id);
         Ok(())
@@ -269,7 +293,10 @@ impl BlobStore {
                     idx.retain(|_, b| b.day != day);
                     out.push(name);
                 }
-                Err(e) => tracing::error!("не удалось удалить {}: {e}", path.display()),
+                Err(e) => tracing::error!(
+                    "{}",
+                    tr!("не удалось удалить {}: {e}", "could not delete {}: {e}", path.display())
+                ),
             }
         }
         out
@@ -357,7 +384,12 @@ async fn receive(body: Body, path: &Path, max: u64) -> Result<u64, ApiError> {
     let mut f = tokio::fs::OpenOptions::from(private_file_options().write(true).create_new(true).to_owned())
         .open(path)
         .await
-        .map_err(|e| io_error("временный файл вложения", e))?;
+        .map_err(|e| {
+            io_error(
+                crate::lang::l("временный файл вложения", "temporary attachment file"),
+                e,
+            )
+        })?;
     let mut body = body;
     let mut n: u64 = 0;
     while let Some(frame) = body.frame().await {
@@ -372,13 +404,15 @@ async fn receive(body: Body, path: &Path, max: u64) -> Result<u64, ApiError> {
             }
             f.write_all(&data)
                 .await
-                .map_err(|e| io_error("запись части вложения", e))?;
+                .map_err(|e| io_error(crate::lang::l("запись части вложения", "writing an attachment part"), e))?;
         }
     }
     if n > max {
         return Err(too_large(max as usize));
     }
-    f.sync_all().await.map_err(|e| io_error("запись части вложения", e))?;
+    f.sync_all()
+        .await
+        .map_err(|e| io_error(crate::lang::l("запись части вложения", "writing an attachment part"), e))?;
     Ok(n)
 }
 
@@ -447,9 +481,13 @@ pub async fn get_part(
     let file = match tokio::fs::File::open(&path).await {
         Ok(f) => f,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Err(not_found()),
-        Err(e) => return Err(io_error("чтение вложения", e)),
+        Err(e) => return Err(io_error(crate::lang::l("чтение вложения", "reading an attachment"), e)),
     };
-    let len = file.metadata().await.map_err(|e| io_error("чтение вложения", e))?.len();
+    let len = file
+        .metadata()
+        .await
+        .map_err(|e| io_error(crate::lang::l("чтение вложения", "reading an attachment"), e))?
+        .len();
     let mut res = Response::new(Body::new(FileBody {
         file,
         buf: vec![0u8; 64 * 1024].into_boxed_slice(),

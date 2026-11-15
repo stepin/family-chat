@@ -15,6 +15,7 @@ import {
   randomBytes,
   seedToPhrase,
   type AvatarRef,
+  type Gender,
   type IdentityKeys,
 } from '@family-chat/protocol';
 import { isApiError } from './api/errors.ts';
@@ -180,6 +181,8 @@ export interface JoinInput {
   readonly code: JoinCode;
   /** Display name for the profile. */
   readonly name: string;
+  /** Gender for the profile (M7); `m` when not given. */
+  readonly gender?: Gender;
   /** Existing identity on this device. */
   readonly userId?: string;
   /** Or an identity restored from its phrase (stored once the server accepts it). */
@@ -207,7 +210,7 @@ export async function joinServer(ctx: CoreContext, input: JoinInput): Promise<Ac
   const userId = keys.userId;
   const now = ctx.clock.now();
   // Validates the name (ProtocolError `invalid-argument`) before anything is sent.
-  const profile = createProfileEnvelope(keys, { name: input.name, rev: 1, updated: now });
+  const profile = createProfileEnvelope(keys, { name: input.name, rev: 1, updated: now, gender: input.gender ?? 'm' });
   const identity = createIdentityEnvelope(keys, now);
   const devId = newDevId();
   const code: JoinCode = 'invite' in input.code ? { invite: input.code.invite } : { adminCode: input.code.adminCode };
@@ -283,6 +286,8 @@ export interface ProfileChange {
   readonly name?: string;
   /** New avatar reference (after PUT /v1/me/avatar), or null to remove it. */
   readonly avatar?: AvatarRef | null;
+  /** M7: grammatical gender. */
+  readonly gender?: Gender;
 }
 
 /**
@@ -302,9 +307,10 @@ export async function updateProfile(rt: AccountRuntimeLike, changeOrName: string
   const name = change.name ?? me.name;
   if (name === null) throw new CoreError('invalid-input', 'no name');
   const avatar = change.avatar !== undefined ? change.avatar : (me.avatar ?? null);
+  const gender = change.gender ?? me.gender ?? 'm';
   let rev = Math.max(me.rev, 0) + 1;
   for (let attempt = 0; ; attempt++) {
-    const env = createProfileEnvelope(keys, { name, rev, updated: ctx.clock.now(), avatar });
+    const env = createProfileEnvelope(keys, { name, rev, updated: ctx.clock.now(), avatar, gender });
     try {
       const stored = await session.call((t) => session.transport.putProfile(t, env));
       await directory.ingest([

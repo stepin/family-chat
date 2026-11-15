@@ -116,6 +116,7 @@ export class Directory {
               row.name = profile.name;
               row.rev = profile.rev;
               row.avatar = profile.avatar;
+              row.gender = profile.gender;
             }
           } catch (e) {
             reports.push(`profile of ${entry.userId} rejected: ${describeError(e)}`);

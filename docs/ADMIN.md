@@ -112,22 +112,38 @@ fcd admin add <userId> --data /var/lib/family-chat
 
 ## Настройки
 
-Настройки задаются флагами или в файле `config.toml` в папке данных. Файл создаётся при первом запуске; флаги важнее
-файла. После правки файла перезапустите сервер.
+Каждую настройку можно задать тремя способами: флагом, переменной окружения или строкой в `config.toml` в папке
+данных. Порядок: **флаг, затем переменная окружения, затем `config.toml`, затем значение по умолчанию**. Переменная
+ведёт себя так же, как её флаг: оба важнее файла, а при первом запуске действующие значения (из флагов, переменных и
+значений по умолчанию) записываются в новый `config.toml`; позже изменённые флаги и переменные туда не пишутся.
+Пустая переменная считается незаданной. Логические значения: `true`, `false`, `1` или `0`; неверное значение
+останавливает сервер с ошибкой, в которой названа переменная. После любых изменений перезапустите сервер.
 
-| Флаг | В `config.toml` | По умолчанию | Что это |
-|---|---|---|---|
-| `--port` | `port` | `8787` | порт |
-| `--listen` | `listen` | `0.0.0.0` | адрес; `127.0.0.1`, если прокси на том же компьютере |
-| `--family-name` | `family_name` | `Семья` | имя семьи, его видят все |
-| `--retention-days` | `retention_days` | `90` | сколько дней сервер хранит сообщения и файлы (от 7 до 90) |
-| `--max-file-mb` | `max_file_mb` | `200` | предел размера одного файла, МБ |
-| `--push` | `push` | `true` | уведомления; `false`: сервер не обращается ни к каким внешним адресам |
-| `--trust-forwarded-for` | `trust_forwarded_for` | `false` | брать адрес клиента из `X-Forwarded-For` (только за прокси) |
-| | `push_subject` | `mailto:fcd-admin@example.org` | контакт для push-сервисов Apple, Google и Mozilla |
-| | `min_free_mb` | `100` | когда свободного места меньше, сервер не принимает новое |
-| `--tls-cert`, `--tls-key` | | | HTTPS со своими файлами сертификата |
-| `--m0` | | | проверочные точки страницы `/server/` |
+| Флаг | Переменная окружения | В `config.toml` | По умолчанию | Что это |
+|---|---|---|---|---|
+| `--data` | `FCD_DATA` | | | папка данных (нужна для запуска; в образе Docker `/data`) |
+| `--port` | `FCD_PORT` | `port` | `8787` | порт |
+| `--listen` | `FCD_LISTEN` | `listen` | `0.0.0.0` | адрес; `127.0.0.1`, если прокси на том же компьютере |
+| `--family-name` | `FCD_FAMILY_NAME` | `family_name` | `Семья` (по-английски `Family`) | имя семьи, его видят все |
+| `--retention-days` | `FCD_RETENTION_DAYS` | `retention_days` | `90` | сколько дней сервер хранит сообщения и файлы (от 7 до 90) |
+| `--max-file-mb` | `FCD_MAX_FILE_MB` | `max_file_mb` | `200` | предел размера одного файла, МБ |
+| `--push` | `FCD_PUSH` | `push` | `true` | уведомления; `false`: сервер не обращается ни к каким внешним адресам |
+| `--trust-forwarded-for` | `FCD_TRUST_FORWARDED_FOR` | `trust_forwarded_for` | `false` | брать адрес клиента из `X-Forwarded-For` (только за прокси) |
+| `--lang` | `FCD_LANG` | `lang` | см. ниже | язык сообщений сервера: `ru` или `en` |
+| `--tls-cert`, `--tls-key` | `FCD_TLS_CERT`, `FCD_TLS_KEY` | | | HTTPS со своими файлами сертификата (нужны оба) |
+| `--web-dir` | `FCD_WEB_DIR` | | | отдавать приложение из папки (для разработки) |
+| `--m0` | `FCD_M0` | | `false` | проверочные точки страницы `/server/` |
+| | | `push_subject` | `mailto:fcd-admin@example.org` | контакт для push-сервисов Apple, Google и Mozilla |
+| | | `min_free_mb` | `100` | когда свободного места меньше, сервер не принимает новое |
+
+Команды `healthcheck`, `reset-admin-code` и `admin` читают те же переменные, где они имеют смысл (`FCD_DATA`,
+`FCD_PORT`, `FCD_LISTEN`, `FCD_LANG`). Другие имена `FCD_*` не мешают (`FCD_GIT_COMMIT` и `FCD_BIN` нужны сборке и
+тестам).
+
+**Язык.** Всё, что печатает сервер (строки при запуске, журнал, `fcd --help`, ошибки, `reset-admin-code`, `admin`,
+`healthcheck`), бывает по-русски и по-английски: `--lang`, иначе `FCD_LANG`, иначе `lang` в `config.toml`, иначе
+язык системы (`LC_ALL`, `LC_MESSAGES`, `LANG`), иначе русский. Несколько редких ошибок командной строки приходят из
+библиотеки `clap` и остаются английскими.
 
 Полный список с пояснениями: `fcd --help`. Подробный журнал: переменная окружения `RUST_LOG=debug`.
 
@@ -225,9 +241,10 @@ docker run -d --name fcd --restart unless-stopped \
 docker logs fcd 2>&1 | grep 'код администратора'
 ```
 
-Флаги сервера дописываются после имени образа, например `... fcd:latest --trust-forwarded-for true`. Если вы меняете
-порт флагом, а не в `config.toml`, проверка здоровья его не узнает: меняйте порт в `config.toml` или задайте свою
-проверку `fcd healthcheck --data /data --port <порт>`.
+Настройки передаются переменными окружения, например `-e FCD_TRUST_FORWARDED_FOR=true` (флаги после имени образа
+тоже работают: `... fcd:latest --trust-forwarded-for true`). Образ задаёт `FCD_DATA=/data`. Встроенная проверка
+здоровья `fcd healthcheck` читает те же переменные, поэтому порт, изменённый через `-e FCD_PORT=...`, она тоже
+знает; порт, изменённый флагом, нет, так что лучше переменная.
 
 Именованный том (`fcd-data`) удобнее папки: Docker сам даёт ему нужного владельца. Если хотите папку на диске,
 сделайте её владельцем пользователя 65534: `sudo chown 65534:65534 /srv/family-chat`.
@@ -243,6 +260,10 @@ services:
       - "127.0.0.1:8787:8787"
     volumes:
       - fcd-data:/data
+    environment:
+      # Server settings (fcd --help lists them all); the health check reads them too.
+      FCD_LANG: "ru"
+      # FCD_TRUST_FORWARDED_FOR: "true"
     stop_grace_period: 20s
 
 volumes:
@@ -275,7 +296,10 @@ ContainerName=fcd
 PublishPort=127.0.0.1:8787:8787
 Volume=fcd-data:/data
 AutoUpdate=registry
-HealthCmd=["/fcd", "healthcheck", "--data", "/data"]
+# Server settings (fcd --help lists them all); the health check reads them too.
+Environment=FCD_LANG=ru
+# Environment=FCD_TRUST_FORWARDED_FOR=true
+HealthCmd=["/fcd", "healthcheck"]
 HealthInterval=30s
 HealthTimeout=15s
 HealthStartPeriod=10s
@@ -325,7 +349,11 @@ Wants=network-online.target
 [Service]
 User=fcd
 Group=fcd
-ExecStart=/usr/local/bin/fcd --data /var/lib/family-chat --listen 127.0.0.1
+Environment=FCD_DATA=/var/lib/family-chat
+Environment=FCD_LISTEN=127.0.0.1
+# More settings, one VARIABLE=value per line (fcd --help lists them all); the file may be absent.
+EnvironmentFile=-/etc/family-chat/fcd.env
+ExecStart=/usr/local/bin/fcd
 Restart=on-failure
 TimeoutStopSec=20
 NoNewPrivileges=yes
@@ -338,9 +366,10 @@ ReadWritePaths=/var/lib/family-chat
 WantedBy=multi-user.target
 ```
 
-`--listen 127.0.0.1` подходит, если прокси на этом же компьютере; иначе уберите этот флаг. Команды при
-остановленной службе: `sudo systemctl stop fcd`, затем `sudo -u fcd fcd reset-admin-code --data /var/lib/family-chat`,
-затем `sudo systemctl start fcd`.
+`FCD_LISTEN=127.0.0.1` подходит, если прокси на этом же компьютере; иначе уберите эту строку. Другие настройки
+кладите в `/etc/family-chat/fcd.env`, по одной `FCD_...=значение` в строке. Команды при остановленной службе:
+`sudo systemctl stop fcd`, затем `sudo -u fcd fcd reset-admin-code --data /var/lib/family-chat`, затем
+`sudo systemctl start fcd`.
 
 ## Windows и macOS
 

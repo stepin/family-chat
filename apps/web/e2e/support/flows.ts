@@ -9,7 +9,8 @@ export interface AdminResult {
 }
 
 /** The administrator route: admin code, name, recovery phrase with confirmation, first invitation. */
-export async function setupAdmin(page: Page, fcd: Fcd, name = 'Мама', family = 'Ивановы'): Promise<AdminResult> {
+/** `gender: 'f'` picks «Ж» next to the name (M7); the default is «М». */
+export async function setupAdmin(page: Page, fcd: Fcd, name = 'Мама', family = 'Ивановы', gender: 'm' | 'f' = 'm'): Promise<AdminResult> {
   await page.goto(`${fcd.url}/`);
   await page.getByRole('button', { name: 'Настроить для своей семьи' }).click();
   await expect(page.getByLabel('Адрес сервера')).toHaveValue(fcd.url);
@@ -17,11 +18,12 @@ export async function setupAdmin(page: Page, fcd: Fcd, name = 'Мама', family
   await page.getByRole('button', { name: 'Дальше' }).click();
   await expect(page.getByText(`Сервер отвечает: семья «${family}».`)).toBeVisible();
   await page.getByLabel('Как вас зовут').fill(name);
+  if (gender === 'f') await page.getByRole('radio', { name: /Ж/ }).check();
   await page.getByRole('button', { name: 'Создать семью' }).click();
 
   await expect(page.locator('ol.words .w')).toHaveCount(24, { timeout: 20_000 });
   const words = await page.locator('ol.words .w').allTextContents();
-  await page.getByRole('button', { name: 'Я записал(а)' }).click();
+  await page.getByRole('button', { name: gender === 'f' ? 'Я записала' : 'Я записал' }).click();
   await expect(page.getByText(/^Слово № \d+$/)).toHaveCount(3);
   const labels = await page.getByText(/^Слово № \d+$/).allTextContents();
   expect(labels).toHaveLength(3);
@@ -53,9 +55,10 @@ export async function createInvite(page: Page): Promise<string> {
 }
 
 /** The invited route on a desktop browser: link → name → chat with the inviter. */
-export async function joinByLink(page: Page, link: string, name: string): Promise<void> {
+export async function joinByLink(page: Page, link: string, name: string, gender: 'm' | 'f' = 'm'): Promise<void> {
   await page.goto(link);
   await page.getByLabel('Как вас зовут').fill(name);
+  if (gender === 'f') await page.getByRole('radio', { name: /Ж/ }).check();
   await page.getByRole('button', { name: 'Войти в семейный чат' }).click();
   await expect(page.getByLabel('Сообщение')).toBeVisible();
 }

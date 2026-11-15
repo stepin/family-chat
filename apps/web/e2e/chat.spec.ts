@@ -26,7 +26,7 @@ test('family from setup to removal', async ({ newUser }) => {
   let firstLink = '';
 
   await test.step('administrator sets up the family with the admin code', async () => {
-    const r = await setupAdmin(mama.page, fcd);
+    const r = await setupAdmin(mama.page, fcd, 'Мама', 'Ивановы', 'f');
     phrase = r.phrase;
     firstLink = r.inviteLink;
     // The empty state of the administrator.
@@ -38,7 +38,7 @@ test('family from setup to removal', async ({ newUser }) => {
     // The invitation fragment is removed from the address bar at once.
     await expect.poll(() => petya.page.url()).not.toContain('#');
     // The invitation check names the inviter before asking for the name.
-    await expect(petya.page.getByRole('heading', { name: 'Вас пригласил(а) Мама в «Ивановы»' })).toBeVisible();
+    await expect(petya.page.getByRole('heading', { name: 'Вас пригласила Мама в «Ивановы»' })).toBeVisible();
     await petya.page.getByLabel('Как вас зовут').fill('Петя');
     await petya.page.getByRole('button', { name: 'Войти в семейный чат' }).click();
     await expect(petya.page.getByRole('heading', { name: 'Мама' })).toBeVisible();
@@ -139,13 +139,13 @@ test('family from setup to removal', async ({ newUser }) => {
     await expect(dialog).toContainText('Отключить Вася от семьи?');
     await dialog.getByRole('button', { name: 'Отключить' }).click();
     await expect(dialog).toBeHidden();
-    await expect(row).toContainText('отключён(а)');
+    await expect(row).toContainText('отключён');
 
     await expect(vasya.page.getByText('Вас отключили от семьи: писать нельзя.')).toBeVisible({ timeout: 30_000 });
     await expect(vasya.page.getByLabel('Сообщение')).toHaveCount(0);
     // Local history stays readable.
     await expect(message(vasya.page, 'Я тоже здесь')).toBeVisible();
     await vasya.page.reload();
-    await expect(vasya.page.getByText('Вас отключили от семьи «Ивановы»').first()).toBeVisible();
+    await expect(vasya.page.getByText('Вас отключили от семьи', { exact: true }).first()).toBeVisible();
   });
 });

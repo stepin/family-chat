@@ -165,7 +165,13 @@ fn count_failure<T>(st: &AppState, ip: IpAddr, r: Result<T, ApiError>) -> Result
         && e.is_auth_failure()
     {
         st.limiter.fail(ip);
-        tracing::info!("неверный код или подпись с адреса {ip}");
+        tracing::info!(
+            "{}",
+            tr!(
+                "неверный код или подпись с адреса {ip}",
+                "wrong code or signature from {ip}"
+            )
+        );
     }
     r
 }
@@ -333,7 +339,12 @@ pub async fn get_avatar(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Err(ApiError::not_found("not_found", "no such avatar"));
         }
-        Err(e) => return Err(crate::error::io_error("чтение аватара", e)),
+        Err(e) => {
+            return Err(crate::error::io_error(
+                crate::lang::l("чтение аватара", "reading an avatar"),
+                e,
+            ));
+        }
     };
     let mut res = Response::new(Body::from(bytes));
     let h = res.headers_mut();
@@ -392,15 +403,14 @@ pub async fn invite_check(
         } else {
             "valid"
         };
-        let name = m
-            .users
-            .get(&inv.created_by)
-            .and_then(|u| u.profile.as_ref())
-            .map(|p| p.name.clone());
+        let profile = m.users.get(&inv.created_by).and_then(|u| u.profile.as_ref());
+        let name = profile.map(|p| p.name.clone());
+        // M7: the inviter's gender, for "пригласил" or "пригласила" (male without a profile).
+        let gender = profile.map(|p| p.gender).unwrap_or_default().as_str();
         Ok(json!({
             "status": status,
             "familyName": st.settings.family_name,
-            "createdBy": { "userId": inv.created_by, "name": name },
+            "createdBy": { "userId": inv.created_by, "name": name, "gender": gender },
             "createdAt": inv.created_at,
             "expiresAt": inv.expires_at,
         }))
@@ -480,15 +490,30 @@ fn push_new_event(st: &Arc<AppState>, a: &Appended, sender: UserId, sender_dev: 
         tokio::spawn(async move {
             match client.send(&st.vapid, &sub, &payload).await {
                 Ok(o) if o.status == 404 || o.status == 410 => {
-                    tracing::info!(service = %o.service, "подписка на уведомления устройства {dev} больше не действует, удаляю");
+                    tracing::info!(
+                        service = %o.service,
+                        "{}",
+                        tr!(
+                            "подписка на уведомления устройства {dev} больше не действует, удаляю",
+                            "the push subscription of device {dev} is no longer valid, removing it"
+                        )
+                    );
                     let ep = sub.endpoint.clone();
                     let _ = st.store.write(move |w| w.set_push(&uid, &dev, None, Some(&ep))).await;
                 }
                 Ok(o) if !(200..300).contains(&o.status) => {
-                    tracing::warn!(service = %o.service, status = o.status, "push-сервис отклонил уведомление");
+                    tracing::warn!(
+                        service = %o.service,
+                        status = o.status,
+                        "{}",
+                        crate::lang::l("push-сервис отклонил уведомление", "the push service refused the notification")
+                    );
                 }
                 Ok(_) => {}
-                Err(e) => tracing::warn!("уведомление не отправлено: {e}"),
+                Err(e) => tracing::warn!(
+                    "{}",
+                    tr!("уведомление не отправлено: {e}", "notification not sent: {e}")
+                ),
             }
         });
     }
@@ -739,7 +764,14 @@ pub async fn delete_event(
 
 pub async fn create_invite(State(st): State<Arc<AppState>>, Admin(c): Admin) -> Result<Response, ApiError> {
     let (inv, code) = st.store.write(move |w| w.create_invite(&c.user, now_ms())).await?;
-    tracing::info!("администратор {} выпустил приглашение", c.user);
+    tracing::info!(
+        "{}",
+        tr!(
+            "администратор {} выпустил приглашение",
+            "administrator {} created an invitation",
+            c.user
+        )
+    );
     Ok((
         StatusCode::CREATED,
         Json(json!({

@@ -1,12 +1,13 @@
 <script lang="ts">
   import { isCoreError, type AccountView } from '@family-chat/core';
+  import GenderPicker from '../../components/GenderPicker.svelte';
   import Page from '../../components/Page.svelte';
   import { app } from '../../lib/app.svelte.ts';
   import { errorText } from '../../lib/errors.ts';
   import { pageServerUrl, parseInviteInput, type ParsedInvite } from '../../lib/invite.ts';
   import { nav } from '../../lib/nav.svelte.ts';
   import { countWords, normalizePhrase } from '../../lib/phrase.ts';
-  import { t } from '../../lib/strings.ts';
+  import { t, type Gender } from '../../lib/strings.ts';
 
   // Restore route (docs/PLAN.md 8.1): invitation link or server address →
   // the 24 words in one field → "Доступ восстановлен".
@@ -14,6 +15,7 @@
   let where = $state(app.invite ? `${app.invite.serverUrl}/#invite=${app.invite.code}` : pageServerUrl(location));
   let phrase = $state('');
   let name = $state('');
+  let gender = $state<Gender>('m');
   let family = $state('');
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -72,6 +74,7 @@
         serverUrl,
         code: { invite: invite.code },
         name: name.trim(),
+        gender,
         phrase: normalizePhrase(phrase),
       });
       phrase = '';
@@ -142,6 +145,7 @@
         <label for="restore-name">{t.join.nameLabel}</label>
         <input id="restore-name" class="input" type="text" maxlength="64" autocomplete="given-name" bind:value={name} />
       </div>
+      <GenderPicker id="restore" bind:value={gender} />
       {#if error}<p class="error-text" role="alert">{error}</p>{/if}
       <button class="btn block" type="submit" disabled={busy || name.trim() === ''}>{t.join.submit}</button>
     </form>

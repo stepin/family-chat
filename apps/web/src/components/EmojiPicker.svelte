@@ -1,25 +1,34 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import Icon from './Icon.svelte';
   import { app } from '../lib/app.svelte.ts';
   import { nav } from '../lib/nav.svelte.ts';
-  import { EMOJI_BY_CHAR, EMOJI_CATEGORIES, searchEmoji, type Emoji } from '../lib/emoji-data.ts';
+  import type { Emoji, EmojiSet } from '../lib/emoji-data.ts';
   import { t } from '../lib/strings.ts';
 
   // The built-in emoji picker (its own chunk, loaded on first use): system
-  // emoji only, a Russian search, categories as tabs, recently used ones kept
-  // on this device. Keyboard: arrows move in the grid, Enter picks, Escape
-  // closes, focus goes back to where it was.
+  // emoji only, a search in the interface language, categories as tabs,
+  // recently used ones kept on this device. Keyboard: arrows move in the
+  // grid, Enter picks, Escape closes.
   //
   // M5: from the composer it also has a "Стикеры" tab (the sticker panel is
   // its own chunk, loaded when the tab is opened).
+  //
+  // M7: a pick closes the dialog first and then hands the emoji over, so the
+  // receiver (the composer) can put the focus back into its field: the focus
+  // goes back to the opener only when nobody took it. On touch screens the
+  // search field is not focused on opening: the on-screen keyboard would
+  // cover the grid.
   let {
+    emoji,
     onpick,
     onclose,
     title = t.emoji.title,
     stickers = null,
     onsticker,
   }: {
+    /** Names and search words in the interface language. */
+    emoji: EmojiSet;
     onpick: (emoji: string) => void;
     onclose: () => void;
     title?: string;
@@ -39,24 +48,25 @@
   let searchEl: HTMLInputElement | undefined = $state();
   let query = $state('');
   let recent = $state<string[]>([]);
-  let tab = $state(EMOJI_CATEGORIES[0]!.id);
+  let tab = $state(untrack(() => emoji.categories[0]!.id));
+  const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
   let active = $state(0);
   let returnTo: HTMLElement | null = null;
 
-  const recentItems = $derived(recent.map((c) => EMOJI_BY_CHAR.get(c) ?? { char: c, name: c, words: [] }));
+  const recentItems = $derived(recent.map((c) => emoji.byChar.get(c) ?? { char: c, name: c, words: [] }));
   const tabs = $derived([
     ...(recent.length > 0 ? [{ id: 'recent', label: t.emoji.recent, icon: '🕘' }] : []),
-    ...EMOJI_CATEGORIES.map((c) => ({ id: c.id, label: c.label, icon: c.icon })),
+    ...emoji.categories.map((c) => ({ id: c.id, label: c.label, icon: c.icon })),
   ]);
   const items = $derived<readonly Emoji[]>(
-    query.trim() ? searchEmoji(query) : tab === 'recent' ? recentItems : (EMOJI_CATEGORIES.find((c) => c.id === tab)?.items ?? []),
+    query.trim() ? emoji.search(query) : tab === 'recent' ? recentItems : (emoji.categories.find((c) => c.id === tab)?.items ?? []),
   );
   const gridLabel = $derived(query.trim() ? t.emoji.search : (tabs.find((x) => x.id === tab)?.label ?? ''));
 
   function setMode(m: 'emoji' | 'stickers'): void {
     mode = m;
     void app.core.setSetting(MODE_KEY, m).catch(() => undefined);
-    if (m === 'emoji') void tick().then(() => searchEl?.focus());
+    if (m === 'emoji') void tick().then(focusStart);
   }
 
   function onModeKey(e: KeyboardEvent): void {
@@ -81,20 +91,35 @@
         if (recent.length > 0) tab = 'recent';
       }
     });
-    searchEl?.focus();
-    return () => returnTo?.focus();
+    focusStart();
+    return () => {
+      // Back to the opener, unless the receiver of the pick has put the focus somewhere (the composer's field).
+      const now = document.activeElement;
+      if (!now || now === document.body || !now.isConnected || dialog?.contains(now)) returnTo?.focus();
+    };
   });
+
+  /** Where the focus starts: the search on devices with a keyboard, the selected tab on touch screens. */
+  function focusStart(): void {
+    if (!coarse) {
+      searchEl?.focus();
+      return;
+    }
+    const selected = dialog?.querySelector<HTMLElement>('.tab[aria-selected="true"]');
+    (selected ?? dialog?.querySelector<HTMLElement>('.head .icon-btn'))?.focus({ preventScroll: true });
+  }
 
   function close(): void {
     dialog?.close();
   }
 
-  async function pick(e: Emoji): Promise<void> {
+  function pick(e: Emoji): void {
     const next = [e.char, ...recent.filter((c) => c !== e.char)].slice(0, RECENT_MAX);
     recent = next;
     void app.core.setSetting(RECENT_KEY, next).catch(() => undefined);
-    onpick(e.char);
+    // Close first: while the modal dialog is open the rest of the page is inert and cannot take the focus.
     close();
+    onpick(e.char);
   }
 
   function columns(): number {
@@ -128,7 +153,7 @@
     else if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       const item = items[active];
-      if (item) void pick(item);
+      if (item) pick(item);
       return;
     } else return;
     e.preventDefault();
@@ -143,7 +168,7 @@
       void focusActive();
     } else if (e.key === 'Enter' && items.length > 0) {
       e.preventDefault();
-      void pick(items[0]!);
+      pick(items[0]!);
     }
   }
 
@@ -264,7 +289,8 @@
           title={e.name}
           tabindex={i === active ? 0 : -1}
           onfocus={() => (active = i)}
-          onclick={() => pick(e)}>{e.char}</button
+          onclick={() => pick(e)}
+          data-testid="emoji-option">{e.char}</button
         >
       {/each}
     </div>

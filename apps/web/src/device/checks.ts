@@ -3,6 +3,8 @@
  * iOS, image encoding (WebP or JPEG), resize via createImageBitmap, and the
  * browser features the client relies on. Results go to a copyable report.
  */
+import { tr } from '../lib/page-lang.ts';
+
 export interface DeviceCheck {
   id: string;
   title: string;
@@ -42,44 +44,48 @@ function testCanvas(): HTMLCanvasElement {
 }
 
 const steps: [string, string, Step][] = [
-  ['secure', 'Защищённый контекст (HTTPS)', async () => ({ ok: window.isSecureContext, detail: String(window.isSecureContext) })],
+  ['secure', tr('Защищённый контекст (HTTPS)', 'Secure context (HTTPS)'), async () => ({ ok: window.isSecureContext, detail: String(window.isSecureContext) })],
   [
     'standalone',
-    'Открыто как установленное приложение',
+    tr('Открыто как установленное приложение', 'Opened as an installed app'),
     async () => {
       const s = window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
-      return { ok: null, detail: s ? 'да' : 'нет (откройте с экрана Домой, чтобы проверить установленное приложение)' };
+      return { ok: null, detail: s ? tr('да', 'yes') : tr('нет (откройте с экрана Домой, чтобы проверить установленное приложение)', 'no (open it from the Home Screen to check the installed app)') };
     },
   ],
   [
     'sw',
     'Service worker',
     async () => {
-      if (!('serviceWorker' in navigator)) return { ok: false, detail: 'не поддерживается' };
+      if (!('serviceWorker' in navigator)) return { ok: false, detail: tr('не поддерживается', 'not supported') };
       const reg = await navigator.serviceWorker.getRegistration();
-      return { ok: !!reg, detail: reg ? `зарегистрирован, управляет страницей: ${navigator.serviceWorker.controller ? 'да' : 'нет'}` : 'не зарегистрирован' };
+      return { ok: !!reg, detail: reg ? tr(`зарегистрирован, управляет страницей: ${navigator.serviceWorker.controller ? 'да' : 'нет'}`, `registered, controls the page: ${navigator.serviceWorker.controller ? 'yes' : 'no'}`) : tr('не зарегистрирован', 'not registered') };
     },
   ],
   [
     'persist',
-    'Постоянное хранилище (storage.persist)',
+    tr('Постоянное хранилище (storage.persist)', 'Persistent storage (storage.persist)'),
     async () => {
-      if (!navigator.storage?.persist) return { ok: false, detail: 'не поддерживается' };
+      if (!navigator.storage?.persist) return { ok: false, detail: tr('не поддерживается', 'not supported') };
       const granted = await navigator.storage.persist();
       const est = await navigator.storage.estimate();
-      const gb = (n?: number): string => (n === undefined ? '?' : `${(n / 1024 ** 3).toFixed(2)} ГБ`);
+      const gb = (n?: number): string => (n === undefined ? '?' : `${(n / 1024 ** 3).toFixed(2)} ${tr('ГБ', 'GB')}`);
       const standalone =
         window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
-      const note = granted ? '' : standalone ? ' (в установленном приложении отказ: данные могут быть вытеснены)' : ' (во вкладке браузера отказ обычен; важен результат в установленном приложении)';
+      const note = granted
+        ? ''
+        : standalone
+          ? tr(' (в установленном приложении отказ: данные могут быть вытеснены)', ' (refused in the installed app: data may be evicted)')
+          : tr(' (во вкладке браузера отказ обычен; важен результат в установленном приложении)', ' (a refusal is normal in a browser tab; the result in the installed app is what matters)');
       return {
         ok: granted ? true : standalone ? false : null,
-        detail: `persist: ${granted}; занято ${gb(est.usage)} из ${gb(est.quota)}${note}`,
+        detail: tr(`persist: ${granted}; занято ${gb(est.usage)} из ${gb(est.quota)}${note}`, `persist: ${granted}; used ${gb(est.usage)} of ${gb(est.quota)}${note}`),
       };
     },
   ],
   [
     'idb',
-    'IndexedDB: запись и чтение 1 МБ',
+    tr('IndexedDB: запись и чтение 1 МБ', 'IndexedDB: write and read 1 MB'),
     async () => {
       const data = randomBytes(1024 * 1024);
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -114,11 +120,11 @@ const steps: [string, string, Step][] = [
       ] as const) {
         try {
           const same = sameBytes(await roundTrip(value), data);
-          results.push(`${label}: ${same ? 'записан и прочитан без изменений' : 'содержимое отличается'}`);
+          results.push(`${label}: ${same ? tr('записан и прочитан без изменений', 'written and read back unchanged') : tr('содержимое отличается', 'the content differs')}`);
           ok ||= same;
           if (same && label === 'Blob') break;
         } catch (e) {
-          results.push(`${label}: ошибка ${why(e)}`);
+          results.push(`${label}: ${tr('ошибка', 'error')} ${why(e)}`);
         }
       }
       db.close();
@@ -128,37 +134,41 @@ const steps: [string, string, Step][] = [
   ],
   [
     'opfs-main',
-    'OPFS: запись из страницы (createWritable)',
+    tr('OPFS: запись из страницы (createWritable)', 'OPFS: writing from the page (createWritable)'),
     async () => {
-      if (!navigator.storage?.getDirectory) return { ok: false, detail: 'OPFS не поддерживается' };
+      if (!navigator.storage?.getDirectory) return { ok: false, detail: tr('OPFS не поддерживается', 'OPFS is not supported') };
       const dir = await navigator.storage.getDirectory();
       const fh = await dir.getFileHandle('fc-device-check.bin', { create: true });
       if (!('createWritable' in fh)) {
         await dir.removeEntry('fc-device-check.bin');
-        return { ok: false, detail: 'нет createWritable (возможна запись только из воркера)' };
+        return { ok: false, detail: tr('нет createWritable (возможна запись только из воркера)', 'no createWritable (writing may only work from a worker)') };
       }
       const w = await fh.createWritable();
       await w.write(new Uint8Array(1024 * 1024));
       await w.close();
       const size = (await fh.getFile()).size;
       await dir.removeEntry('fc-device-check.bin');
-      return { ok: size === 1024 * 1024, detail: `записан и прочитан файл ${size} байт` };
+      return { ok: size === 1024 * 1024, detail: tr(`записан и прочитан файл ${size} байт`, `wrote and read a file of ${size} bytes`) };
     },
   ],
   [
     'opfs-worker',
-    'OPFS: запись из воркера (createSyncAccessHandle)',
+    tr('OPFS: запись из воркера (createSyncAccessHandle)', 'OPFS: writing from a worker (createSyncAccessHandle)'),
     async () => {
       const worker = new Worker(new URL('./opfs-worker.ts', import.meta.url), { type: 'module' });
       const result = await new Promise<{ ok: boolean; detail: string }>((resolve) => {
-        const timer = setTimeout(() => resolve({ ok: false, detail: 'воркер не ответил за 10 с' }), 10_000);
+        const timer = setTimeout(() => resolve({ ok: false, detail: tr('воркер не ответил за 10 с', 'the worker didn’t answer within 10 s') }), 10_000);
         worker.onmessage = (e) => {
           clearTimeout(timer);
-          resolve(e.data as { ok: boolean; detail: string });
+          const m = e.data as { ok: boolean; size?: number; error?: string };
+          resolve({
+            ok: m.ok,
+            detail: m.error !== undefined ? `${tr('ошибка', 'error')}: ${m.error}` : tr(`записан и прочитан файл ${m.size} байт`, `wrote and read a file of ${m.size} bytes`),
+          });
         };
         worker.onerror = (e) => {
           clearTimeout(timer);
-          resolve({ ok: false, detail: `ошибка воркера: ${e.message}` });
+          resolve({ ok: false, detail: `${tr('ошибка воркера', 'worker error')}: ${e.message}` });
         };
       });
       worker.terminate();
@@ -167,66 +177,71 @@ const steps: [string, string, Step][] = [
   ],
   [
     'webp',
-    'Кодирование WebP',
+    tr('Кодирование WebP', 'WebP encoding'),
     async () => {
       const b = await blobFromCanvas(testCanvas(), 'image/webp');
       const webp = b?.type === 'image/webp';
-      return { ok: webp ? true : null, detail: `получен ${b?.type ?? 'null'}${webp ? '' : ': WebP не кодируется, клиент будет использовать JPEG'}` };
+      return { ok: webp ? true : null, detail: `${tr('получен', 'got')} ${b?.type ?? 'null'}${webp ? '' : tr(': WebP не кодируется, клиент будет использовать JPEG', ': WebP can’t be encoded, the app will use JPEG')}` };
     },
   ],
   [
     'jpeg',
-    'Кодирование JPEG',
+    tr('Кодирование JPEG', 'JPEG encoding'),
     async () => {
       const b = await blobFromCanvas(testCanvas(), 'image/jpeg');
-      return { ok: b?.type === 'image/jpeg', detail: `получен ${b?.type ?? 'null'}, ${b?.size ?? 0} байт` };
+      return { ok: b?.type === 'image/jpeg', detail: tr(`получен ${b?.type ?? 'null'}, ${b?.size ?? 0} байт`, `got ${b?.type ?? 'null'}, ${b?.size ?? 0} bytes`) };
     },
   ],
   [
     'resize',
-    'Уменьшение через createImageBitmap',
+    tr('Уменьшение через createImageBitmap', 'Resizing with createImageBitmap'),
     async () => {
       const bmp = await createImageBitmap(testCanvas(), { resizeWidth: 100, resizeHeight: 75, resizeQuality: 'high' });
       const ok = bmp.width === 100 && bmp.height === 75;
-      return { ok, detail: `получено ${bmp.width}x${bmp.height}${ok ? '' : ' (параметры resize не поддерживаются)'}` };
+      return { ok, detail: `${tr('получено', 'got')} ${bmp.width}x${bmp.height}${ok ? '' : tr(' (параметры resize не поддерживаются)', ' (resize options are not supported)')}` };
     },
   ],
   [
     'offscreen',
-    'OffscreenCanvas с WebP',
+    tr('OffscreenCanvas с WebP', 'OffscreenCanvas with WebP'),
     async () => {
-      if (typeof OffscreenCanvas === 'undefined') return { ok: false, detail: 'нет OffscreenCanvas' };
+      if (typeof OffscreenCanvas === 'undefined') return { ok: false, detail: tr('нет OffscreenCanvas', 'no OffscreenCanvas') };
       const c = new OffscreenCanvas(64, 64);
       c.getContext('2d')!.fillRect(0, 0, 64, 64);
       const b = await c.convertToBlob({ type: 'image/webp' });
       const webp = b.type === 'image/webp';
-      return { ok: webp ? true : null, detail: `convertToBlob дал ${b.type}${webp ? '' : ': WebP не кодируется, клиент будет использовать JPEG'}` };
+      return { ok: webp ? true : null, detail: `${tr('convertToBlob дал', 'convertToBlob gave')} ${b.type}${webp ? '' : tr(': WebP не кодируется, клиент будет использовать JPEG', ': WebP can’t be encoded, the app will use JPEG')}` };
     },
   ],
-  ['locks', 'Web Locks', async () => ({ ok: 'locks' in navigator, detail: 'locks' in navigator ? 'есть' : 'нет' })],
+  ['locks', 'Web Locks', async () => ({ ok: 'locks' in navigator, detail: 'locks' in navigator ? tr('есть', 'yes') : tr('нет', 'no') })],
   [
     'periodic',
     'Periodic Background Sync',
     async () => {
       const has = 'periodicSync' in ServiceWorkerRegistration.prototype;
-      return { ok: null, detail: has ? 'API есть (реальная частота проверяется отдельно)' : 'нет: фоновая проверка в закрытом приложении недоступна' };
+      return {
+        ok: null,
+        detail: has
+          ? tr('API есть (реальная частота проверяется отдельно)', 'the API exists (the real frequency is checked separately)')
+          : tr('нет: фоновая проверка в закрытом приложении недоступна', 'no: checking in the background while the app is closed is not available'),
+      };
     },
   ],
   [
     'notify',
-    'Уведомления',
-    async () => ({ ok: null, detail: 'Notification' in window ? `API есть, разрешение: ${Notification.permission}` : 'нет API (на iOS только в установленном приложении)' }),
+    tr('Уведомления', 'Notifications'),
+    async () => ({ ok: null, detail: 'Notification' in window ? tr(`API есть, разрешение: ${Notification.permission}`, `the API exists, permission: ${Notification.permission}`) : tr('нет API (на iOS только в установленном приложении)', 'no API (on iOS only in the installed app)') }),
   ],
-  ['badge', 'Бейдж на значке', async () => ({ ok: null, detail: 'setAppBadge' in navigator ? 'есть' : 'нет' })],
+  ['badge', tr('Бейдж на значке', 'Badge on the icon'), async () => ({ ok: null, detail: 'setAppBadge' in navigator ? tr('есть', 'yes') : tr('нет', 'no') })],
   [
     'lna',
-    'Разрешение на доступ к локальной сети (Chrome)',
+    tr('Разрешение на доступ к локальной сети (Chrome)', 'Local network access permission (Chrome)'),
     async () => {
       try {
         const s = await navigator.permissions.query({ name: 'local-network-access' as PermissionName });
         return { ok: null, detail: s.state };
       } catch {
-        return { ok: null, detail: 'не поддерживается этим браузером' };
+        return { ok: null, detail: tr('не поддерживается этим браузером', 'not supported by this browser') };
       }
     },
   ],
@@ -238,11 +253,11 @@ export async function runDeviceChecks(onProgress: (list: DeviceCheck[]) => void)
     try {
       // A permission prompt nobody answers (Firefox asks for storage.persist) must not block the rest.
       const timeout = new Promise<Omit<DeviceCheck, 'id' | 'title'>>((resolve) =>
-        setTimeout(() => resolve({ ok: null, detail: 'нет ответа за 8 с: браузер, вероятно, ждёт ответа на запрос разрешения' }), 8_000),
+        setTimeout(() => resolve({ ok: null, detail: tr('нет ответа за 8 с: браузер, вероятно, ждёт ответа на запрос разрешения', 'no answer within 8 s: the browser is probably waiting for a permission prompt') }), 8_000),
       );
       out.push({ id, title, ...(await Promise.race([step(), timeout])) });
     } catch (e) {
-      out.push({ id, title, ok: false, detail: `ошибка: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}` });
+      out.push({ id, title, ok: false, detail: `${tr('ошибка', 'error')}: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}` });
     }
     onProgress([...out]);
   }
@@ -251,10 +266,10 @@ export async function runDeviceChecks(onProgress: (list: DeviceCheck[]) => void)
 
 export function formatDeviceReport(list: DeviceCheck[]): string {
   return [
-    'Family Chat: проверка устройства',
-    `Адрес: ${location.origin}`,
-    `Браузер: ${navigator.userAgent}`,
-    `Время: ${new Date().toISOString()}`,
+    tr('Family Chat: проверка устройства', 'Family Chat: device check'),
+    `${tr('Адрес', 'Address')}: ${location.origin}`,
+    `${tr('Браузер', 'Browser')}: ${navigator.userAgent}`,
+    `${tr('Время', 'Time')}: ${new Date().toISOString()}`,
     '',
     ...list.map((c) => `${c.ok === true ? '[ok]' : c.ok === false ? '[x] ' : '[i] '} ${c.title}: ${c.detail}`),
   ].join('\n');

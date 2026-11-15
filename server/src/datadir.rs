@@ -61,13 +61,22 @@ impl fmt::Display for OpenError {
         match self {
             Self::Locked(p) => write!(
                 f,
-                "папка данных {} уже используется другим процессом fcd; остановите его или укажите другую папку",
-                p.display()
+                "{}",
+                tr!(
+                    "папка данных {} уже используется другим процессом fcd; остановите его или укажите другую папку",
+                    "the data folder {} is already in use by another fcd process; stop it or use another folder",
+                    p.display()
+                )
             ),
             Self::TooNew { found, supported } => write!(
                 f,
-                "папка данных создана более новой версией fcd (формат {found}, эта версия понимает до {supported}); \
-                 обновите fcd"
+                "{}",
+                tr!(
+                    "папка данных создана более новой версией fcd (формат {found}, эта версия понимает до {supported}); \
+                     обновите fcd",
+                    "the data folder was created by a newer fcd (format {found}, this version understands up to {supported}); \
+                     update fcd"
+                )
             ),
             Self::Config(m) => f.write_str(m),
             Self::Io(m) => f.write_str(m),
@@ -96,10 +105,20 @@ impl DataDir {
     /// settings: `flags` override `config.toml`, which overrides defaults.
     pub fn open(path: &Path, flags: Overrides) -> Result<(DataDir, Settings), OpenError> {
         let created = !path.exists();
-        create_private_dir(path).map_err(|e| io_err("не удалось создать папку данных", path, e))?;
-        let path = path
-            .canonicalize()
-            .map_err(|e| io_err("не удалось открыть папку данных", path, e))?;
+        create_private_dir(path).map_err(|e| {
+            io_err(
+                crate::lang::l("не удалось создать папку данных", "could not create the data folder"),
+                path,
+                e,
+            )
+        })?;
+        let path = path.canonicalize().map_err(|e| {
+            io_err(
+                crate::lang::l("не удалось открыть папку данных", "could not open the data folder"),
+                path,
+                e,
+            )
+        })?;
         if created {
             restrict(&path, true);
         }
@@ -109,12 +128,19 @@ impl DataDir {
         let existing = match fs::read(&server_path) {
             Ok(bytes) => Some(parse_server_file(&server_path, &bytes)?),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(io_err("не удалось прочитать", &server_path, e)),
+            Err(e) => {
+                return Err(io_err(
+                    crate::lang::l("не удалось прочитать", "could not read"),
+                    &server_path,
+                    e,
+                ));
+            }
         };
 
         for d in DIRS {
             let p = path.join(d);
-            create_private_dir(&p).map_err(|e| io_err("не удалось создать", &p, e))?;
+            create_private_dir(&p)
+                .map_err(|e| io_err(crate::lang::l("не удалось создать", "could not create"), &p, e))?;
             // Folders made by the M0 build used the default umask.
             restrict(&p, true);
         }
@@ -138,9 +164,9 @@ impl DataDir {
         let vapid = match fs::read(&vapid_path) {
             Ok(bytes) => {
                 let f: VapidFile = serde_json::from_slice(&bytes)
-                    .map_err(|e| OpenError::Io(format!("повреждён {}: {e}", vapid_path.display())))?;
+                    .map_err(|e| OpenError::Io(tr!("повреждён {}: {e}", "{} is damaged: {e}", vapid_path.display())))?;
                 VapidKey::from_file(&f)
-                    .map_err(|e| OpenError::Io(format!("повреждён {}: {e}", vapid_path.display())))?
+                    .map_err(|e| OpenError::Io(tr!("повреждён {}: {e}", "{} is damaged: {e}", vapid_path.display())))?
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 if existing.is_some() {
@@ -151,14 +177,24 @@ impl DataDir {
                 write_atomic(&path, &vapid_path, &json)?;
                 k
             }
-            Err(e) => return Err(io_err("не удалось прочитать", &vapid_path, e)),
+            Err(e) => {
+                return Err(io_err(
+                    crate::lang::l("не удалось прочитать", "could not read"),
+                    &vapid_path,
+                    e,
+                ));
+            }
         };
 
         let (server, new_admin_code) = match existing {
             Some(mut s) if s.format_version < FORMAT_VERSION => {
                 tracing::info!(
-                    "папка данных обновлена: формат {} -> {FORMAT_VERSION}",
-                    s.format_version
+                    "{}",
+                    tr!(
+                        "папка данных обновлена: формат {} -> {FORMAT_VERSION}",
+                        "data folder updated: format {} -> {FORMAT_VERSION}",
+                        s.format_version
+                    )
                 );
                 s.format_version = FORMAT_VERSION;
                 write_server_file(&path, &s)?;
@@ -204,12 +240,16 @@ impl DataDir {
     /// Adds an administrator (`fcd admin add`, server stopped).
     pub fn add_admin(&mut self, user: &str) -> Result<bool, OpenError> {
         if crate::ids::UserId::parse(user).is_none() {
-            return Err(OpenError::Config(format!(
-                "{user} не похож на userId (26 символов base32)"
+            return Err(OpenError::Config(tr!(
+                "{user} не похож на userId (26 символов base32)",
+                "{user} does not look like a userId (26 base32 characters)"
             )));
         }
         if !self.path.join("users").join(user).join("identity.json").is_file() {
-            return Err(OpenError::Config(format!("участник {user} не найден")));
+            return Err(OpenError::Config(tr!(
+                "участник {user} не найден",
+                "member {user} not found"
+            )));
         }
         if self.server.admins.iter().any(|a| a == user) {
             return Ok(false);
@@ -279,11 +319,15 @@ fn acquire_lock(dir: &Path) -> Result<File, OpenError> {
         .truncate(false)
         .write(true)
         .open(&p)
-        .map_err(|e| io_err("не удалось открыть", &p, e))?;
+        .map_err(|e| io_err(crate::lang::l("не удалось открыть", "could not open"), &p, e))?;
     match f.try_lock() {
         Ok(()) => Ok(f),
         Err(TryLockError::WouldBlock) => Err(OpenError::Locked(dir.to_path_buf())),
-        Err(TryLockError::Error(e)) => Err(io_err("не удалось заблокировать", &p, e)),
+        Err(TryLockError::Error(e)) => Err(io_err(
+            crate::lang::l("не удалось заблокировать", "could not lock"),
+            &p,
+            e,
+        )),
     }
 }
 
@@ -295,15 +339,16 @@ fn parse_server_file(path: &Path, bytes: &[u8]) -> Result<ServerFile, OpenError>
     struct VersionOnly {
         format_version: u32,
     }
-    let v: VersionOnly =
-        serde_json::from_slice(bytes).map_err(|e| OpenError::Io(format!("повреждён {}: {e}", path.display())))?;
+    let v: VersionOnly = serde_json::from_slice(bytes)
+        .map_err(|e| OpenError::Io(tr!("повреждён {}: {e}", "{} is damaged: {e}", path.display())))?;
     if v.format_version > FORMAT_VERSION {
         return Err(OpenError::TooNew {
             found: v.format_version,
             supported: FORMAT_VERSION,
         });
     }
-    serde_json::from_slice(bytes).map_err(|e| OpenError::Io(format!("повреждён {}: {e}", path.display())))
+    serde_json::from_slice(bytes)
+        .map_err(|e| OpenError::Io(tr!("повреждён {}: {e}", "{} is damaged: {e}", path.display())))
 }
 
 pub fn write_server_file(dir: &Path, s: &ServerFile) -> Result<(), OpenError> {
@@ -314,7 +359,8 @@ pub fn write_server_file(dir: &Path, s: &ServerFile) -> Result<(), OpenError> {
 /// Writes through `tmp/` and renames, so a crash never leaves half a file.
 /// Files are private (0600 on Unix).
 pub fn write_atomic(dir: &Path, target: &Path, bytes: &[u8]) -> Result<(), OpenError> {
-    write_atomic_io(dir, target, bytes).map_err(|e| io_err("не удалось записать", target, e))
+    write_atomic_io(dir, target, bytes)
+        .map_err(|e| io_err(crate::lang::l("не удалось записать", "could not write"), target, e))
 }
 
 /// [`write_atomic`] with a plain I/O error. `dir` is the data folder.
@@ -383,7 +429,14 @@ fn restrict(p: &Path, is_dir: bool) {
             Ok(m) if m.permissions().mode() & 0o777 == mode => {}
             Ok(_) => {
                 if let Err(e) = fs::set_permissions(p, fs::Permissions::from_mode(mode)) {
-                    tracing::warn!("не удалось ограничить права на {}: {e}", p.display());
+                    tracing::warn!(
+                        "{}",
+                        tr!(
+                            "не удалось ограничить права на {}: {e}",
+                            "could not restrict the permissions of {}: {e}",
+                            p.display()
+                        )
+                    );
                 }
             }
             Err(_) => {}

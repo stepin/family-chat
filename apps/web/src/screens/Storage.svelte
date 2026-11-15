@@ -67,7 +67,7 @@
         bytes += chunk.length;
         exp = { state: 'running', bytes };
       }
-      const name = archiveFileName(account.familyName, Date.now());
+      const name = archiveFileName(app.familyLabel(account.familyName) ?? "", Date.now());
       exp = { state: 'ready', file: new File(chunks as BlobPart[], name, { type: 'application/octet-stream' }) };
     } catch (e) {
       const quota = e instanceof DOMException && e.name === 'QuotaExceededError';

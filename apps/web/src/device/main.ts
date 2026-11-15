@@ -2,6 +2,9 @@ import '../styles/base.css';
 import './page.css';
 import { formatDeviceReport, runDeviceChecks, type DeviceCheck } from './checks.ts';
 import { registerServiceWorker } from '../pwa.ts';
+import { localizePage, tr } from '../lib/page-lang.ts';
+
+localizePage();
 
 registerServiceWorker();
 
@@ -43,9 +46,9 @@ button.addEventListener('click', async () => {
 copyBtn.addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(text);
-    status.textContent = 'Отчёт скопирован.';
+    status.textContent = tr('Отчёт скопирован.', 'Report copied.');
   } catch {
-    status.textContent = 'Не удалось скопировать: выделите текст ниже.';
+    status.textContent = tr('Не удалось скопировать: выделите текст ниже.', 'Couldn’t copy: select the text below.');
     out.closest('details')?.setAttribute('open', '');
   }
 });

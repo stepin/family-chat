@@ -4,6 +4,9 @@
 // except inside the encrypted message, and the link opens only when tapped.
 
 import type { Os } from './platform.ts';
+import { formatLang } from './format.ts';
+import { intlLocale } from './locale.ts';
+import { t } from './strings.ts';
 
 export interface Place {
   readonly lat: number;
@@ -34,15 +37,17 @@ export function formatCoords(p: Pick<Place, 'lat' | 'lon'>): string {
   return `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
 }
 
-/** "около 25 м", "около 1,2 км", "около 12 км". */
+/** "около 25 м", "около 1,2 км", "около 12 км" (or "about 25 m"). */
 export function formatAccuracy(metres: number): string {
-  if (!Number.isFinite(metres)) return 'неизвестна';
+  if (!Number.isFinite(metres)) return t.location.accuracyUnknown;
+  const unit = (value: number, u: 'meter' | 'kilometer', digits: number) =>
+    new Intl.NumberFormat(intlLocale(formatLang()), { style: 'unit', unit: u, unitDisplay: 'short', maximumFractionDigits: digits, useGrouping: false }).format(value);
   if (metres < 1000) {
     const step = metres < 100 ? 5 : 10;
-    return `около ${Math.max(step, Math.round(metres / step) * step)} м`;
+    return t.location.approx(unit(Math.max(step, Math.round(metres / step) * step), 'meter', 0));
   }
   const km = metres / 1000;
-  return `около ${km < 10 ? km.toFixed(1).replace('.', ',') : Math.round(km)} км`;
+  return t.location.approx(km < 10 ? unit(Math.round(km * 10) / 10, 'kilometer', 1) : unit(Math.round(km), 'kilometer', 0));
 }
 
 /** Map zoom that shows the accuracy circle. */

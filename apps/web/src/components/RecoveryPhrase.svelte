@@ -65,7 +65,7 @@
       {/each}
     </ol>
     <p class="muted small">{t.phrase.secret} {t.phrase.englishNote}</p>
-    <button class="btn block" type="button" disabled={words.length === 0} onclick={toConfirm}>{t.phrase.written}</button>
+    <button class="btn block" type="button" disabled={words.length === 0} onclick={toConfirm}>{t.phrase.written(app.myGender)}</button>
     {#if onskip}
       <button class="link-btn" type="button" onclick={onskip}>{t.common.later}</button>
     {/if}

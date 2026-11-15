@@ -787,6 +787,8 @@ async fn invitation_details_before_joining() {
     assert_eq!(j["familyName"], "Ивановы");
     assert_eq!(j["createdBy"]["userId"], mama.user.to_string());
     assert_eq!(j["createdBy"]["name"], "Мама");
+    // M7: the profile has no gender field, so male.
+    assert_eq!(j["createdBy"]["gender"], "m");
     assert!(j["expiresAt"].as_u64().unwrap() > j["createdAt"].as_u64().unwrap());
     // The check does not use the invitation up.
     join(&srv, "Сын", "invite", &code).await;

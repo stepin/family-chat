@@ -54,11 +54,21 @@ export const AVATAR_TYPES: readonly AvatarType[] = ['image/jpeg', 'image/webp'];
 
 export type Avatar = null | AvatarRef;
 
+/**
+ * Grammatical gender for the wording of messages about the person (M7):
+ * `m` or `f`. Optional in the payload; a profile without it (every profile
+ * made before M7) means `m`.
+ */
+export type Gender = 'm' | 'f';
+export const GENDERS: readonly Gender[] = ['m', 'f'];
+
 /** A verified profile. */
 export interface Profile {
   readonly userId: string;
   readonly name: string;
   readonly avatar: Avatar;
+  /** `m` when the payload has no `gender` field. */
+  readonly gender: Gender;
   readonly rev: number;
   readonly updated: number;
   readonly envelope: SignedEnvelope;
@@ -227,6 +237,8 @@ export interface ProfileInput {
   readonly updated?: number;
   /** Avatar reference; null or absent means no avatar. */
   readonly avatar?: AvatarRef | null;
+  /** Gender (M7). Absent: no `gender` field (a reader takes `m`); the app always gives it. */
+  readonly gender?: Gender;
 }
 
 /** Problem with an avatar reference, or undefined if it is valid (exactly the keys sha256 and type). */
@@ -259,7 +271,14 @@ export function createProfileEnvelope(keys: IdentityKeys, input: ProfileInput): 
   const ap = avatarProblem(avatarIn);
   if (ap) throw new ProtocolError('invalid-argument', ap);
   const avatar = avatarIn === null ? null : { sha256: avatarIn.sha256, type: avatarIn.type };
-  return seal('profile', { v: PROTOCOL_VERSION, userId: keys.userId, name, avatar, rev: input.rev, updated }, keys);
+  // Written only when given: without it the bytes are those of a profile before M7.
+  const gender = input.gender;
+  if (gender !== undefined && !GENDERS.includes(gender)) throw new ProtocolError('invalid-argument', 'gender must be "m" or "f"');
+  return seal(
+    'profile',
+    { v: PROTOCOL_VERSION, userId: keys.userId, name, avatar, ...(gender !== undefined ? { gender } : {}), rev: input.rev, updated },
+    keys,
+  );
 }
 
 /** Verify a profile envelope against the owner's verified identity. */
@@ -274,13 +293,16 @@ export function verifyProfileEnvelope(input: unknown, identity: Identity): Profi
   if (ap) throw malformed(`profile: ${ap}`);
   const avatar: Avatar =
     avatarIn === null ? null : { sha256: (avatarIn as AvatarRef).sha256, type: (avatarIn as AvatarRef).type };
+  const genderIn = o.json.gender;
+  if (genderIn !== undefined && !GENDERS.includes(genderIn as Gender)) throw malformed('profile: gender must be "m" or "f"');
+  const gender: Gender = (genderIn as Gender | undefined) ?? 'm';
   const rev = requireUint(o.json, 'rev', 'profile');
   const updated = requireUint(o.json, 'updated', 'profile');
   if (userId !== identity.userId) {
     throw new ProtocolError('user-id-mismatch', 'profile belongs to another user');
   }
   checkSig(o, 'profile', identity.signPub);
-  return { userId, name, avatar, rev, updated, envelope: o.env };
+  return { userId, name, avatar, gender, rev, updated, envelope: o.env };
 }
 
 // ---- auth ----

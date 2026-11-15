@@ -31,12 +31,13 @@ pub fn target(data: Option<&Path>, flags: &Overrides) -> Result<SocketAddr, Stri
         None => Overrides::default(),
     };
     let o = flags.clone().or(file);
-    let ip: IpAddr = o
-        .listen
-        .as_deref()
-        .unwrap_or(DEFAULT_LISTEN)
-        .parse()
-        .map_err(|_| "адрес прослушивания (listen) должен быть IP-адресом".to_string())?;
+    let ip: IpAddr = o.listen.as_deref().unwrap_or(DEFAULT_LISTEN).parse().map_err(|_| {
+        crate::lang::l(
+            "адрес прослушивания (listen) должен быть IP-адресом",
+            "the listen address (listen) must be an IP address",
+        )
+        .to_string()
+    })?;
     let ip = match ip {
         IpAddr::V4(v) if v.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
         IpAddr::V6(v) if v.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
@@ -49,13 +50,22 @@ pub fn target(data: Option<&Path>, flags: &Overrides) -> Result<SocketAddr, Stri
 pub async fn check(addr: SocketAddr) -> Result<String, String> {
     match tokio::time::timeout(TIMEOUT, plain(addr)).await {
         Ok(Ok(v)) => return Ok(v),
-        Ok(Err(Failure::Connect(e))) => return Err(format!("нет соединения с {addr}: {e}")),
+        Ok(Err(Failure::Connect(e))) => {
+            return Err(tr!("нет соединения с {addr}: {e}", "no connection to {addr}: {e}"));
+        }
         Ok(Err(Failure::Answer(_))) | Err(_) => {}
     }
     match tokio::time::timeout(TIMEOUT, tls(addr)).await {
         Ok(Ok(v)) => Ok(v),
-        Ok(Err(Failure::Connect(e) | Failure::Answer(e))) => Err(format!("{addr} не отвечает как fcd: {e}")),
-        Err(_) => Err(format!("{addr}: нет ответа за {} с", TIMEOUT.as_secs())),
+        Ok(Err(Failure::Connect(e) | Failure::Answer(e))) => Err(tr!(
+            "{addr} не отвечает как fcd: {e}",
+            "{addr} does not answer like fcd: {e}"
+        )),
+        Err(_) => Err(tr!(
+            "{addr}: нет ответа за {} с",
+            "{addr}: no answer within {} s",
+            TIMEOUT.as_secs()
+        )),
     }
 }
 
@@ -104,7 +114,9 @@ async fn ask<S: AsyncRead + AsyncWrite + Unpin>(mut s: S, addr: SocketAddr) -> R
             Ok(n) => {
                 buf.extend_from_slice(&chunk[..n]);
                 if buf.len() > MAX_RESPONSE {
-                    return Err(Failure::Answer("слишком длинный ответ".into()));
+                    return Err(Failure::Answer(
+                        crate::lang::l("слишком длинный ответ", "the answer is too long").into(),
+                    ));
                 }
             }
             // A TLS peer may close without close_notify after a complete answer.
@@ -117,15 +129,19 @@ async fn ask<S: AsyncRead + AsyncWrite + Unpin>(mut s: S, addr: SocketAddr) -> R
 
 /// Accepts `200` with a JSON body `{"server": "fcd", "version": ...}`.
 pub fn parse_hello(raw: &[u8]) -> Result<String, String> {
-    let text = std::str::from_utf8(raw).map_err(|_| "ответ не в UTF-8".to_string())?;
-    let (head, body) = text.split_once("\r\n\r\n").ok_or("неполный ответ HTTP")?;
+    let text = std::str::from_utf8(raw)
+        .map_err(|_| crate::lang::l("ответ не в UTF-8", "the answer is not UTF-8").to_string())?;
+    let (head, body) = text
+        .split_once("\r\n\r\n")
+        .ok_or(crate::lang::l("неполный ответ HTTP", "incomplete HTTP answer"))?;
     let status = head.lines().next().unwrap_or("");
     if status.split(' ').nth(1) != Some("200") {
-        return Err(format!("ответ «{status}»"));
+        return Err(tr!("ответ «{status}»", "answer “{status}”"));
     }
-    let v: serde_json::Value = serde_json::from_str(body.trim()).map_err(|_| "тело ответа не JSON".to_string())?;
+    let v: serde_json::Value = serde_json::from_str(body.trim())
+        .map_err(|_| crate::lang::l("тело ответа не JSON", "the answer body is not JSON").to_string())?;
     if v["server"] != "fcd" {
-        return Err("ответил не fcd".into());
+        return Err(crate::lang::l("ответил не fcd", "the answer is not from fcd").into());
     }
     Ok(v["version"].as_str().unwrap_or("?").to_string())
 }

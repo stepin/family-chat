@@ -15,13 +15,14 @@
   import { app, follow } from '../lib/app.svelte.ts';
   import { isDisplayableImage } from '../lib/attachment-state.ts';
   import { errorText } from '../lib/errors.ts';
-  import { formatBytes } from '../lib/format.ts';
+  import { formatBytes, formatMegabytes } from '../lib/format.ts';
   import { groupByDay } from '../lib/group.ts';
   import { prepareAttachment } from '../lib/media.ts';
   import { displayNames, joinNames } from '../lib/names.ts';
   import { nav } from '../lib/nav.svelte.ts';
   import { serviceText } from '../lib/service.ts';
-  import { t } from '../lib/strings.ts';
+  import { activeLang, t } from '../lib/strings.ts';
+  import { loadEmoji } from '../lib/emoji-data.ts';
 
   // A chat (docs/PLAN.md screen 9): direct, group or "Избранное". Messages
   // grouped by day, own messages on the right, in groups the author's name
@@ -71,7 +72,8 @@
   const loadViewer = () => import('../components/ImageViewer.svelte');
   const loadLocation = () => import('../components/LocationSheet.svelte');
   // M4: the emoji picker (with its data), forwarding and the delete and "who reacted" dialogs.
-  const loadPicker = () => import('../components/EmojiPicker.svelte');
+  // The picker and the emoji names in the interface language, both on first use.
+  const loadPicker = () => Promise.all([import('../components/EmojiPicker.svelte'), loadEmoji(activeLang())]);
   const loadForward = () => import('../components/ForwardSheet.svelte');
   const loadDialogs = () => import('../components/MessageDialogs.svelte');
   const loadMenu = lazy(() => import('../components/MessageMenu.svelte'));
@@ -123,8 +125,8 @@
   /** Why the composer is replaced by a line, or null when one can write. */
   const blocked = $derived.by((): string | null => {
     if (removed) return t.chat.removedComposer;
-    if (kind === 'dm' && peerRevoked) return t.chat.peerRevokedComposer;
-    if (kind === 'dm' && peerRemoved) return t.chat.peerRemovedComposer;
+    if (kind === 'dm' && peerRevoked) return t.chat.peerRevokedComposer(peer?.gender ?? 'm');
+    if (kind === 'dm' && peerRemoved) return t.chat.peerRemovedComposer(peer?.gender ?? 'm');
     if (kind === 'group') {
       if (!groupLoaded || !group) return null;
       if (!group.member) return t.group.notMember;
@@ -302,7 +304,7 @@
       // Only new messages are announced (not older ones loaded on scrolling).
       const newest = incoming.at(-1);
       if (newest && newest.key === list.at(-1)?.key) {
-        if (newest.kind === 'service' && newest.service) announce = serviceText(newest.service, { me: account?.userId ?? '', nameOf });
+        if (newest.kind === 'service' && newest.service) announce = serviceText(newest.service, { me: account?.userId ?? '', nameOf, genderOf: (id) => app.genderOf(id) });
         else {
           const who = kind === 'group' ? nameOf(newest.senderId) : title;
           const first = newest.attachments?.[0];
@@ -478,7 +480,7 @@
       closePreview();
       afterFirstSend();
     } catch (e) {
-      if (isCoreError(e, 'too-large')) app.notify(t.attach.tooLargeAny(app.hello ? `${app.hello.maxFileMb} МБ` : formatBytes(0)));
+      if (isCoreError(e, 'too-large')) app.notify(t.attach.tooLargeAny(app.hello ? formatMegabytes(app.hello.maxFileMb) : formatBytes(0)));
       else if (isCoreError(e, 'no-space')) app.notify(t.attach.noSpace);
       else app.notify(isCoreError(e, 'invalid-input') ? t.attach.failed : errorText(e));
       app.log('warn', 'chat', 'sending attachments failed', e);
@@ -502,7 +504,7 @@
       return true;
     } catch (e) {
       if (isCoreError(e, 'no-space')) app.notify(t.attach.noSpace);
-      else if (isCoreError(e, 'too-large')) app.notify(t.attach.tooLargeAny(app.hello ? `${app.hello.maxFileMb} МБ` : ''));
+      else if (isCoreError(e, 'too-large')) app.notify(t.attach.tooLargeAny(app.hello ? formatMegabytes(app.hello.maxFileMb) : ''));
       else app.notify(errorText(e));
       app.log('warn', 'chat', 'sending a voice message failed', e);
       return true; // the reason was already shown
@@ -603,7 +605,7 @@
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <section
-  class="screen chat"
+  class="screen chat chat-scaled"
   aria-labelledby="chat-title-{chatId}"
   onkeydown={onKeydown}
   ondragover={onDragOver}
@@ -648,7 +650,7 @@
   {#if kind === 'group' && group}
     {#if group.frozen}
       <div class="notice warn banner" role="status">
-        <p>{t.group.frozen}</p>
+        <p>{t.group.frozen(app.genderOf(group.members.find((x) => x.isOwner)?.userId))}</p>
         <button class="btn small" type="button" onclick={newGroupFromFrozen}>{t.group.frozenAction}</button>
       </div>
     {/if}
@@ -670,7 +672,7 @@
     </div>
   {/if}
 
-  <div class="feed" bind:this={feedEl} data-testid="feed">
+  <div class="feed chat-bg" bind:this={feedEl} data-testid="feed">
     <div class="top" bind:this={sentinel}>
       {#if loaded && messages.length > 0}
         {#if older === 'loading'}
@@ -692,7 +694,7 @@
     </div>
 
     {#if loaded && messages.length === 0}
-      <p class="empty muted">{kind === 'self' ? t.chat.selfEmpty : t.chat.empty}</p>
+      <p class="empty muted">{kind === 'self' ? t.chat.selfEmpty : t.chat.empty(app.myGender)}</p>
     {/if}
 
     <ol class="messages" aria-label={title}>
@@ -701,7 +703,7 @@
           <li class="day"><span>{entry.label}</span></li>
         {:else if entry.message.kind === 'service' && entry.message.service}
           <li class="service" data-testid="service-line">
-            <span>{serviceText(entry.message.service, { me: account?.userId ?? '', nameOf })}</span>
+            <span>{serviceText(entry.message.service, { me: account?.userId ?? '', nameOf, genderOf: (id) => app.genderOf(id) })}</span>
           </li>
         {:else}
           {@const author = authorOf(entry.message)}
@@ -780,7 +782,7 @@
       bind:files={pending}
       bind:caption
       maxBytes={app.hello?.maxBlobBytes ?? null}
-      limitText={app.hello ? `${app.hello.maxFileMb} МБ` : ''}
+      limitText={app.hello ? formatMegabytes(app.hello.maxFileMb) : ''}
       busy={sendingFiles}
       onsend={sendFiles}
       oncancel={closePreview}
@@ -826,13 +828,14 @@
   {@const target = pickerFor}
   {#await loadPicker()}
     <p class="visually-hidden" role="status">{t.emoji.loading}</p>
-  {:then { default: EmojiPicker }}
+  {:then [{ default: EmojiPicker }, emojiSet]}
     <EmojiPicker
+      emoji={emojiSet}
       title={target.kind === 'react' ? t.msg.reactions : t.emoji.titleWithStickers}
       stickers={target.kind === 'composer' ? accountId : null}
       onsticker={(packId, file) => void sendSticker(packId, file)}
       onpick={(emoji) => {
-        if (target.kind === 'composer') composer?.insert(emoji);
+        if (target.kind === 'composer') composer?.pickEmoji(emoji);
         else {
           const m = byKey.get(target.key);
           if (m) toggleReaction(m, emoji);

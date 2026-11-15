@@ -1,7 +1,7 @@
 # FAQ and troubleshooting
 
-Common questions of family members and of the administrator. If the answer is not here, the app has «Настройки»,
-«Диагностика» (Settings, Diagnostics): a log and a button to copy a report (it contains no message text, words or
+Common questions of family members and of the administrator. If the answer is not here, the app has “Settings”,
+“Diagnostics”: a log and a button to copy a report (it contains no message text, words or
 keys).
 
 ## For everyone
@@ -12,10 +12,10 @@ In order:
 
 1. **iPhone:** notifications work only for the app on the home screen and only on iOS 16.4 or newer. A Safari tab
    gets none. How to install: [family guide](FAMILY.md#iphone-add-to-home-screen).
-2. Notifications are enabled in the app itself: «Настройки», «Уведомления». It also shows whether they are blocked
+2. Notifications are enabled in the app itself: “Settings”, “Notifications”. It also shows whether they are blocked
    in the phone or browser settings, and how to fix that.
 3. Do Not Disturb or a Focus mode on the phone hides notifications: check that it is off or allows Family Chat.
-4. One device gets notifications from one family only. With several families, «Настройки», «Уведомления» shows
+4. One device gets notifications from one family only. With several families, “Settings”, “Notifications” shows
    which one; you can pick another there.
 5. The administrator has not switched notifications off on the server (`push = false`). Then the app says that
    notifications are off on the family server.
@@ -28,7 +28,7 @@ administrator code is needed). More: [installation](ADMIN.md#the-server-check-pa
 
 ### I lost my 24 words
 
-If the app still opens on at least one device, nothing is lost: «Настройки», «Слова для восстановления» shows them
+If the app still opens on at least one device, nothing is lost: “Settings”, “Recovery words” shows them
 again. Write them down and check.
 
 With no device and no words, the old identity cannot come back: the key exists only in those words. Ask the
@@ -38,8 +38,7 @@ only with the identity that created it. So keep both the words and the archive.
 
 ### My phone was lost or stolen
 
-Revoke your key: from another device in «Настройки», «Безопасность», or on the sign-in screen with «Восстановить по
-фразе» and then «Потеряли телефон? Отозвать ключ по словам». Details: [family guide](FAMILY.md#if-the-phone-is-lost-or-someone-saw-the-words).
+Revoke your key: from another device in “Settings”, “Security”, or on the sign-in screen with “Restore with my words” and then “Lost your phone? Revoke your key with your words”. Details: [family guide](FAMILY.md#if-the-phone-is-lost-or-someone-saw-the-words).
 
 ### Messages older than 90 days are missing on the new phone
 
@@ -53,7 +52,7 @@ the internet works, the server is unreachable or its proxy cuts long requests (s
 
 ### "Login invalid"
 
-Press «Войти заново» (sign in again): the app signs in again with your key, no words needed. If the app says you
+Press “Sign in again”: the app signs in again with your key, no words needed. If the app says you
 were disconnected from the family, the administrator disconnected you; ask for a new invitation.
 
 ### Message times look odd or the phone clock is wrong
@@ -79,7 +78,7 @@ The app says the family server is running out of space, and the server refuses n
   deleted at start;
 - lower the file size limit (`max_file_mb`).
 
-Used and free space are shown in the app: «Настройки», «Семья и сервер».
+Used and free space are shown in the app: “Settings”, “Family and server”.
 
 ### The connection keeps dropping behind a proxy or tunnel
 
@@ -100,11 +99,11 @@ request", server with `--m0`) and raise the proxy's response timeout:
 
 ### The server does not start
 
-The server writes the reason to its log (in Russian). Common ones:
+The server writes the reason to its log (in English or Russian, see the language rule in the [installation guide](ADMIN.md)). Common ones:
 
-- «уже используется другим процессом fcd»: a server already runs on this folder;
-- «не удалось занять адрес»: another program uses the port, choose another `--port`;
-- «создана более новой версией fcd»: a newer server opened the folder; run the newer version or restore a backup;
+- “is already in use by another fcd process”: a server already runs on this folder;
+- “could not bind to”: another program uses the port, choose another `--port`;
+- “was created by a newer fcd”: a newer server opened the folder; run the newer version or restore a backup;
 - an error in `config.toml`: the server names the line.
 
 ### Moving the server to another computer

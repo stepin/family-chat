@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { AccountView } from '@family-chat/core';
+  import GenderPicker from '../../components/GenderPicker.svelte';
   import Page from '../../components/Page.svelte';
   import RecoveryPhrase from '../../components/RecoveryPhrase.svelte';
   import InviteFamily from '../../components/InviteFamily.svelte';
@@ -7,7 +8,7 @@
   import { errorText, joinProblem } from '../../lib/errors.ts';
   import { pageServerUrl } from '../../lib/invite.ts';
   import { nav } from '../../lib/nav.svelte.ts';
-  import { t } from '../../lib/strings.ts';
+  import { t, type Gender } from '../../lib/strings.ts';
 
   // Administrator route (docs/PLAN.md 8.1 with docs/PLAN-v2.md 8): server
   // address and admin code → name → recovery phrase → invite the family.
@@ -15,6 +16,7 @@
   let serverUrl = $state(pageServerUrl(location));
   let code = $state('');
   let name = $state('');
+  let gender = $state<Gender>('m');
   let family = $state('');
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -45,7 +47,7 @@
     busy = true;
     error = null;
     try {
-      account = await app.core.join({ serverUrl, code: { adminCode: code.trim() }, name: name.trim() });
+      account = await app.core.join({ serverUrl, code: { adminCode: code.trim() }, name: name.trim(), gender });
       code = '';
       void navigator.storage?.persist?.().catch(() => false);
       step = 'phrase';
@@ -120,6 +122,7 @@
         <label for="admin-name">{t.join.nameLabel}</label>
         <input id="admin-name" class="input" type="text" maxlength="64" autocomplete="given-name" bind:value={name} />
       </div>
+      <GenderPicker id="admin" bind:value={gender} />
       {#if error}<p class="error-text" role="alert">{error}</p>{/if}
       <button class="btn block" type="submit" disabled={busy || name.trim() === ''}>
         {busy ? t.admin.creating : t.admin.create}

@@ -7,7 +7,10 @@ use serde::Deserialize;
 
 pub const DEFAULT_PORT: u16 = 8787;
 pub const DEFAULT_LISTEN: &str = "0.0.0.0";
-pub const DEFAULT_FAMILY_NAME: &str = "Семья";
+/// Family name when none is given: in the server's language at first start.
+pub fn default_family_name() -> &'static str {
+    crate::lang::l("Семья", "Family")
+}
 pub const DEFAULT_RETENTION_DAYS: u32 = 90;
 pub const DEFAULT_MAX_FILE_MB: u64 = 200;
 /// Below this much free space on the data disk the server answers 507.
@@ -29,6 +32,8 @@ pub struct Overrides {
     pub push_subject: Option<String>,
     pub min_free_mb: Option<u64>,
     pub trust_forwarded_for: Option<bool>,
+    /// M7: language of the console output, `ru` or `en` (only in the file; the flag is `--lang`).
+    pub lang: Option<String>,
 }
 
 impl Overrides {
@@ -44,6 +49,7 @@ impl Overrides {
             push_subject: self.push_subject.or(lower.push_subject),
             min_free_mb: self.min_free_mb.or(lower.min_free_mb),
             trust_forwarded_for: self.trust_forwarded_for.or(lower.trust_forwarded_for),
+            lang: self.lang.or(lower.lang),
         }
     }
 }
@@ -65,33 +71,56 @@ pub struct Settings {
 
 impl Settings {
     pub fn resolve(o: Overrides) -> Result<Settings, String> {
-        let ip: IpAddr = o
-            .listen
-            .as_deref()
-            .unwrap_or(DEFAULT_LISTEN)
-            .parse()
-            .map_err(|_| "адрес прослушивания (listen) должен быть IP-адресом, например 0.0.0.0".to_string())?;
+        let ip: IpAddr = o.listen.as_deref().unwrap_or(DEFAULT_LISTEN).parse().map_err(|_| {
+            crate::lang::l(
+                "адрес прослушивания (listen) должен быть IP-адресом, например 0.0.0.0",
+                "the listen address (listen) must be an IP address, for example 0.0.0.0",
+            )
+            .to_string()
+        })?;
         let retention_days = o.retention_days.unwrap_or(DEFAULT_RETENTION_DAYS);
         if !(7..=90).contains(&retention_days) {
-            return Err(format!(
-                "срок хранения (retention_days) должен быть от 7 до 90 дней, указано {retention_days}"
+            return Err(tr!(
+                "срок хранения (retention_days) должен быть от 7 до 90 дней, указано {retention_days}",
+                "retention (retention_days) must be 7 to 90 days, got {retention_days}"
             ));
         }
         let max_file_mb = o.max_file_mb.unwrap_or(DEFAULT_MAX_FILE_MB);
         if max_file_mb == 0 {
-            return Err("предел файла (max_file_mb) должен быть больше нуля".into());
+            return Err(crate::lang::l(
+                "предел файла (max_file_mb) должен быть больше нуля",
+                "the file limit (max_file_mb) must be more than zero",
+            )
+            .into());
         }
         let family_name = o
             .family_name
-            .unwrap_or_else(|| DEFAULT_FAMILY_NAME.into())
+            .unwrap_or_else(|| default_family_name().into())
             .trim()
             .to_string();
         if family_name.is_empty() || family_name.chars().count() > 100 {
-            return Err("имя семьи (family_name) должно быть от 1 до 100 символов".into());
+            return Err(crate::lang::l(
+                "имя семьи (family_name) должно быть от 1 до 100 символов",
+                "the family name (family_name) must be 1 to 100 characters",
+            )
+            .into());
         }
         let push_subject = o.push_subject.unwrap_or_else(|| DEFAULT_PUSH_SUBJECT.into());
         if !(push_subject.starts_with("mailto:") || push_subject.starts_with("https://")) {
-            return Err("push_subject должен начинаться с mailto: или https://".into());
+            return Err(crate::lang::l(
+                "push_subject должен начинаться с mailto: или https://",
+                "push_subject must start with mailto: or https://",
+            )
+            .into());
+        }
+        if let Some(l) = o.lang.as_deref()
+            && crate::lang::Lang::parse(l).is_none_or(|p| p.code() != l)
+        {
+            return Err(crate::lang::l(
+                "язык (lang) должен быть ru или en",
+                "the language (lang) must be ru or en",
+            )
+            .into());
         }
         Ok(Settings {
             listen: SocketAddr::new(ip, o.port.unwrap_or(DEFAULT_PORT)),
@@ -108,16 +137,30 @@ impl Settings {
 
 pub fn read_config_file(path: &Path) -> Result<Overrides, String> {
     match std::fs::read_to_string(path) {
-        Ok(text) => toml::from_str(&text).map_err(|e| format!("ошибка в {}: {e}", path.display())),
+        Ok(text) => toml::from_str(&text).map_err(|e| tr!("ошибка в {}: {e}", "error in {}: {e}", path.display())),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Overrides::default()),
-        Err(e) => Err(format!("не удалось прочитать {}: {e}", path.display())),
+        Err(e) => Err(tr!(
+            "не удалось прочитать {}: {e}",
+            "could not read {}: {e}",
+            path.display()
+        )),
     }
 }
 
-/// Text of `config.toml` written at first start, with the effective values.
+/// Text of `config.toml` written at first start, with the effective values,
+/// commented in the server's language.
 pub fn config_template(s: &Settings) -> String {
     let family = toml::Value::String(s.family_name.clone()).to_string();
-    format!(
+    let (port, ip, retention, max_file, push, min_free, trust_xff) = (
+        s.listen.port(),
+        s.listen.ip(),
+        s.retention_days,
+        s.max_file_mb,
+        s.push,
+        s.min_free_mb,
+        s.trust_forwarded_for,
+    );
+    tr!(
         r#"# Настройки fcd. Флаги командной строки важнее значений из этого файла.
 # После правки перезапустите сервер.
 
@@ -147,14 +190,45 @@ min_free_mb = {min_free}
 # X-Forwarded-For. Включайте, только если сервер стоит за обратным прокси,
 # который этот заголовок выставляет; иначе его может подделать кто угодно.
 trust_forwarded_for = {trust_xff}
+
+# Язык сообщений сервера: "ru" или "en". Без этой строки: флаг --lang,
+# затем переменные LC_ALL, LC_MESSAGES, LANG, иначе русский.
+# lang = "ru"
 "#,
-        port = s.listen.port(),
-        ip = s.listen.ip(),
-        retention = s.retention_days,
-        max_file = s.max_file_mb,
-        push = s.push,
-        min_free = s.min_free_mb,
-        trust_xff = s.trust_forwarded_for,
+        r#"# fcd settings. Command-line flags win over the values in this file.
+# Restart the server after editing it.
+
+# Port and address the server listens on for HTTP.
+port = {port}
+listen = "{ip}"
+
+# Family name, everyone in the family sees it.
+family_name = {family}
+
+# How long the server keeps messages, days (7 to 90).
+retention_days = {retention}
+
+# Size limit of one file, MB.
+max_file_mb = {max_file}
+
+# Web Push notifications. false: the server never contacts any outside address.
+push = {push}
+
+# Contact for push services (RFC 8292): mailto:address or https://address.
+# push_subject = "mailto:you@example.com"
+
+# Below this much free disk space, MB, the server refuses new messages.
+min_free_mb = {min_free}
+
+# true: the client address for rate limiting wrong codes is taken from the
+# X-Forwarded-For header. Only turn it on behind a reverse proxy that sets
+# this header; otherwise anyone can fake it.
+trust_forwarded_for = {trust_xff}
+
+# Language of the server's messages: "ru" or "en". Without this line: the
+# --lang flag, then the LC_ALL, LC_MESSAGES, LANG variables, else Russian.
+# lang = "en"
+"#
     )
 }
 
@@ -177,6 +251,25 @@ mod tests {
         assert!(s2.push);
         assert_eq!(s2.min_free_mb, DEFAULT_MIN_FREE_MB);
         assert!(!s2.trust_forwarded_for);
+    }
+
+    #[test]
+    fn lang_is_ru_or_en() {
+        for (v, ok) in [
+            ("ru", true),
+            ("en", true),
+            ("de", false),
+            ("EN", false),
+            ("ru_RU", false),
+        ] {
+            let r = Settings::resolve(Overrides {
+                lang: Some(v.into()),
+                ..Default::default()
+            });
+            assert_eq!(r.is_ok(), ok, "{v}");
+        }
+        let back: Overrides = toml::from_str("lang = \"en\"\n").unwrap();
+        assert_eq!(back.lang.as_deref(), Some("en"));
     }
 
     #[test]

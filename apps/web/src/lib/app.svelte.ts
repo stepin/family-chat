@@ -12,6 +12,7 @@ import {
   type Hello,
   type TransferView,
   type FamilyChatCore,
+  type Gender,
   type Member,
   type OutboxItem,
   type Readable,
@@ -21,6 +22,8 @@ import { showUnread } from './badge.ts';
 import { describe } from './errors.ts';
 import type { ParsedInvite } from './invite.ts';
 import { currentPlatform, type PlatformInfo } from './platform.ts';
+import { LANG_SETTING_KEY, readLangPref, resolveLang, systemLanguages, writeLangPref, type Lang, type LangPref } from './locale.ts';
+import { activeLang, loadStrings } from './strings.ts';
 
 export interface InstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -91,6 +94,9 @@ class AppState {
   membersLoaded = $state(false);
   /** Per-identity interface flags stored in the core's settings table. */
   flags: Flags = $state({ ...NO_FLAGS });
+  /** Interface language (M7) and the person's choice; the screens are keyed by `lang`. */
+  lang: Lang = $state(activeLang());
+  langPref: LangPref = $state(readLangPref());
   flagsLoaded = $state(false);
   #membersOf: string | null = null;
   #membersUnsub: Unsubscribe | undefined;
@@ -105,6 +111,21 @@ class AppState {
   /** The family shown now (M5: one of several servers). */
   get account(): AccountView | null {
     return this.accounts.find((a) => a.id === this.currentId) ?? this.accounts[0] ?? null;
+  }
+
+  /** Gender of a member of the shown family from the profile (M7); male when unknown. */
+  genderOf(userId: string | null | undefined): Gender {
+    return (userId ? this.members.find((m) => m.userId === userId)?.gender : undefined) ?? 'm';
+  }
+
+  /** My own gender in the shown family (for "Я записала", "Напишите первой"). */
+  get myGender(): Gender {
+    return this.members.find((m) => m.isMe)?.gender ?? 'm';
+  }
+
+  /** The family name where it is needed to tell families apart: only with several families on this device. */
+  familyLabel(name: string): string | null {
+    return this.accounts.length > 1 ? name : null;
   }
 
   /** Unread messages per family (for the switcher). */
@@ -173,6 +194,11 @@ class AppState {
     core.connection.subscribe((c) => (this.connection = c));
     this.#watchMembers();
     window.addEventListener('online', () => core.wake());
+    // The service worker reads the language from the database; localStorage is what this page used.
+    void core.setSetting(LANG_SETTING_KEY, this.langPref).catch(() => undefined);
+    window.addEventListener('languagechange', () => {
+      if (this.langPref === 'system') void this.setLanguage('system');
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible') return;
       core.wake();
@@ -251,6 +277,21 @@ class AppState {
   async setValue(name: string, value: unknown): Promise<void> {
     const userId = this.account?.userId;
     if (userId) await this.core.setSetting(`ui.${name}.${userId}`, value);
+  }
+
+  /**
+   * Switches the interface language at once: loads the catalogue, then the
+   * screens render again (App.svelte keys them by `lang`). Kept in
+   * localStorage for the next start and in the settings table for the
+   * service worker's notifications.
+   */
+  async setLanguage(pref: LangPref): Promise<void> {
+    writeLangPref(pref);
+    const lang = resolveLang(pref, systemLanguages());
+    await loadStrings(lang);
+    this.langPref = pref;
+    this.lang = lang;
+    await this.#core?.setSetting(LANG_SETTING_KEY, pref).catch(() => undefined);
   }
 
   notify(text: string): void {

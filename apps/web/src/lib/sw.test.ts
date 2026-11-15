@@ -21,7 +21,7 @@ function req<T>(r: IDBRequest<T>): Promise<T> {
 }
 
 /** The app database as Dexie leaves it (only the stores the worker reads). */
-async function appDb(factory: IDBFactory, withSettings = true): Promise<void> {
+async function appDb(factory: IDBFactory, withSettings = true, families = 2, lang: string | null = null): Promise<void> {
   const open = factory.open('family-chat', 40);
   open.onupgradeneeded = () => {
     const db = open.result;
@@ -33,11 +33,12 @@ async function appDb(factory: IDBFactory, withSettings = true): Promise<void> {
   };
   const db = await req(open);
   const tx = db.transaction(withSettings ? ['accounts', 'chats', 'users', 'settings'] : ['accounts', 'chats', 'users'], 'readwrite');
-  tx.objectStore('accounts').put({ id: 'accountaaaaaaaaa', familyName: 'Ивановы' });
+  if (families > 1) tx.objectStore('accounts').put({ id: 'accountaaaaaaaaa', familyName: 'Ивановы' });
   tx.objectStore('accounts').put({ id: 'accountbbbbbbbbb', familyName: 'Петровы' });
   tx.objectStore('chats').put({ accountId: 'accountbbbbbbbbb', chatId: 'c'.repeat(26), kind: 'dm', peerId: 'p'.repeat(26) });
   tx.objectStore('users').put({ accountId: 'accountbbbbbbbbb', userId: 'p'.repeat(26), name: 'Бабушка' });
   if (withSettings) tx.objectStore('settings').put({ key: SETTING_BADGE_COUNT, value: 4 });
+  if (withSettings && lang) tx.objectStore('settings').put({ key: 'ui.lang', value: lang });
   await new Promise((r) => (tx.oncomplete = r));
   db.close();
 }
@@ -49,7 +50,7 @@ async function setting(factory: IDBFactory, key: string): Promise<unknown> {
   return (row as { value?: unknown } | undefined)?.value;
 }
 
-function worker(factory: IDBFactory, badge = true) {
+function worker(factory: IDBFactory, badge = true, languages: readonly string[] = ['ru-RU']) {
   const listeners = new Map<string, Listener[]>();
   const notifications: { title: string; options: { body?: string; data?: { url?: string; accountId?: string | null } } }[] = [];
   const setAppBadge = vi.fn(async () => undefined);
@@ -59,7 +60,7 @@ function worker(factory: IDBFactory, badge = true) {
       scope: SCOPE,
       showNotification: async (title: string, options: never) => void notifications.push({ title, options }),
     },
-    navigator: badge ? { setAppBadge } : {},
+    navigator: badge ? { setAppBadge, languages } : { languages },
   };
   const clients = { matchAll: async () => [], openWindow: async () => null };
   new Function('self', 'clients', 'indexedDB', CODE)(self, clients, factory);
@@ -83,8 +84,9 @@ describe('push: badge and routing', () => {
     expect(await setting(factory, SETTING_BADGE_COUNT)).toBe(5);
     expect(w.setAppBadge).toHaveBeenCalledWith(5);
     expect(w.notifications).toHaveLength(1);
-    expect(w.notifications[0]!.title).toBe('Петровы');
-    expect(w.notifications[0]!.options.body).toBe('Новое сообщение от Бабушка');
+    // M7: the chat is the title; the family is named only because two share the device.
+    expect(w.notifications[0]!.title).toBe('Бабушка');
+    expect(w.notifications[0]!.options.body).toBe('Новое сообщение · Петровы');
     expect(w.notifications[0]!.options.data!.url).toBe(`${SCOPE}?chat=${'c'.repeat(26)}&account=accountbbbbbbbbb`);
     expect(w.notifications[0]!.options.data!.accountId).toBe('accountbbbbbbbbb');
     await w.dispatch('push', { data: { json: () => ({ chatId: 'c'.repeat(26), gseq: 8 }) } });
@@ -100,6 +102,40 @@ describe('push: badge and routing', () => {
     const empty = worker(new IDBFactory());
     await empty.dispatch('push', { data: { json: () => ({ chatId: 'zzz', gseq: 1 }) } });
     expect(empty.notifications[0]!.title).toBe('Family Chat');
+  });
+});
+
+describe('push: wording and language (M7)', () => {
+  const push = { data: { json: () => ({ chatId: 'c'.repeat(26), gseq: 1 }) } };
+
+  it('with one family the family is not named', async () => {
+    const factory = new IDBFactory();
+    await appDb(factory, true, 1);
+    const w = worker(factory);
+    await w.dispatch('push', push);
+    expect(w.notifications[0]).toMatchObject({ title: 'Бабушка', options: { body: 'Новое сообщение' } });
+  });
+
+  it('speaks the language chosen in the app', async () => {
+    const factory = new IDBFactory();
+    await appDb(factory, true, 1, 'en');
+    const w = worker(factory, true, ['ru-RU']);
+    await w.dispatch('push', push);
+    expect(w.notifications[0]!.options.body).toBe('New message');
+  });
+
+  it('follows the system list when the app follows the system: first of ru and en, else Russian', async () => {
+    for (const [languages, body] of [
+      [['de-DE', 'en-GB', 'ru'], 'New message'],
+      [['uk', 'ru-UA', 'en'], 'Новое сообщение'],
+      [['de', 'fr'], 'Новое сообщение'],
+    ] as const) {
+      const factory = new IDBFactory();
+      await appDb(factory, true, 1, 'system');
+      const w = worker(factory, true, languages);
+      await w.dispatch('push', push);
+      expect(w.notifications[0]!.options.body, languages.join(',')).toBe(body);
+    }
   });
 });
 

@@ -118,8 +118,10 @@ export default defineConfig({
       manifest: {
         name: 'Family Chat',
         short_name: 'Family Chat',
-        description: 'Семейный чат',
-        lang: 'ru',
+        // Language neutral (M7): the app speaks Russian or English, the manifest is one for both.
+        description: 'Family Chat',
+        // "und" (undetermined, BCP 47): otherwise vite-plugin-pwa writes "en".
+        lang: 'und',
         start_url: './',
         scope: './',
         display: 'standalone',

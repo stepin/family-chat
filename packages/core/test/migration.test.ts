@@ -61,9 +61,26 @@ class M4Db extends M2Db {
   }
 }
 
+/** Exactly the M5/M6 schema (commit b7075d2, src/db/schema.ts): versions 1 to 4. */
+class M5Db extends M4Db {
+  constructor(name: string, factory: IDBFactory) {
+    super(name, factory);
+    this.version(4).stores({
+      stickerPacks: '[accountId+packId], accountId',
+      stickerFiles: '[accountId+file], [accountId+packId]',
+      links: '[accountId+userId], accountId, [accountId+to]',
+    });
+  }
+}
+
+/** A stored profile envelope with this payload (the upgrade reads the payload only; it was verified when stored). */
+function storedProfile(payload: object): { payload: string; sig: string } {
+  return { payload: Buffer.from(JSON.stringify(payload)).toString('base64url'), sig: 'A'.repeat(86) };
+}
+
 describe('schema migration', () => {
   it('opens an M1 database, keeps its rows and adds the M2 tables and fields', async () => {
-    expect(DB_VERSION).toBe(4);
+    expect(DB_VERSION).toBe(5);
     const factory = new IDBFactory();
     const old = new M1Db('m1', factory);
     await old.open();
@@ -144,7 +161,7 @@ describe('schema migration to version 4 (M5)', () => {
     old.close();
 
     const db = await openDb(new CoreDb('m4', { indexedDB: factory, IDBKeyRange }));
-    expect(db.verno).toBe(4);
+    expect(db.verno).toBe(DB_VERSION);
     expect((await db.accounts.get('acc1'))!).toMatchObject({ cursor: 42, token: 't' });
     const m = (await db.messages.toArray())[0]!;
     expect(m).toMatchObject({ body: 'Ёлка во дворе', reactions: [{ emoji: '👍', users: ['q'] }] });
@@ -155,6 +172,34 @@ describe('schema migration to version 4 (M5)', () => {
     for (const t of ['stickerPacks', 'stickerFiles', 'links']) expect(await db.table(t).count()).toBe(0);
     await db.links.put({ accountId: 'acc1', userId: 'o'.repeat(26), to: 'n'.repeat(26), fromFingerprint: 'f', toFingerprint: 'g', createdAt: 1 });
     expect(await db.links.where('[accountId+to]').equals(['acc1', 'n'.repeat(26)]).count()).toBe(1);
+    db.close();
+  });
+});
+
+describe('schema migration to version 5 (M7)', () => {
+  it('opens an M5 database, keeps its rows and reads the gender from the stored profiles', async () => {
+    const factory = new IDBFactory();
+    const old = new M5Db('m5', factory);
+    await old.open();
+    const user = (userId: string, profile: object | null) => ({
+      accountId: 'acc1', userId, identity: { payload: 'i', sig: 's' }, signPub: new Uint8Array(32), boxPub: new Uint8Array(32), created: 1,
+      profile: profile ? storedProfile(profile) : null, name: profile ? 'Имя' : null, rev: profile ? 2 : -1, admin: false, removed: false, keyChange: null,
+    });
+    // A profile written by an M7 client and taken in by this device before it was updated.
+    await old.table('users').put(user('f'.repeat(26), { v: 1, userId: 'f'.repeat(26), name: 'Мама', avatar: null, gender: 'f', rev: 2, updated: 3 }));
+    await old.table('users').put(user('m'.repeat(26), { v: 1, userId: 'm'.repeat(26), name: 'Папа', avatar: null, rev: 2, updated: 3 }));
+    await old.table('users').put(user('n'.repeat(26), null));
+    await old.table('stickerPacks').put({ accountId: 'acc1', packId: 'p'.repeat(26), name: 'Котики' });
+    await old.table('settings').put({ key: 'emoji.recent', value: ['👍'] });
+    old.close();
+
+    const db = await openDb(new CoreDb('m5', { indexedDB: factory, IDBKeyRange }));
+    expect(db.verno).toBe(5);
+    expect((await db.users.get(['acc1', 'f'.repeat(26)]))!).toMatchObject({ name: 'Имя', gender: 'f', rev: 2 });
+    expect((await db.users.get(['acc1', 'm'.repeat(26)]))!.gender).toBe('m');
+    expect((await db.users.get(['acc1', 'n'.repeat(26)]))!.gender).toBe('m');
+    expect(await db.stickerPacks.count()).toBe(1);
+    expect((await db.settings.get('emoji.recent'))!.value).toEqual(['👍']);
     db.close();
   });
 });

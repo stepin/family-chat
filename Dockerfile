@@ -69,8 +69,10 @@ COPY --from=server --chown=65534:65534 /data-empty /data
 USER 65534:65534
 VOLUME /data
 EXPOSE 8787
-# Reads the port from /data/config.toml. If you change the port with a flag
-# instead, pass the same flag here: fcd healthcheck --data /data --port <port>.
+# Settings come from FCD_* environment variables (docker run -e, compose
+# `environment:`); the server and the health check read the same ones, so a
+# port changed with FCD_PORT is checked too. The data folder is /data.
+ENV FCD_DATA=/data
 HEALTHCHECK --interval=30s --timeout=15s --start-period=10s --retries=3 \
-    CMD ["/fcd", "healthcheck", "--data", "/data"]
-ENTRYPOINT ["/fcd", "--data", "/data"]
+    CMD ["/fcd", "healthcheck"]
+ENTRYPOINT ["/fcd"]

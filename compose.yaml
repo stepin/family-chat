@@ -6,6 +6,10 @@ services:
       - "127.0.0.1:8787:8787"
     volumes:
       - fcd-data:/data
+    environment:
+      # Server settings (fcd --help lists them all); the health check reads them too.
+      FCD_LANG: "ru"
+      # FCD_TRUST_FORWARDED_FOR: "true"
     stop_grace_period: 20s
 
 volumes:

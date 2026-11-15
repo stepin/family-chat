@@ -11,12 +11,14 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Family Chat" />
     <title>Family Chat</title>
+    <!-- Appearance and language before the first paint (M7): a same-origin file, not inline (CSP). -->
+    <script src="./early.js"></script>
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
   </head>
   <body>
     <div id="app"></div>
-    <noscript>Для Family Chat нужен JavaScript.</noscript>
+    <noscript>Для Family Chat нужен JavaScript. Family Chat needs JavaScript.</noscript>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

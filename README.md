@@ -5,7 +5,7 @@
 Android и компьютера. Вход по приглашению, без номеров телефонов. История живёт на устройствах.
 
 *In English:* an end-to-end encrypted family chat on your own server. One Rust binary with the web app built in,
-no database, messages kept on the server for at most 90 days. The app is in Russian for now. Documentation in
+no database, messages kept on the server for at most 90 days. The app and the server speak Russian and English. Documentation in
 English: [installation](docs/en/ADMIN.md), [family guide](docs/en/FAMILY.md), [security](docs/en/SECURITY-MODEL.md),
 [FAQ](docs/en/FAQ.md).
 
@@ -38,6 +38,9 @@ tar xzf fcd-<версия>-x86_64-unknown-linux-musl.tar.gz
 При первом запуске сервер печатает адрес и одноразовый код администратора. Приложению нужен HTTPS: поставьте перед
 сервером обратный прокси (Caddy, nginx, NAS) или дайте ему свои файлы сертификата. Затем откройте адрес, нажмите
 «Настроить для своей семьи» и введите код. Подробно: [установка сервера](docs/ADMIN.md).
+
+Настройки сервера задаются флагами, переменными окружения `FCD_*` (например `FCD_PORT`, `FCD_LANG`) или в
+`config.toml` папки данных; порядок: флаг, переменная, файл. Список: `fcd --help` и [установка сервера](docs/ADMIN.md).
 
 ## Документация
 

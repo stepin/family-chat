@@ -34,6 +34,7 @@ export type {
   Avatar,
   AvatarRef,
   AvatarType,
+  Gender,
   Revocation,
   ProfileInput,
   AuthInput,

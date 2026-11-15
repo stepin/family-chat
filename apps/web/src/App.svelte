@@ -101,6 +101,8 @@
   });
 </script>
 
+<!-- M7: a new interface language renders every screen again (the state lives in app and nav). -->
+{#key app.lang}
 {#if app.phase === 'loading'}
   <div class="splash" role="status">{t.boot.loading}</div>
 {:else if app.phase === 'db-newer'}
@@ -135,6 +137,8 @@
     </main>
   {/await}
 {/if}
+
+{/key}
 
 {#if app.toast}
   <div class="toast" role="status">{app.toast}</div>

@@ -140,6 +140,21 @@ describe('identity and joining', () => {
     expect((await ctx.db.users.get([row.id, row.userId]))!.name).toBe('Оля');
     await expect(updateProfile(rt, '')).rejects.toBeInstanceOf(ProtocolError);
   });
+
+  it('M7: the profile carries the gender; changing it keeps the name and the other way round', async () => {
+    const { ctx, row, rt } = await admin();
+    // A new profile always writes the field ("m" by default).
+    expect((await ctx.db.users.get([row.id, row.userId]))!.gender).toBe('m');
+    await updateProfile(rt, { gender: 'f' });
+    let me = (await ctx.db.users.get([row.id, row.userId]))!;
+    expect(me.gender).toBe('f');
+    expect(JSON.parse(Buffer.from(me.profile!.payload, 'base64url').toString()).gender).toBe('f');
+    const name = me.name;
+    await updateProfile(rt, 'Оля');
+    me = (await ctx.db.users.get([row.id, row.userId]))!;
+    expect(me).toMatchObject({ name: 'Оля', gender: 'f' });
+    expect(name).not.toBe('Оля');
+  });
 });
 
 describe('session', () => {

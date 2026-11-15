@@ -35,7 +35,9 @@ export type Route =
   // M5
   | { readonly name: 'families' }
   | { readonly name: 'add-family' }
-  | { readonly name: 'sticker-packs' };
+  | { readonly name: 'sticker-packs' }
+  // M7
+  | { readonly name: 'appearance' };
 
 export type RouteName = Route['name'];
 

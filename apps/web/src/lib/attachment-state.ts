@@ -3,7 +3,7 @@
 // action it offers (docs/PLAN.md 8.4, 8.6).
 
 import type { AttachmentView } from '@family-chat/core';
-import { plural } from './format.ts';
+import { t } from './strings.ts';
 
 const DAY_MS = 86_400_000;
 
@@ -57,23 +57,23 @@ export function attachmentUi(a: AttachmentView, ctx: AttachmentContext): Attachm
     case 'ready':
       return { label: null, action: 'save', percent: null, tone: 'quiet' };
     case 'downloading':
-      return { label: `Скачивается ${percent}%`, action: 'cancel-download', percent, tone: 'quiet' };
+      return { label: t.attachState.downloading(percent), action: 'cancel-download', percent, tone: 'quiet' };
     case 'uploading':
-      if (a.error === 'storage_full') return { label: 'На сервере не хватает места', action: null, percent, tone: 'error' };
-      return { label: `Загружается ${percent}%`, action: null, percent, tone: 'quiet' };
+      if (a.error === 'storage_full') return { label: t.attachState.serverFull, action: null, percent, tone: 'error' };
+      return { label: t.attachState.uploading(percent), action: null, percent, tone: 'quiet' };
     case 'failed':
-      if (a.error === 'no-space') return { label: 'На устройстве не хватает места', action: 'retry-download', percent: null, tone: 'error' };
-      return { label: 'Не удалось скачать', action: 'retry-download', percent: null, tone: 'error' };
+      if (a.error === 'no-space') return { label: t.attachState.noSpace, action: 'retry-download', percent: null, tone: 'error' };
+      return { label: t.attachState.downloadFailed, action: 'retry-download', percent: null, tone: 'error' };
     case 'gone':
-      return { label: 'Удалено с сервера', action: null, percent: null, tone: 'quiet' };
+      return { label: t.attachState.gone, action: null, percent: null, tone: 'quiet' };
     case 'cancelled':
-      return { label: 'Загрузка отменена', action: null, percent: null, tone: 'quiet' };
+      return { label: t.attachState.cancelled, action: null, percent: null, tone: 'quiet' };
     case 'not-downloaded': {
-      if (ctx.sentAt === null) return { label: 'Не скачано', action: 'download', percent: null, tone: 'quiet' };
+      if (ctx.sentAt === null) return { label: t.attachState.notDownloaded, action: 'download', percent: null, tone: 'quiet' };
       const left = daysLeft(ctx.sentAt, ctx.retentionDays, ctx.now);
-      if (left === 0) return { label: 'Не скачано. Срок хранения на сервере истекает', action: 'download', percent: null, tone: 'quiet' };
+      if (left === 0) return { label: t.attachState.expiring, action: 'download', percent: null, tone: 'quiet' };
       return {
-        label: `Не скачано. Доступно ещё ${left} ${plural(left, ['день', 'дня', 'дней'])}`,
+        label: t.attachState.daysLeft(left),
         action: 'download',
         percent: null,
         tone: 'quiet',

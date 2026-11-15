@@ -106,15 +106,15 @@
     </section>
 
     {#if member.revoked}
-      <p class="notice error" role="status">{t.contact.revoked}</p>
+      <p class="notice error" role="status">{t.contact.revoked(member?.gender ?? 'm')}</p>
     {:else if member.removed}
-      <p class="notice" role="status">{t.contact.removed}</p>
+      <p class="notice" role="status">{t.contact.removed(member?.gender ?? 'm')}</p>
     {/if}
 
     {#if member.keyChanged && !member.revoked}
       <section class="notice warn stack" aria-labelledby="key-changed">
         <h2 id="key-changed">{t.contact.keyChangedTitle}</h2>
-        <p>{t.contact.keyChangedText}</p>
+        <p>{t.contact.keyChangedText(member?.gender ?? 'm')}</p>
         <button class="btn small" type="button" disabled={busy} onclick={acceptKey}>{t.contact.acceptKey}</button>
       </section>
     {/if}
@@ -124,7 +124,7 @@
       <p class="fp mono tabular" data-testid="fingerprint">
         {#each fingerprintLines(member.fingerprint) as line, i (i)}<span>{line}</span>{/each}
       </p>
-      <p class="muted small">{t.contact.fingerprintHint}</p>
+      <p class="muted small">{t.contact.fingerprintHint(member?.gender ?? 'm')}</p>
       {#if !member.isMe && !member.revoked}
         <label class="switch">
           <input

@@ -3,7 +3,14 @@ import './styles/app.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
 import { app, type InstallPromptEvent } from './lib/app.svelte.ts';
+import { applyAppearance, readAppearance } from './lib/appearance.ts';
+import { readLangPref, resolveLang, systemLanguages } from './lib/locale.ts';
+import { loadStrings } from './lib/strings.ts';
 import { registerServiceWorker } from './pwa.ts';
+
+// public/early.js has already set the appearance before the first paint;
+// this repeats it with the app's own code (the same rules).
+applyAppearance(readAppearance());
 
 // The composer stays above the on-screen keyboard: iOS shrinks only the
 // visual viewport, so the app follows its height (set through CSSOM, which
@@ -32,4 +39,8 @@ registerServiceWorker((apply) => {
   app.applyUpdate = apply;
   app.updateReady = true;
 });
+// Only the catalogue of the interface language is loaded (its own chunk).
+const lang = resolveLang(readLangPref(), systemLanguages());
+await loadStrings(lang).catch(() => loadStrings('ru'));
+app.lang = lang;
 mount(App, { target: document.getElementById('app')! });

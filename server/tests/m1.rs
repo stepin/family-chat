@@ -1092,6 +1092,10 @@ async fn admin_list_and_add_from_the_command_line() {
 
     let run = |args: &[&str]| {
         let out = std::process::Command::new(env!("CARGO_BIN_EXE_fcd"))
+            .env_remove("LANG")
+            .env_remove("LC_ALL")
+            .env_remove("LC_MESSAGES")
+            .env_remove("FCD_LANG")
             .args(args)
             .args(["--data", data.to_str().unwrap()])
             .output()

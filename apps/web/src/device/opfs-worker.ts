@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 // Writes and reads 1 MB through a sync access handle (the path iOS supports).
+// It reports facts only; the page words them in its language (M7).
 (async () => {
   try {
     const dir = await navigator.storage.getDirectory();
@@ -13,8 +14,8 @@
     const size = handle.getSize();
     handle.close();
     await dir.removeEntry('fc-device-check-worker.bin');
-    postMessage({ ok: size === data.length && back[back.length - 1] === 7, detail: `записан и прочитан файл ${size} байт` });
+    postMessage({ ok: size === data.length && back[back.length - 1] === 7, size });
   } catch (e) {
-    postMessage({ ok: false, detail: `ошибка: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}` });
+    postMessage({ ok: false, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) });
   }
 })();

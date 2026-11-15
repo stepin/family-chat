@@ -7,11 +7,13 @@
 // keyed by `accountId` first.
 
 import { Dexie, type Table } from 'dexie';
+import { base64urlDecode } from '@family-chat/protocol';
 import type {
   Attachment,
   AttachmentKind,
   AvatarRef,
   BlobRef,
+  Gender,
   GroupState,
   Location,
   MsgRef,
@@ -23,7 +25,7 @@ import type { NoticeBody, ServerEvent } from '../api/types.ts';
 import { messageWords } from '../search.ts';
 
 export const DEFAULT_DB_NAME = 'family-chat';
-export const DB_VERSION = 4;
+export const DB_VERSION = 5;
 
 export type AccountStatus = 'active' | 'login-invalid' | 'removed';
 
@@ -119,6 +121,9 @@ export interface UserRow {
   revoked?: { revokedAt: number; envelope: SignedEnvelope; detectedAt: number } | null;
   /** Fingerprint the person confirmed as verified (local mark); compared with the current keys. */
   verifiedFingerprint?: string | null;
+  // ---- version 5 ----
+  /** Gender from the verified profile (M7); absent means `m`. */
+  gender?: Gender;
 }
 
 export interface LastMessage {
@@ -647,6 +652,33 @@ export class CoreDb extends Dexie {
       stickerFiles: '[accountId+file], [accountId+packId]',
       links: '[accountId+userId], accountId, [accountId+to]',
     });
+    // Version 5 (M7): the profile's gender. No new tables or indexes; users gain the
+    // optional field `gender`, read here from the verified profiles already stored (a
+    // newer client may have written "f" into a profile this device took in before M7).
+    this.version(5)
+      .stores({})
+      .upgrade(async (tx) => {
+        await tx
+          .table('users')
+          .toCollection()
+          .modify((u: UserRow) => {
+            u.gender = genderOfProfile(u.profile);
+          });
+      });
+  }
+}
+
+/**
+ * Gender written in a stored, already verified profile envelope: `f` only
+ * when the payload says so, `m` otherwise (no field, unreadable, no profile).
+ */
+export function genderOfProfile(profile: SignedEnvelope | null | undefined): Gender {
+  if (!profile) return 'm';
+  try {
+    const json: unknown = JSON.parse(new TextDecoder().decode(base64urlDecode(profile.payload)));
+    return (json as { gender?: unknown } | null)?.gender === 'f' ? 'f' : 'm';
+  } catch {
+    return 'm';
   }
 }
 

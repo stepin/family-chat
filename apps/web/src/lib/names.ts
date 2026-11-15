@@ -2,6 +2,9 @@
 // and names made unique with a short fingerprint when two relatives share one
 // (docs/PLAN.md 8.6).
 
+import { formatLang, formatList } from './format.ts';
+import { intlLocale } from './locale.ts';
+
 /** Groups of a fingerprint ("12345 67890 …", 6 groups of 5 digits). */
 function groups(fp: string): string[] {
   return fp.trim().split(/\s+/).filter((g) => g.length > 0);
@@ -51,11 +54,11 @@ export function displayNames(people: readonly Named[], unknown: string): Map<str
 export function initial(name: string | null | undefined): string {
   const s = (name ?? '').trim();
   if (s.length === 0) return '?';
-  return (Array.from(s)[0] ?? '?').toLocaleUpperCase('ru');
+  return (Array.from(s)[0] ?? '?').toLocaleUpperCase(intlLocale(formatLang()));
 }
 
-/** "Петя", "Петя и Вася", "Петя, Вася и Катя". */
+/** "Петя", "Петя и Вася", "Петя, Вася и Катя" (or the English forms: Intl list formatting). */
 export function joinNames(names: readonly string[]): string {
   if (names.length <= 1) return names[0] ?? '';
-  return `${names.slice(0, -1).join(', ')} и ${names[names.length - 1]}`;
+  return formatList(names);
 }

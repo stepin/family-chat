@@ -168,7 +168,7 @@
             <div class="pack-head">
               <span class="lines">
                 <span class="pname">{p.name}</span>
-                <span class="sub">{t.stickers.count(p.stickers.length)} · {p.mine ? t.stickers.mine : t.stickers.by(names.get(p.author) ?? t.common.unknownName)}</span>
+                <span class="sub">{t.stickers.count(p.stickers.length)} · {p.mine ? t.stickers.mine : t.stickers.by(names.get(p.author) ?? t.common.unknownName, app.genderOf(p.author))}</span>
               </span>
               {#if p.mine}
                 <button class="btn secondary small" type="button" onclick={(e) => askDelete(e, p)} data-testid="sticker-pack-delete">{t.stickers.delete}</button>

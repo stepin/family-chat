@@ -4,6 +4,8 @@
 // to lock; a tap or a click starts a locked recording, which is the required
 // alternative to holding and the way keyboards and screen readers use it).
 
+import { t } from './strings.ts';
+
 /** Longest recording; at this point the recording stops and is sent. */
 export const MAX_VOICE_MS = 10 * 60 * 1000;
 /** A warning this long before the limit. */
@@ -53,7 +55,7 @@ const EXT: Record<VoiceMime, string> = { 'audio/mp4': 'm4a', 'audio/webm': 'webm
 export function voiceFileName(mime: VoiceMime, time: number): string {
   const d = new Date(time);
   const p = (n: number) => String(n).padStart(2, '0');
-  return `Голосовое ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}-${p(d.getMinutes())}.${EXT[mime]}`;
+  return `${t.voice.fileName} ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}-${p(d.getMinutes())}.${EXT[mime]}`;
 }
 
 /**
@@ -99,23 +101,14 @@ export function formatDuration(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function plural(n: number, forms: readonly [string, string, string]): string {
-  const a = Math.abs(n) % 100;
-  const b = a % 10;
-  if (a > 10 && a < 20) return forms[2];
-  if (b > 1 && b < 5) return forms[1];
-  if (b === 1) return forms[0];
-  return forms[2];
-}
-
 /** For screen readers: "1 минута 5 секунд", "7 секунд". */
 export function durationWords(ms: number): string {
   const total = Math.max(0, Math.round((Number.isFinite(ms) ? ms : 0) / 1000));
   const m = Math.floor(total / 60);
   const s = total % 60;
   const parts: string[] = [];
-  if (m > 0) parts.push(`${m} ${plural(m, ['минута', 'минуты', 'минут'])}`);
-  if (s > 0 || m === 0) parts.push(`${s} ${plural(s, ['секунда', 'секунды', 'секунд'])}`);
+  if (m > 0) parts.push(t.voice.minutes(m));
+  if (s > 0 || m === 0) parts.push(t.voice.seconds(s));
   return parts.join(' ');
 }
 

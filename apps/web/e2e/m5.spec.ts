@@ -40,6 +40,17 @@ async function bothThemes(page: Page, what: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light' });
 }
 
+/** The family open now, read from the switcher's sheet (the header no longer shows it). */
+async function currentFamily(page: Page): Promise<string> {
+  await page.getByTestId('family-switcher').click();
+  const menu = page.getByTestId('family-menu');
+  await expect(menu).toBeVisible();
+  const text = (await menu.locator('[aria-current="true"]').textContent()) ?? '';
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  return text;
+}
+
 async function firstMessage(page: Page, text: string): Promise<void> {
   await send(page, text);
   const later = page.getByRole('button', { name: 'Позже' });
@@ -60,13 +71,14 @@ test('two family servers: add, switch with unread counts, badge, remove', async 
   await openChat(mama.page, 'Папа');
   await expect(message(mama.page, 'Привет из Ивановых')).toBeVisible();
 
-  await test.step('add the second family from the switcher, with the same identity', async () => {
-    await mama.page.getByTestId('family-switcher').click();
-    const menu = mama.page.getByTestId('family-menu');
-    await expect(menu).toBeVisible();
-    await expect(menu.getByTestId('family-item')).toHaveCount(1);
-    await bothThemes(mama.page, 'family switcher');
-    await menu.getByRole('button', { name: 'Добавить семью' }).click();
+  await test.step('add the second family from Settings, with the same identity', async () => {
+    // M7: with one family there is no family label or switcher at the top.
+    await toList(mama.page);
+    await expect(mama.page.getByTestId('family-switcher')).toHaveCount(0);
+    await expect(mama.page.locator('.list-pane .screen-header')).not.toContainText('Ивановы');
+    await mama.page.getByRole('button', { name: 'Настройки' }).click();
+    await mama.page.getByRole('button', { name: /Семьи на этом устройстве/ }).click();
+    await mama.page.getByRole('button', { name: 'Добавить семью' }).click();
     await expect(mama.page.getByRole('heading', { name: 'Добавить семью', exact: true })).toBeVisible();
     await mama.page.getByLabel('Ссылка-приглашение').fill(linkTwo);
     await mama.page.getByRole('button', { name: 'Проверить' }).click();
@@ -76,7 +88,15 @@ test('two family servers: add, switch with unread counts, badge, remove', async 
     await bothThemes(mama.page, 'add a family');
     await mama.page.getByTestId('add-family-submit').click();
     await expect(mama.page.getByText('Семья «Петровы» добавлена')).toBeVisible();
-    await expect(mama.page.getByTestId('family-switcher')).toContainText('Петровы');
+    // Two families: a compact switcher named "Семьи", without the name as text.
+    const switcher = mama.page.getByTestId('family-switcher');
+    await expect(switcher).toHaveAccessibleName('Семьи');
+    await expect(switcher).not.toContainText('Петровы');
+    expect(await currentFamily(mama.page)).toContain('Петровы');
+    await switcher.click();
+    await expect(mama.page.getByTestId('family-menu').getByTestId('family-item')).toHaveCount(2);
+    await bothThemes(mama.page, 'family switcher');
+    await mama.page.keyboard.press('Escape');
   });
 
   await test.step('write in the second family; unread from the first shows on the switcher', async () => {
@@ -101,7 +121,7 @@ test('two family servers: add, switch with unread counts, badge, remove', async 
     await expect(items).toHaveCount(2);
     await expect(items.filter({ hasText: 'Ивановы' })).toContainText('1');
     await items.filter({ hasText: 'Ивановы' }).click();
-    await expect(mama.page.getByTestId('family-switcher')).toContainText('Ивановы');
+    expect(await currentFamily(mama.page)).toContain('Ивановы');
     await openChat(mama.page, 'Папа');
     await expect(message(mama.page, 'Как дела?')).toBeVisible();
     await expect.poll(async () => (await badges(mama.page)).at(-1)).toBe(1);
@@ -132,7 +152,8 @@ test('two family servers: add, switch with unread counts, badge, remove', async 
     await confirm.click();
     await expect(mama.page.getByText('Семья «Петровы» убрана с этого устройства')).toBeVisible();
     await expect(mama.page.getByTestId('family-row')).toHaveCount(1);
-    await expect(mama.page.getByTestId('family-switcher')).toContainText('Ивановы');
+    // One family again: the switcher is gone.
+    await expect(mama.page.getByTestId('family-switcher')).toHaveCount(0);
     await send(papa.page, 'Всё ещё здесь?');
     await openChat(mama.page, 'Папа');
     await expect(message(mama.page, 'Всё ещё здесь?')).toBeVisible();

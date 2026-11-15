@@ -26,6 +26,8 @@
   const AddFamily = lazy(() => import('./AddFamily.svelte'));
   const StickerPacks = lazy(() => import('./StickerPacks.svelte'));
   const ForwardSheet = lazy(() => import('../components/ForwardSheet.svelte'));
+  // M7: appearance settings.
+  const Appearance = lazy(() => import('./Appearance.svelte'));
 
   // One column below 900 px (a stack of screens over the chat list), two
   // columns from 900 px: the list and the open screen (docs/PLAN.md 8.2).
@@ -77,6 +79,8 @@
         {#await Families() then { default: C }}<C />{/await}
       {:else if top.name === 'add-family'}
         {#await AddFamily() then { default: C }}<C />{/await}
+      {:else if top.name === 'appearance'}
+        {#await Appearance() then { default: C }}<C />{/await}
       {:else if top.name === 'sticker-packs'}
         {#key app.account?.id}
           {#await StickerPacks() then { default: C }}<C />{/await}

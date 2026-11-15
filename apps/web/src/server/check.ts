@@ -5,7 +5,11 @@
  *
  * The administrator code is passed to requests only and never appears in the
  * report or in the stored log.
+ *
+ * M7: the texts follow the page language (lib/page-lang.ts).
  */
+
+import { tr } from '../lib/page-lang.ts';
 
 export interface Hello {
   protocol: number;
@@ -65,7 +69,7 @@ export function sameBytes(a: ArrayBuffer | Uint8Array | null | undefined, b: Uin
 }
 
 export function describeError(e: unknown): string {
-  if (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')) return 'истекло время ожидания';
+  if (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')) return tr('истекло время ожидания', 'timed out');
   if (e instanceof Error) return `${e.name}: ${e.message}`;
   return String(e);
 }
@@ -138,11 +142,11 @@ export function sendTestPush(
 
 /** Host of a push endpoint; the full endpoint is a secret capability URL. */
 export function pushServiceHost(endpoint: string | undefined): string {
-  if (!endpoint) return 'нет';
+  if (!endpoint) return tr('нет', 'none');
   try {
     return new URL(endpoint).host;
   } catch {
-    return 'неизвестно';
+    return tr('неизвестно', 'unknown');
   }
 }
 
@@ -169,39 +173,47 @@ function time(ms: number): string {
 }
 
 export function formatLogEntry(e: LogEntry): string {
-  const mark = e.ok === true ? 'OK' : e.ok === false ? 'ОШИБКА' : '--';
+  const mark = e.ok === true ? 'OK' : e.ok === false ? tr('ОШИБКА', 'FAILED') : '--';
   return `${new Date(e.at).toISOString().slice(0, 10)} ${time(e.at)} [${mark}] ${e.text}`;
 }
 
 /** Plain-text report for the owner to send back. Contains no secrets. */
 export function formatReport(r: ReportInput): string {
   const page = new URL(r.pageUrl);
+  const yes = tr('да', 'yes');
+  const no = tr('нет', 'no');
   const lines = [
-    'Family Chat: проверка сервера (M0v2)',
-    `Время: ${r.now.toISOString()}`,
-    `Страница: ${page.origin}${page.pathname}`,
-    `Сервер: ${r.server}`,
-    `Браузер: ${r.userAgent}`,
-    `HTTPS (защищённый контекст): ${r.secureContext ? 'да' : 'нет'}`,
-    `Открыто как установленное приложение: ${r.standalone ? 'да' : 'нет'}`,
-    `Push в браузере: ${r.pushSupported ? 'есть' : 'нет'}`,
-    `Разрешение на уведомления: ${r.notificationPermission}`,
-    `Push-сервис подписки: ${r.pushService}`,
+    tr('Family Chat: проверка сервера (M0v2)', 'Family Chat: server check (M0v2)'),
+    `${tr('Время', 'Time')}: ${r.now.toISOString()}`,
+    `${tr('Страница', 'Page')}: ${page.origin}${page.pathname}`,
+    `${tr('Сервер', 'Server')}: ${r.server}`,
+    `${tr('Браузер', 'Browser')}: ${r.userAgent}`,
+    `${tr('HTTPS (защищённый контекст)', 'HTTPS (secure context)')}: ${r.secureContext ? yes : no}`,
+    `${tr('Открыто как установленное приложение', 'Opened as an installed app')}: ${r.standalone ? yes : no}`,
+    `${tr('Push в браузере', 'Push in the browser')}: ${r.pushSupported ? tr('есть', 'yes') : no}`,
+    `${tr('Разрешение на уведомления', 'Notification permission')}: ${r.notificationPermission}`,
+    `${tr('Push-сервис подписки', 'Push service of the subscription')}: ${r.pushService}`,
     '',
   ];
-  if (!r.hello) lines.push('hello: не запрашивался');
+  if (!r.hello) lines.push(tr('hello: не запрашивался', 'hello: not requested'));
   else if (r.hello.ok) {
     const h = r.hello.value;
     lines.push(
-      `hello: OK за ${r.hello.ms} мс`,
-      `  fcd ${h.version}, протокол ${h.protocol}, serverId ${h.serverId}`,
-      `  семья «${h.familyName}», хранение ${h.retentionDays} дн., файл до ${h.maxFileMb} МБ`,
-      `  push ${h.push ? 'включён' : 'выключен'}, проверки M0 ${h.m0 ? 'включены' : 'выключены'}`,
-      `  часы сервера минус часы устройства: ${r.clockOffsetSec ?? '?'} с`,
+      tr(`hello: OK за ${r.hello.ms} мс`, `hello: OK in ${r.hello.ms} ms`),
+      tr(`  fcd ${h.version}, протокол ${h.protocol}, serverId ${h.serverId}`, `  fcd ${h.version}, protocol ${h.protocol}, serverId ${h.serverId}`),
+      tr(
+        `  семья «${h.familyName}», хранение ${h.retentionDays} дн., файл до ${h.maxFileMb} МБ`,
+        `  family “${h.familyName}”, kept for ${h.retentionDays} days, files up to ${h.maxFileMb} MB`,
+      ),
+      tr(
+        `  push ${h.push ? 'включён' : 'выключен'}, проверки M0 ${h.m0 ? 'включены' : 'выключены'}`,
+        `  push ${h.push ? 'on' : 'off'}, M0 checks ${h.m0 ? 'on' : 'off'}`,
+      ),
+      tr(`  часы сервера минус часы устройства: ${r.clockOffsetSec ?? '?'} с`, `  server clock minus device clock: ${r.clockOffsetSec ?? '?'} s`),
     );
-  } else lines.push(`hello: ОШИБКА ${r.hello.error} (${r.hello.ms} мс)`);
-  lines.push('', 'Журнал проверок:');
-  if (r.log.length === 0) lines.push('  (пусто)');
+  } else lines.push(tr(`hello: ОШИБКА ${r.hello.error} (${r.hello.ms} мс)`, `hello: FAILED ${r.hello.error} (${r.hello.ms} ms)`));
+  lines.push('', tr('Журнал проверок:', 'Check log:'));
+  if (r.log.length === 0) lines.push(tr('  (пусто)', '  (empty)'));
   for (const e of r.log) lines.push(`  ${formatLogEntry(e)}`);
   return lines.join('\n');
 }

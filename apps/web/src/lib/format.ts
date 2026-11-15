@@ -1,5 +1,8 @@
 // Dates and times for the UI. Everything shown is in the device's time zone;
-// message times come from the server (docs/PLAN-v2.md 7.6).
+// message times come from the server (docs/PLAN-v2.md 7.6). Words and number
+// formats follow the interface language (M7), through Intl.
+
+import { intlLocale, type Lang } from './locale.ts';
 
 const DAY_MS = 86_400_000;
 
@@ -20,43 +23,75 @@ export function daysBetween(earlier: number, later: number): number {
   return Math.round((startOfDay(later) - startOfDay(earlier)) / DAY_MS);
 }
 
-const timeFmt = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' });
-const dayMonthFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' });
-const dayMonthYearFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
-const shortDateFmt = new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
-const weekdayFmt = new Intl.DateTimeFormat('ru-RU', { weekday: 'short' });
+let lang: Lang = 'ru';
+let fmt = makeFormatters(lang);
 
-/** `ЧЧ:ММ`. */
-export function formatTime(time: number): string {
-  return timeFmt.format(time);
+function makeFormatters(l: Lang) {
+  const loc = intlLocale(l);
+  return {
+    time: new Intl.DateTimeFormat(loc, l === 'en' ? { hour: 'numeric', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' }),
+    dayMonth: new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'long' }),
+    dayMonthYear: new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'long', year: 'numeric' }),
+    shortDate: new Intl.DateTimeFormat(loc, { day: '2-digit', month: '2-digit', year: '2-digit' }),
+    weekday: new Intl.DateTimeFormat(loc, { weekday: 'short' }),
+    relative: new Intl.RelativeTimeFormat(loc, { numeric: 'auto' }),
+    list: new Intl.ListFormat(loc, { type: 'conjunction' }),
+  };
 }
 
-/** Day separator in a chat: "Сегодня", "Вчера", "12 ноября", "3 марта 2025". */
+/** Switches every formatter to the interface language (called when the string catalogue changes). */
+export function setFormatLang(l: Lang): void {
+  lang = l;
+  fmt = makeFormatters(l);
+}
+
+export function formatLang(): Lang {
+  return lang;
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toLocaleUpperCase(intlLocale(lang)) + s.slice(1);
+}
+
+/** `ЧЧ:ММ` (Russian) or `7:05 PM` (English). */
+export function formatTime(time: number): string {
+  return fmt.time.format(time);
+}
+
+/** Day separator in a chat: "Сегодня", "Вчера", "12 ноября", "3 марта 2025 г." (or the English forms). */
 export function formatDayLabel(time: number, now: number): string {
   const days = daysBetween(time, now);
-  if (days === 0) return 'Сегодня';
-  if (days === 1) return 'Вчера';
-  if (new Date(time).getFullYear() === new Date(now).getFullYear()) return dayMonthFmt.format(time);
-  return dayMonthYearFmt.format(time);
+  if (days === 0 || days === 1) return capitalize(fmt.relative.format(-days, 'day'));
+  if (new Date(time).getFullYear() === new Date(now).getFullYear()) return fmt.dayMonth.format(time);
+  return fmt.dayMonthYear.format(time);
 }
 
-/** Time in the chat list: today `ЧЧ:ММ`, this week the weekday, otherwise `ДД.ММ.ГГ`. */
+/** Time in the chat list: today the time, yesterday the word, this week the weekday, otherwise a short date. */
 export function formatListTime(time: number, now: number): string {
   const days = daysBetween(time, now);
   if (days <= 0) return formatTime(time);
-  if (days === 1) return 'вчера';
-  if (days < 7) return weekdayFmt.format(time);
-  return shortDateFmt.format(time);
+  if (days === 1) return fmt.relative.format(-1, 'day');
+  if (days < 7) return fmt.weekday.format(time);
+  return fmt.shortDate.format(time);
 }
 
-/** A date for notices: "12 ноября 2026". */
+/**
+ * A date inside a sentence: "12 ноября 2026", "November 12, 2026". The
+ * Russian "г." is dropped: the sentence around it puts its own period, and
+ * "2026 г.." is what came out.
+ */
 export function formatDate(time: number): string {
-  return dayMonthYearFmt.format(time);
+  return fmt.dayMonthYear.format(time).replace(/\s*г\.$/u, '');
 }
 
-/** Human-readable size: "12,3 МБ". */
+const BYTE_UNITS: Record<Lang, readonly string[]> = {
+  ru: ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'],
+  en: ['B', 'KB', 'MB', 'GB', 'TB'],
+};
+
+/** Human-readable size: "12,3 МБ", "12.3 MB". */
 export function formatBytes(bytes: number): string {
-  const units = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
+  const units = BYTE_UNITS[lang];
   let v = bytes;
   let i = 0;
   while (v >= 1024 && i < units.length - 1) {
@@ -64,15 +99,22 @@ export function formatBytes(bytes: number): string {
     i++;
   }
   const digits = i === 0 || v >= 100 ? 0 : 1;
-  return `${v.toLocaleString('ru-RU', { maximumFractionDigits: digits })} ${units[i]}`;
+  return `${formatNumber(v, digits)} ${units[i]}`;
 }
 
-/** Russian plural form: plural(5, ['день', 'дня', 'дней']). */
-export function plural(n: number, forms: readonly [string, string, string]): string {
-  const a = Math.abs(n) % 100;
-  const b = a % 10;
-  if (a > 10 && a < 20) return forms[2];
-  if (b > 1 && b < 5) return forms[1];
-  if (b === 1) return forms[0];
-  return forms[2];
+/** A size given in whole megabytes (the family's file limit): "200 МБ", "200 MB". */
+export function formatMegabytes(mb: number): string {
+  return `${formatNumber(mb, 0)} ${BYTE_UNITS[lang][2]}`;
 }
+
+export function formatNumber(n: number, maxFractionDigits = 0): string {
+  return n.toLocaleString(intlLocale(lang), { maximumFractionDigits: maxFractionDigits });
+}
+
+/** Names joined as people say them: "Петя и Вася", "Petya, Vasya, and Masha". */
+export function formatList(items: readonly string[]): string {
+  return fmt.list.format(items);
+}
+
+/** Russian plural form (kept for older callers; the catalogues use i18n/forms.ts). */
+export { pluralRu as plural } from './i18n/forms.ts';

@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { AccountView } from '@family-chat/core';
+  import GenderPicker from '../../components/GenderPicker.svelte';
   import Page from '../../components/Page.svelte';
   import { app } from '../../lib/app.svelte.ts';
   import { errorText, joinProblem } from '../../lib/errors.ts';
   import { nav } from '../../lib/nav.svelte.ts';
-  import { t } from '../../lib/strings.ts';
+  import { t, type Gender } from '../../lib/strings.ts';
 
   // "Вас пригласил(а) Мама в «Семья»" → name → the chat with the person who
   // invited (docs/PLAN.md 8.1). The invitation is checked first (without
@@ -13,6 +14,8 @@
   const invite = app.invite;
   let family = $state<string | null>(null);
   let inviter = $state<string | null>(null);
+  let inviterGender = $state<Gender>('m');
+  let gender = $state<Gender>('m');
   let checking = $state(true);
   let unreachable = $state<string | null>(null);
   let name = $state('');
@@ -32,6 +35,7 @@
       } else {
         family = c.familyName;
         inviter = c.createdBy.name;
+        inviterGender = c.createdBy.gender;
         if (c.status === 'used' || c.status === 'expired') {
           fatal = c.status;
           app.invite = null;
@@ -71,7 +75,7 @@
     busy = true;
     error = null;
     try {
-      const acc = await app.core.join({ serverUrl: invite.serverUrl, code: { invite: invite.code }, name: name.trim() });
+      const acc = await app.core.join({ serverUrl: invite.serverUrl, code: { invite: invite.code }, name: name.trim(), gender });
       app.invite = null;
       void navigator.storage?.persist?.().catch(() => false);
       const chatId = acc.firstChatId ?? (await firstChat(acc));
@@ -92,7 +96,7 @@
   const back = nav.stack.length > 1 ? () => nav.back() : undefined;
 </script>
 
-<Page title={family ? (inviter ? t.join.titleBy(inviter, family) : t.join.title(family)) : t.join.titleUnknown} onback={back} narrow>
+<Page title={family ? (inviter ? t.join.titleBy(inviter, family, inviterGender) : t.join.title(family)) : t.join.titleUnknown} onback={back} narrow>
   {#if fatal}
     <div class="stack">
       <p class="notice warn" role="alert">
@@ -126,6 +130,7 @@
         />
         <span id="join-name-hint" class="hint">{t.join.nameHint}</span>
       </div>
+      <GenderPicker id="join" bind:value={gender} />
       {#if error}<p class="error-text" role="alert">{error}</p>{/if}
       <button class="btn block" type="submit" disabled={busy || name.trim().length === 0}>
         {busy ? t.join.joining : t.join.submit}

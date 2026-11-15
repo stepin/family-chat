@@ -103,7 +103,13 @@ pub fn spawn_maintenance(st: Arc<AppState>) {
                 .await
                 .unwrap_or(0);
             if removed > 0 {
-                tracing::info!("удалены неопубликованные черновики наборов стикеров: {removed}");
+                tracing::info!(
+                    "{}",
+                    tr!(
+                        "удалены неопубликованные черновики наборов стикеров: {removed}",
+                        "removed unpublished sticker pack drafts: {removed}"
+                    )
+                );
             }
         }
     });
@@ -326,13 +332,11 @@ pub fn endpoint_allowed(endpoint: &str) -> bool {
     false
 }
 
+/// The test notification carries no human text (M7): the service worker
+/// words it in the language of the app (public/push-sw.js), `delay` says
+/// whether it was sent later.
 fn test_payload(delay: u64) -> Vec<u8> {
-    let body = if delay == 0 {
-        "Пробное уведомление дошло.".to_string()
-    } else {
-        format!("Пробное уведомление дошло (отправлено через {delay} с).")
-    };
-    json!({ "kind": "m0-test", "title": "Family Chat", "body": body, "sentAt": now_ms() })
+    json!({ "kind": "m0-test", "delay": delay, "sentAt": now_ms() })
         .to_string()
         .into_bytes()
 }

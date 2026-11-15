@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { isCoreError, type AccountView } from '@family-chat/core';
+  import GenderPicker from '../components/GenderPicker.svelte';
   import Page from '../components/Page.svelte';
   import { app } from '../lib/app.svelte.ts';
   import { errorText } from '../lib/errors.ts';
   import { inviteLinkFor, parseInviteInput, sameServer, type ParsedInvite } from '../lib/invite.ts';
   import { nav } from '../lib/nav.svelte.ts';
-  import { t } from '../lib/strings.ts';
+  import { t, type Gender } from '../lib/strings.ts';
 
   // Adding a family on another server (M5, docs/PLAN.md 7.4 and 7.5), without
   // losing the families already here: by invitation link, as an existing
@@ -22,6 +23,8 @@
   let adminCode = $state('');
   let phrase = $state('');
   let name = $state('');
+  // The gender in the family open now, as a starting point.
+  let gender = $state<Gender>(app.myGender);
   let invite = $state.raw<ParsedInvite | null>(null);
   let invited = $state<{ family: string; by: string | null } | null>(null);
   let busy = $state(false);
@@ -99,10 +102,10 @@
     try {
       if (mode === 'invite') {
         if (!invite) return;
-        const acc = await app.core.join({ serverUrl: invite.serverUrl, code: { invite: invite.code }, name: name.trim(), ...who });
+        const acc = await app.core.join({ serverUrl: invite.serverUrl, code: { invite: invite.code }, name: name.trim(), gender, ...who });
         await done(acc);
       } else if (mode === 'admin') {
-        const acc = await app.core.join({ serverUrl, code: { adminCode: adminCode.trim() }, name: name.trim(), ...who });
+        const acc = await app.core.join({ serverUrl, code: { adminCode: adminCode.trim() }, name: name.trim(), gender, ...who });
         adminCode = '';
         await done(acc);
       } else if (identity === 'phrase') {
@@ -202,6 +205,7 @@
             <label for="add-name">{t.addFamily.nameLabel}</label>
             <input id="add-name" class="input" type="text" maxlength="64" autocomplete="given-name" bind:value={name} />
           </div>
+          <GenderPicker id="add" bind:value={gender} />
         {/if}
         {#if identity === 'new'}<p class="muted small">{t.addFamily.newPhraseNote}</p>{/if}
         {#if error}<p class="error-text" role="alert">{error}</p>{/if}

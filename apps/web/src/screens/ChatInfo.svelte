@@ -82,7 +82,7 @@
     return [
       m.isMe ? t.group.you : null,
       m.isOwner ? t.group.owner : null,
-      m.revoked ? t.group.revoked : m.removed ? t.group.removed : null,
+      m.revoked ? t.group.revoked(app.genderOf(m.userId)) : m.removed ? t.group.removed(app.genderOf(m.userId)) : null,
       m.keyMismatch ? t.group.keyMismatch : null,
     ]
       .filter(Boolean)
@@ -198,7 +198,7 @@
     </section>
 
     {#if group.frozen}
-      <p class="notice warn">{t.group.frozen}</p>
+      <p class="notice warn">{t.group.frozen(app.genderOf(group.members.find((x) => x.isOwner)?.userId))}</p>
     {/if}
     {#if !group.member}
       <p class="notice">{t.group.notMember}</p>
@@ -286,7 +286,7 @@
     {@const m = dlg.member}
     <div class="stack">
       <h2 id="info-dialog-title">{t.group.removeTitle(nameOf(m))}</h2>
-      <p>{t.group.removeText}</p>
+      <p>{t.group.removeText(app.genderOf(m.userId))}</p>
       {#if dlgError}<p class="error-text" role="alert">{dlgError}</p>{/if}
       <div class="row end">
         <button class="btn secondary" type="button" onclick={close}>{t.common.cancel}</button>
@@ -299,7 +299,7 @@
     {@const m = dlg.member}
     <div class="stack">
       <h2 id="info-dialog-title">{t.group.ownerTitle(nameOf(m))}</h2>
-      <p>{t.group.ownerText}</p>
+      <p>{t.group.ownerText(app.genderOf(m.userId))}</p>
       {#if dlgError}<p class="error-text" role="alert">{dlgError}</p>{/if}
       <div class="row end">
         <button class="btn secondary" type="button" onclick={close}>{t.common.cancel}</button>

@@ -20,7 +20,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     bin = join(repo, 'server/target/debug/fcd');
   }
   const data = mkdtempSync(join(tmpdir(), 'fcd-e2e-'));
-  const proc = spawn(bin, ['--data', data, '--listen', '127.0.0.1', '--port', String(FCD_PORT), '--m0', '--family-name', 'E2E'], {
+  const proc = spawn(bin, ['--data', data, '--listen', '127.0.0.1', '--port', String(FCD_PORT), '--m0', '--lang', 'ru', '--family-name', 'E2E'], {
     env: { ...process.env, NO_COLOR: '1', RUST_LOG: 'info' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

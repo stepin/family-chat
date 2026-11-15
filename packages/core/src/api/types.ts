@@ -305,7 +305,7 @@ export interface BlobInfo {
 export interface InviteCheck {
   readonly status: 'valid' | 'used' | 'expired';
   readonly familyName: string;
-  readonly createdBy: { readonly userId: string; readonly name: string | null };
+  readonly createdBy: { readonly userId: string; readonly name: string | null; readonly gender: 'm' | 'f' };
   readonly createdAt: number;
   readonly expiresAt: number;
 }

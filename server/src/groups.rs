@@ -139,7 +139,8 @@ impl Writer {
 
     fn write_state(&self, chat: &ChatId, version: u64, bytes: &[u8]) -> Result<(), ApiError> {
         let dir = self.chat_dir(chat).join("state");
-        create_private_dir(&dir).map_err(|e| io_error("создание папки состояния", e))?;
+        create_private_dir(&dir)
+            .map_err(|e| io_error(crate::lang::l("создание папки состояния", "creating a state folder"), e))?;
         // A file with this number can only be an orphan of a change that
         // crashed before `meta.json` was written: overwriting it is safe.
         self.write_file(&self.state_path(chat, version), bytes)
@@ -161,7 +162,15 @@ impl Writer {
         match self.write_notice(c.id, c.epoch, n, now) {
             Ok(g) => Some(g),
             Err(e) => {
-                tracing::error!("служебное событие группы {} не записано: {}", c.id, e.message);
+                tracing::error!(
+                    "{}",
+                    tr!(
+                        "служебное событие группы {} не записано: {}",
+                        "service event of group {} not written: {}",
+                        c.id,
+                        e.message
+                    )
+                );
                 None
             }
         }
@@ -214,7 +223,15 @@ impl Writer {
             m.chats.insert(chat.id, chat.clone());
             Writer::commit_keys(&mut m, keys);
         }
-        tracing::info!("создана группа {} ({} участн.)", chat.id, chat.members.len());
+        tracing::info!(
+            "{}",
+            tr!(
+                "создана группа {} ({} участн.)",
+                "group {} created ({} members)",
+                chat.id,
+                chat.members.len()
+            )
+        );
         let notice = self.notice_after_commit(&chat, Notice::group_created(&by, &chat), now);
         Ok(GroupChange { chat, notice })
     }
@@ -450,7 +467,12 @@ pub async fn get_state(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Err(ApiError::not_found("not_found", "no such state version"));
         }
-        Err(e) => return Err(io_error("чтение состояния группы", e)),
+        Err(e) => {
+            return Err(io_error(
+                crate::lang::l("чтение состояния группы", "reading a group state"),
+                e,
+            ));
+        }
     };
     let mut res = Response::new(Body::from(bytes));
     res.headers_mut().insert(

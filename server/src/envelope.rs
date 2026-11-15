@@ -270,16 +270,45 @@ fn parse_avatar(v: Option<&Value>) -> Result<AvatarRef, EnvError> {
     }
 }
 
+/// Grammatical gender of a profile (M7, docs/PROTOCOL.md 4.3): the optional
+/// `gender` field, `"m"` or `"f"`; absent means male.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Gender {
+    #[default]
+    Male,
+    Female,
+}
+
+impl Gender {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Gender::Male => "m",
+            Gender::Female => "f",
+        }
+    }
+}
+
+/// The `gender` field: absent, `"m"` or `"f"` (the same rule as `packages/protocol`).
+fn parse_gender(v: Option<&Value>) -> Result<Gender, EnvError> {
+    match v {
+        None => Ok(Gender::Male),
+        Some(Value::String(s)) if s == "m" => Ok(Gender::Male),
+        Some(Value::String(s)) if s == "f" => Ok(Gender::Female),
+        _ => Err(malformed("gender must be \"m\" or \"f\"")),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Profile {
     pub rev: i64,
     pub name: String,
     pub avatar: AvatarRef,
+    pub gender: Gender,
     pub envelope: Envelope,
 }
 
-/// profile payload: `{"v":1,"userId","name","avatar","rev","updated"}`,
-/// signed by the user's identity key.
+/// profile payload: `{"v":1,"userId","name","avatar","gender"?,"rev","updated"}`,
+/// signed by the user's identity key. `gender` is optional (M7).
 pub fn verify_profile(env: &Envelope, user: &UserId, key: &VerifyingKey) -> Result<Profile, EnvError> {
     let (bytes, m) = env.decode()?;
     check_version(&m)?;
@@ -291,6 +320,7 @@ pub fn verify_profile(env: &Envelope, user: &UserId, key: &VerifyingKey) -> Resu
         return Err(malformed(problem));
     }
     let avatar = parse_avatar(m.get("avatar"))?;
+    let gender = parse_gender(m.get("gender"))?;
     let rev = int_field(&m, "rev")?;
     if rev < 0 {
         return Err(malformed("rev must not be negative"));
@@ -301,6 +331,7 @@ pub fn verify_profile(env: &Envelope, user: &UserId, key: &VerifyingKey) -> Resu
         rev,
         name: name.to_string(),
         avatar,
+        gender,
         envelope: env.clone(),
     })
 }
@@ -661,6 +692,29 @@ mod tests {
             verify_profile(&seal(&k, Kind::Profile, &p), &uid, &id.key),
             Err(EnvError::Malformed(_))
         ));
+    }
+
+    #[test]
+    fn gender_field() {
+        let k = SigningKey::from_bytes(&[7; 32]);
+        let (uid, env) = identity(&k);
+        let id = verify_identity(&env).unwrap();
+        let with = |g: &str| {
+            let p = format!(r#"{{"v":1,"userId":"{uid}","name":"x","avatar":null,"gender":{g},"rev":1,"updated":2}}"#);
+            verify_profile(&seal(&k, Kind::Profile, &p), &uid, &id.key).map(|p| p.gender)
+        };
+        assert_eq!(with("\"f\"").unwrap(), Gender::Female);
+        assert_eq!(with("\"m\"").unwrap(), Gender::Male);
+        // Profiles from before M7 have no field: male.
+        assert_eq!(
+            verify_profile(&profile(&k, &uid, "x", 1), &uid, &id.key)
+                .unwrap()
+                .gender,
+            Gender::Male
+        );
+        for bad in ["\"x\"", "\"F\"", "null", "1", "\"\""] {
+            assert!(matches!(with(bad), Err(EnvError::Malformed(_))), "{bad}");
+        }
     }
 
     #[test]

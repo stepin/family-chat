@@ -4,20 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="referrer" content="no-referrer" />
-    <title>Проверка устройства · Family Chat</title>
+    <title data-en="Device check · Family Chat">Проверка устройства · Family Chat</title>
     <link rel="icon" href="../icon.svg" type="image/svg+xml" />
   </head>
   <body>
     <main>
-      <h1>Проверка устройства</h1>
-      <p class="muted">
+      <h1 data-en="Device check">Проверка устройства</h1>
+      <p class="muted" data-en="Checks the browser features the app depends on: storage, OPFS, image encoding, background work. On iPhone run it twice: in Safari and from the installed app.">
         Проверяет возможности браузера, от которых зависит клиент: хранилище, OPFS, кодирование картинок, фон. На iPhone
         запустите её дважды: в Safari и из установленного приложения.
       </p>
-      <p><button id="run" type="button">Проверить устройство</button></p>
+      <p><button id="run" type="button" data-en="Check this device">Проверить устройство</button></p>
       <ul id="list" class="checks card"></ul>
-      <p><button id="copy" type="button" hidden>Скопировать отчёт</button> <span id="status" role="status"></span></p>
-      <details class="card"><summary>Текст отчёта</summary><textarea id="report" rows="12" readonly></textarea></details>
+      <p><button id="copy" type="button" hidden data-en="Copy report">Скопировать отчёт</button> <span id="status" role="status"></span></p>
+      <details class="card"><summary data-en="Report text">Текст отчёта</summary><textarea id="report" rows="12" readonly></textarea></details>
     </main>
     <script type="module" src="../src/device/main.ts"></script>
   </body>

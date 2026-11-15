@@ -66,7 +66,7 @@ test('screenshots of the app with the Sokolov family', async ({ browser }) => {
   await fcd.start(FAMILY);
   try {
     const anna = await person(browser, { width: 390, height: 844 });
-    await setupAdmin(anna, fcd, 'Анна', FAMILY);
+    await setupAdmin(anna, fcd, 'Анна', FAMILY, 'f');
     const links = [await createInvite(anna), await createInvite(anna), await createInvite(anna)];
 
     const sergey = await person(browser);

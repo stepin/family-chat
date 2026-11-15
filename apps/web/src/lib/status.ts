@@ -20,7 +20,8 @@ export interface StatusLine {
  */
 export function statusLine(
   state: ConnectionState | undefined,
-  familyName: string,
+  /** Shown only when it tells families apart (several on the device), else null. */
+  familyName: string | null,
   queued = 0,
 ): StatusLine {
   const s = state ?? { kind: 'connecting' as const };

@@ -5,6 +5,10 @@ import { encodeOrder, fitWithin, renameForType, safeFileName, safeMime, shouldRe
 import { displayNames, fingerprintLines, initial, joinNames, shortFingerprint } from './names.ts';
 import { serviceText } from './service.ts';
 import { archiveFileName, archiveReminder } from './storage.ts';
+import en from './i18n/en.ts';
+import ru from './i18n/ru.ts';
+import { setFormatLang } from './format.ts';
+import { useStrings } from './strings.ts';
 
 const DAY = 86_400_000;
 
@@ -133,20 +137,44 @@ describe('service-line wording', () => {
   const names: Record<string, string> = { me: 'Я', mama: 'Мама', petya: 'Петя', vasya: 'Вася' };
   const n = { me: 'me', nameOf: (id: string) => names[id] ?? 'Без имени' };
 
-  it('words every entry', () => {
-    expect(serviceText({ type: 'created', by: 'mama', name: 'Семья', members: [] }, n)).toBe('Мама создал(а) группу «Семья»');
+  it('words every entry; without a known gender the verb is male', () => {
+    expect(serviceText({ type: 'created', by: 'mama', name: 'Семья', members: [] }, n)).toBe('Мама создал группу «Семья»');
     expect(serviceText({ type: 'created', by: 'me', name: 'Семья', members: [] }, n)).toBe('Вы создали группу «Семья»');
-    expect(serviceText({ type: 'joined', by: 'mama' }, n)).toBe('Мама добавил(а) вас в группу');
+    expect(serviceText({ type: 'joined', by: 'mama' }, n)).toBe('Мама добавил вас в группу');
     expect(serviceText({ type: 'renamed', by: 'me', name: 'Дача' }, n)).toBe('Вы переименовали группу в «Дача»');
-    expect(serviceText({ type: 'added', by: 'mama', userIds: ['petya', 'vasya'] }, n)).toBe('Мама добавил(а) Петя и Вася');
-    expect(serviceText({ type: 'added', by: 'mama', userIds: ['me'] }, n)).toBe('Мама добавил(а) вас');
-    expect(serviceText({ type: 'left', userId: 'petya' }, n)).toBe('Петя вышел(а) из группы');
-    expect(serviceText({ type: 'removed', by: 'mama', userIds: ['vasya'] }, n)).toBe('Мама удалил(а) из группы Вася');
-    expect(serviceText({ type: 'owner', by: 'mama', userId: 'me' }, n)).toBe('Мама передал(а) владение группой. Новый владелец: вы');
+    expect(serviceText({ type: 'added', by: 'mama', userIds: ['petya', 'vasya'] }, n)).toBe('Мама добавил Петя и Вася');
+    expect(serviceText({ type: 'added', by: 'mama', userIds: ['me'] }, n)).toBe('Мама добавил вас');
+    expect(serviceText({ type: 'left', userId: 'petya' }, n)).toBe('Петя вышел из группы');
+    expect(serviceText({ type: 'removed', by: 'mama', userIds: ['vasya'] }, n)).toBe('Мама удалил из группы Вася');
+    expect(serviceText({ type: 'owner', by: 'mama', userId: 'me' }, n)).toBe('Мама передал владение группой. Новый владелец: вы');
     expect(serviceText({ type: 'owner', by: 'me', userId: 'petya' }, n)).toBe('Вы передали владение группой. Новый владелец: Петя');
     expect(serviceText({ type: 'you-removed' }, n)).toBe('Вас удалили из группы. Вы больше не участник');
     expect(serviceText({ type: 'you-left' }, n)).toBe('Вы вышли из группы');
-    expect(serviceText({ type: 'left', userId: 'ghost' }, n)).toBe('Без имени вышел(а) из группы');
+    expect(serviceText({ type: 'left', userId: 'ghost' }, n)).toBe('Без имени вышел из группы');
+  });
+
+  it('M7: the verb agrees with the gender of whoever acted', () => {
+    const g = { ...n, genderOf: (id: string) => (id === 'mama' ? ('f' as const) : ('m' as const)) };
+    expect(serviceText({ type: 'created', by: 'mama', name: 'Семья', members: [] }, g)).toBe('Мама создала группу «Семья»');
+    expect(serviceText({ type: 'joined', by: 'mama' }, g)).toBe('Мама добавила вас в группу');
+    expect(serviceText({ type: 'renamed', by: 'mama', name: 'Дача' }, g)).toBe('Мама переименовала группу в «Дача»');
+    expect(serviceText({ type: 'added', by: 'mama', userIds: ['petya'] }, g)).toBe('Мама добавила Петя');
+    expect(serviceText({ type: 'removed', by: 'mama', userIds: ['vasya'] }, g)).toBe('Мама удалила из группы Вася');
+    expect(serviceText({ type: 'owner', by: 'mama', userId: 'petya' }, g)).toBe('Мама передала владение группой. Новый владелец: Петя');
+    expect(serviceText({ type: 'left', userId: 'mama' }, g)).toBe('Мама вышла из группы');
+    expect(serviceText({ type: 'left', userId: 'petya' }, g)).toBe('Петя вышел из группы');
+  });
+
+  it('M7: English wording', () => {
+    useStrings('en', en);
+    setFormatLang('en');
+    try {
+      expect(serviceText({ type: 'created', by: 'mama', name: 'Family', members: [] }, n)).toBe('Мама created the group “Family”');
+      expect(serviceText({ type: 'added', by: 'mama', userIds: ['petya', 'vasya', 'me'] }, n)).toBe('Мама added Петя, Вася, and you');
+      expect(serviceText({ type: 'left', userId: 'me' }, n)).toBe('You left the group');
+    } finally {
+      useStrings('ru', ru);
+    }
   });
 
   it('joins names', () => {

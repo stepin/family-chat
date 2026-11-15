@@ -99,7 +99,7 @@ impl IntoResponse for ApiError {
 /// disk is full).
 pub fn io_error(what: &str, e: std::io::Error) -> ApiError {
     if is_disk_full(&e) {
-        tracing::error!("{what}: диск заполнен: {e}");
+        tracing::error!("{what}: {}: {e}", crate::lang::l("диск заполнен", "disk full"));
         return ApiError::storage_full();
     }
     tracing::error!("{what}: {e}");

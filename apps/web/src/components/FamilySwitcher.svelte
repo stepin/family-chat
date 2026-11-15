@@ -1,19 +1,23 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import FamilyEmblem from './FamilyEmblem.svelte';
   import Icon from './Icon.svelte';
+  import { emblems } from '../lib/emblem.ts';
   import { app } from '../lib/app.svelte.ts';
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // Which family am I in now (M5, docs/PLAN.md 7.4): the family name in the
-  // chat list header is a button; it opens the list of families on this
-  // device with their unread counts, and "add a family". A dot with a count
-  // shows unread messages in the other families.
+  // Which family am I in now (M5, docs/PLAN.md 7.4). M7: shown only with
+  // several families, and without the family's name: a compact button with
+  // the family's emblem (a coloured circle with a symbol) and a dot with the
+  // unread count of the other families. Its name for screen readers is
+  // "Семьи". Names appear only in the sheet it opens (and in Settings).
   let dialog: HTMLDialogElement | undefined = $state();
   let opener: HTMLButtonElement | undefined = $state();
 
   const account = $derived(app.account!);
   const unread = $derived(app.unreadByAccount);
+  const marks = $derived(emblems(app.accounts.map((a) => a.id)));
   const elsewhere = $derived(app.accounts.filter((a) => a.id !== account.id).reduce((n, a) => n + (unread[a.id] ?? 0), 0));
 
   async function open(): Promise<void> {
@@ -40,16 +44,22 @@
   }
 </script>
 
-<h1 id="list-title" class="family">
-  <button bind:this={opener} class="switch" type="button" aria-haspopup="dialog" aria-label={t.families.switcher(account.familyName)} onclick={open} data-testid="family-switcher">
-    <span class="name">{account.familyName}</span>
-    <span class="chev"><Icon name="down" size={18} /></span>
-    {#if elsewhere > 0}
-      <span class="dot tabular" aria-hidden="true" data-testid="unread-elsewhere">{elsewhere}</span>
-      <span class="visually-hidden">{t.families.unreadElsewhere(elsewhere)}</span>
-    {/if}
-  </button>
-</h1>
+<button
+  bind:this={opener}
+  class="switch"
+  type="button"
+  aria-haspopup="dialog"
+  aria-describedby={elsewhere > 0 ? 'family-unread-elsewhere' : undefined}
+  onclick={open}
+  data-testid="family-switcher"
+>
+  {#if marks.get(account.id)}<FamilyEmblem emblem={marks.get(account.id)!} size={30} />{/if}
+  <span class="visually-hidden">{t.families.switcher}</span>
+  {#if elsewhere > 0}
+    <span class="dot tabular" aria-hidden="true" data-testid="unread-elsewhere">{elsewhere > 99 ? '99+' : elsewhere}</span>
+  {/if}
+</button>
+{#if elsewhere > 0}<span id="family-unread-elsewhere" class="visually-hidden">{t.families.unreadElsewhere(elsewhere)}</span>{/if}
 
 <dialog bind:this={dialog} class="menu" aria-labelledby="families-title" onclose={() => opener?.focus()} data-testid="family-menu">
   <div class="head">
@@ -61,6 +71,7 @@
       {@const n = unread[a.id] ?? 0}
       <li>
         <button class="item" type="button" aria-current={a.id === account.id ? 'true' : undefined} onclick={() => choose(a.id)} data-testid="family-item">
+          {#if marks.get(a.id)}<FamilyEmblem emblem={marks.get(a.id)!} size={32} />{/if}
           <span class="lines">
             <span class="fname">{a.familyName}</span>
             <span class="sub">{a.id === account.id ? t.families.current : new URL(a.serverUrl).host}</span>
@@ -83,23 +94,19 @@
 </dialog>
 
 <style>
-  .family {
-    min-width: 0;
-    flex: 1 1 auto;
-  }
-
   .switch {
+    position: relative;
     display: inline-flex;
     align-items: center;
-    gap: var(--sp-1);
-    max-width: 100%;
-    min-height: var(--touch);
-    padding: 0 var(--sp-2);
+    justify-content: center;
+    flex: 0 0 auto;
+    width: var(--touch);
+    height: var(--touch);
+    padding: 0;
     border: 0;
-    border-radius: var(--r-m);
+    border-radius: 50%;
     background: transparent;
     color: inherit;
-    font: inherit;
     cursor: pointer;
   }
 
@@ -107,19 +114,23 @@
     background: var(--surface-2);
   }
 
-  .name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .dot {
+    position: absolute;
+    top: 0;
+    right: -2px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border: 2px solid var(--surface);
+    border-radius: 10px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
   }
 
-  .chev {
-    display: inline-flex;
-    flex: 0 0 auto;
-    color: var(--muted);
-  }
-
-  .dot,
   .badge {
     flex: 0 0 auto;
     min-width: 22px;

@@ -5,55 +5,55 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="referrer" content="no-referrer" />
     <meta name="theme-color" content="#2f5d50" />
-    <title>Проверка сервера · Family Chat</title>
+    <title data-en="Server check · Family Chat">Проверка сервера · Family Chat</title>
     <link rel="icon" href="../icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="../apple-touch-icon.png" />
   </head>
   <body>
     <main>
-      <h1>Проверка сервера</h1>
-      <p class="muted">
+      <h1 data-en="Server check">Проверка сервера</h1>
+      <p class="muted" data-en="Stage M0v2: the server answers, a long request gets through, notifications arrive. Run the checks from a laptop and from every phone, at home and on mobile data, then copy the report.">
         Этап M0v2: сервер отвечает, длинный запрос проходит, уведомления доходят. Пройдите проверки с ноутбука и с
         каждого телефона, дома и в мобильной сети, затем скопируйте отчёт.
       </p>
 
       <section class="card" aria-labelledby="h-server">
-        <h2 id="h-server">Сервер</h2>
-        <label>Адрес сервера <input id="server" type="url" inputmode="url" autocomplete="off" spellcheck="false" /></label>
-        <div class="actions"><button id="hello-btn" type="button" class="secondary">Проверить адрес</button></div>
+        <h2 id="h-server" data-en="Server">Сервер</h2>
+        <label><span data-en="Server address">Адрес сервера</span> <input id="server" type="url" inputmode="url" autocomplete="off" spellcheck="false" /></label>
+        <div class="actions"><button id="hello-btn" type="button" class="secondary" data-en="Check the address">Проверить адрес</button></div>
         <p id="hello-status" role="status"></p>
         <dl id="hello"></dl>
       </section>
 
       <section class="card" aria-labelledby="h-checks">
-        <h2 id="h-checks">Проверки</h2>
+        <h2 id="h-checks" data-en="Checks">Проверки</h2>
         <label>
-          Код администратора
+          <span data-en="Admin code">Код администратора</span>
           <input id="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX" />
         </label>
-        <p class="muted">Код печатается при первом запуске сервера. В отчёт он не попадает.</p>
-        <p id="ios-hint" class="card hint" hidden>
+        <p class="muted" data-en="The server prints the code when it first starts. It never goes into the report.">Код печатается при первом запуске сервера. В отчёт он не попадает.</p>
+        <p id="ios-hint" class="card hint" hidden data-en="On iPhone and iPad notifications only work in the app added to the Home Screen: in Safari tap “Share”, then “Add to Home Screen”, open the app from the Home Screen and run the checks there.">
           На iPhone и iPad уведомления работают только в приложении, добавленном на экран «Домой»: в Safari нажмите
           «Поделиться», затем «На экран "Домой"», откройте приложение с экрана «Домой» и повторите проверки там.
         </p>
         <div class="actions">
           <button id="wait-btn" type="button">Проверить длинный запрос (25 с)</button>
-          <button id="notify-btn" type="button">Включить уведомления</button>
-          <button id="push-now-btn" type="button">Прислать пробное сейчас</button>
-          <button id="push-later-btn" type="button">Прислать через 1 минуту</button>
+          <button id="notify-btn" type="button" data-en="Turn on notifications">Включить уведомления</button>
+          <button id="push-now-btn" type="button" data-en="Send a test now">Прислать пробное сейчас</button>
+          <button id="push-later-btn" type="button" data-en="Send in 1 minute">Прислать через 1 минуту</button>
         </div>
         <p id="check-status" role="status"></p>
         <ul id="log" class="log"></ul>
       </section>
 
       <section class="card" aria-labelledby="h-report">
-        <h2 id="h-report">Отчёт</h2>
+        <h2 id="h-report" data-en="Report">Отчёт</h2>
         <div class="actions">
-          <button id="copy-btn" type="button">Скопировать отчёт</button>
-          <button id="clear-btn" type="button" class="secondary">Очистить журнал</button>
+          <button id="copy-btn" type="button" data-en="Copy report">Скопировать отчёт</button>
+          <button id="clear-btn" type="button" class="secondary" data-en="Clear log">Очистить журнал</button>
         </div>
         <p id="copy-status" role="status"></p>
-        <details><summary>Текст отчёта</summary><textarea id="report" rows="14" readonly></textarea></details>
+        <details><summary data-en="Report text">Текст отчёта</summary><textarea id="report" rows="14" readonly></textarea></details>
       </section>
     </main>
     <script type="module" src="../src/server/main.ts"></script>

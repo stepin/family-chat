@@ -6,7 +6,11 @@ Wants=network-online.target
 [Service]
 User=fcd
 Group=fcd
-ExecStart=/usr/local/bin/fcd --data /var/lib/family-chat --listen 127.0.0.1
+Environment=FCD_DATA=/var/lib/family-chat
+Environment=FCD_LISTEN=127.0.0.1
+# More settings, one VARIABLE=value per line (fcd --help lists them all); the file may be absent.
+EnvironmentFile=-/etc/family-chat/fcd.env
+ExecStart=/usr/local/bin/fcd
 Restart=on-failure
 TimeoutStopSec=20
 NoNewPrivileges=yes

@@ -5,7 +5,7 @@
 // No DOM: it needs fetch, IndexedDB, WebCrypto and timers, all present in a
 // worker. The web client runs it on the main thread.
 
-import { dmChatId, fingerprint, type AvatarRef, type IdentityKeys, type Location, type MsgRef, type PackSticker, type StickerRef } from '@family-chat/protocol';
+import { dmChatId, fingerprint, type AvatarRef, type Gender, type IdentityKeys, type Location, type MsgRef, type PackSticker, type StickerRef } from '@family-chat/protocol';
 import { Dexie, liveQuery } from 'dexie';
 import {
   AccountRuntime,
@@ -166,6 +166,8 @@ export interface Member {
   readonly verified: boolean;
   /** Avatar reference from the verified profile (blob: core.avatar()). */
   readonly avatar: AvatarRef | null;
+  /** Gender from the verified profile (M7); `m` when the profile has none or is unknown. */
+  readonly gender: Gender;
 }
 
 export interface ChatListItem {
@@ -543,8 +545,9 @@ export class FamilyChatCore {
     rt.outbox.kick();
   }
 
-  async updateProfile(accountId: string, name: string): Promise<void> {
-    await updateProfile(await this.#runtime(accountId), name);
+  /** Signs and uploads a new profile: a new name (a string, as before M7) or any of name and gender. */
+  async updateProfile(accountId: string, change: string | { readonly name?: string; readonly gender?: Gender }): Promise<void> {
+    await updateProfile(await this.#runtime(accountId), change);
   }
 
   /**
@@ -593,6 +596,7 @@ export class FamilyChatCore {
           revoked: !!u.revoked,
           verified: !!u.verifiedFingerprint && u.verifiedFingerprint === fingerprint(u),
           avatar: u.avatar ?? null,
+          gender: u.gender ?? 'm',
         }));
       },
       (e) => void this.#ctx.diag.error('db', `members query failed: ${String((e as Error)?.name)}`, accountId),

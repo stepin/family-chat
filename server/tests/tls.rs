@@ -23,6 +23,10 @@ struct Proc {
 impl Proc {
     fn spawn(args: &[&str]) -> Proc {
         let mut child = Command::new(env!("CARGO_BIN_EXE_fcd"))
+            .env_remove("LANG")
+            .env_remove("LC_ALL")
+            .env_remove("LC_MESSAGES")
+            .env_remove("FCD_LANG")
             .args(args)
             .env("NO_COLOR", "1")
             .env_remove("RUST_LOG")
@@ -165,6 +169,10 @@ async fn serves_https_with_own_certificate() {
         let port = port.to_string();
         move || {
             Command::new(env!("CARGO_BIN_EXE_fcd"))
+                .env_remove("LANG")
+                .env_remove("LC_ALL")
+                .env_remove("LC_MESSAGES")
+                .env_remove("FCD_LANG")
                 .args(["healthcheck", "--listen", "127.0.0.1", "--port", &port])
                 .output()
                 .unwrap()

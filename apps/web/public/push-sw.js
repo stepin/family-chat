@@ -8,6 +8,12 @@
 // `{chatId, gseq}` (docs/API.md 6); names come from the local database
 // (read-only, plain IndexedDB, nothing is created or changed). Text is not
 // decrypted here. Group chats show the group name (docs/PLAN-v2.md 7.7).
+//
+// M7: the title is the chat (the person, the group, "Избранное"), not the
+// family; the family's name is added only when several families share the
+// device, to tell them apart. The language is the app's (settings key
+// `ui.lang`, written by the app), else the first of ru/en in the system's
+// list, else Russian: the same rule as src/lib/locale.ts.
 
 const DB_NAME = 'family-chat';
 const LOOKUP_TIMEOUT_MS = 3000;
@@ -18,6 +24,56 @@ const MAX_BADGE = 9999;
 const MAX_SHARED_FILES = 10;
 const MAX_SHARED_BYTES = 1024 * 1024 * 1024;
 const MAX_SHARED_TEXT = 16 * 1024;
+const LANG_KEY = 'ui.lang';
+
+const TEXT = {
+  ru: {
+    message: 'Новое сообщение',
+    groupMessage: 'Новое сообщение в группе',
+    from: (name) => `Новое сообщение от ${name}`,
+    self: 'Новая запись в «Избранном»',
+    selfTitle: 'Избранное',
+    test: 'Пробное уведомление дошло.',
+    testLater: (s) => `Пробное уведомление дошло (отправлено через ${s} с).`,
+  },
+  en: {
+    message: 'New message',
+    groupMessage: 'New message in the group',
+    from: (name) => `New message from ${name}`,
+    self: 'New note in Saved Messages',
+    selfTitle: 'Saved Messages',
+    test: 'The test notification arrived.',
+    testLater: (s) => `The test notification arrived (sent ${s} s later).`,
+  },
+};
+
+/** The language stored by the app, or null (no database or no setting). */
+async function readLangPref() {
+  try {
+    const db = await openExisting();
+    try {
+      if (!db.objectStoreNames.contains('settings')) return null;
+      const row = await request(db.transaction('settings', 'readonly').objectStore('settings').get(LANG_KEY));
+      return row ? row.value : null;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+/** The app's choice ('ru', 'en'), or the system's languages when it is 'system' or unknown. */
+function pickLang(pref) {
+  if (pref === 'ru' || pref === 'en') return pref;
+  const nav = self.navigator || {};
+  const list = nav.languages && nav.languages.length ? nav.languages : [nav.language || ''];
+  for (const tag of list) {
+    const primary = String(tag).toLowerCase().split(/[-_]/)[0];
+    if (primary === 'ru' || primary === 'en') return primary;
+  }
+  return 'ru';
+}
 
 function request(req) {
   return new Promise((resolve, reject) => {
@@ -46,7 +102,12 @@ async function lookup(chatId) {
   const db = await openExisting();
   try {
     const names = ['accounts', 'chats', 'users'];
-    if (!names.every((n) => db.objectStoreNames.contains(n))) return {};
+    let langPref = null;
+    if (db.objectStoreNames.contains('settings')) {
+      const row = await request(db.transaction('settings', 'readonly').objectStore('settings').get(LANG_KEY));
+      langPref = row ? row.value : null;
+    }
+    if (!names.every((n) => db.objectStoreNames.contains(n))) return { langPref };
     const withGroups = db.objectStoreNames.contains('groups');
     const tx = db.transaction(withGroups ? [...names, 'groups'] : names, 'readonly');
     const chats = typeof chatId === 'string' ? await request(tx.objectStore('chats').index('chatId').getAll(chatId)) : [];
@@ -75,19 +136,26 @@ async function lookup(chatId) {
       groupName,
       group: !!chat && chat.kind === 'group',
       self,
+      severalFamilies: accounts.length > 1,
+      langPref,
     };
   } finally {
     db.close();
   }
 }
 
-/** Title and text of the notification (no message text: it is not decrypted here). */
+/**
+ * Title and text of the notification (no message text: it is not decrypted
+ * here). The family's name only tells families apart (several on the device).
+ */
 function describe(info) {
-  if (info.group) {
-    return { title: info.groupName || info.familyName || 'Family Chat', body: 'Новое сообщение в группе' };
-  }
-  if (info.self) return { title: info.familyName || 'Family Chat', body: 'Новая запись в «Избранном»' };
-  return { title: info.familyName || 'Family Chat', body: info.peerName ? `Новое сообщение от ${info.peerName}` : 'Новое сообщение' };
+  const t = TEXT[pickLang(info.langPref)];
+  const family = info.severalFamilies && info.familyName ? info.familyName : null;
+  const withFamily = (body) => (family ? `${body} · ${family}` : body);
+  if (info.group) return { title: info.groupName || family || 'Family Chat', body: withFamily(t.groupMessage) };
+  if (info.self) return { title: t.selfTitle, body: withFamily(t.self) };
+  if (info.peerName) return { title: info.peerName, body: withFamily(t.message) };
+  return { title: family || 'Family Chat', body: t.message };
 }
 
 /**
@@ -145,8 +213,11 @@ self.addEventListener('push', (event) => {
     const receivedAt = Date.now();
     event.waitUntil(
       (async () => {
+        // The text is chosen here, in the app's language (M7); older servers sent their own.
+        const t = TEXT[pickLang(await readLangPref())];
+        const delay = typeof data.delay === 'number' && data.delay > 0 ? data.delay : 0;
         await self.registration.showNotification(data.title || 'Family Chat', {
-          body: data.body || 'Новое сообщение',
+          body: data.body || (delay ? t.testLater(delay) : t.test),
           icon,
           badge: icon,
           tag: `fc-m0-${sentAt || receivedAt}`,
@@ -187,7 +258,7 @@ self.addEventListener('push', (event) => {
           data: { url, chatId, accountId },
         });
       } catch {
-        await self.registration.showNotification('Family Chat', { body: 'Новое сообщение', icon, data: { url, chatId, accountId } });
+        await self.registration.showNotification('Family Chat', { body: TEXT[pickLang(info.langPref)].message, icon, data: { url, chatId, accountId } });
       }
     })(),
   );

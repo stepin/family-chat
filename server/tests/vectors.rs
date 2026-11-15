@@ -146,3 +146,24 @@ fn sticker_pack_vectors() {
         assert!(refused, "{name} must be refused");
     }
 }
+
+/// M7: the optional `gender` field of a profile, the same rule as the protocol package.
+#[test]
+fn profile_gender_vectors() {
+    let users = users();
+    let v = load("profile-gender.json");
+    let alice = user_id(&users, "alice");
+    let k = key(&users, "alice");
+    for p in v["profiles"].as_array().unwrap() {
+        let prof = envelope::verify_profile(&env(&p["envelope"]), &alice, &k)
+            .unwrap_or_else(|e| panic!("{}: {e:?}", p["name"]));
+        assert_eq!(prof.gender.as_str(), p["gender"].as_str().unwrap(), "{}", p["name"]);
+    }
+    for c in v["negative"].as_array().unwrap() {
+        assert!(
+            envelope::verify_profile(&env(&c["envelope"]), &alice, &k).is_err(),
+            "{} must be rejected",
+            c["name"]
+        );
+    }
+}

@@ -26,6 +26,7 @@
   });
   const others = $derived(app.members.filter((m) => !m.isMe && !m.removed && !m.revoked));
   const memberById = $derived(new Map(app.members.map((m) => [m.userId, m])));
+  const me = $derived(app.members.find((m) => m.isMe));
   const names = $derived(displayNames(app.members.filter((m) => !m.isMe), t.common.unknownName));
   const removed = $derived(account.status === 'removed' || app.connection[account.id]?.kind === 'removed');
   const openChatId = $derived(nav.top.name === 'chat' ? nav.top.chatId : null);
@@ -142,8 +143,8 @@
     }
     if (c.kind === 'dm') {
       const peer = c.peerId ? memberById.get(c.peerId) : undefined;
-      if (c.peerRevoked) out.push(t.list.revokedPeer);
-      else if (c.peerRemoved) out.push(t.list.removedPeer);
+      if (c.peerRevoked) out.push(t.list.revokedPeer(peer?.gender ?? 'm'));
+      else if (c.peerRemoved) out.push(t.list.removedPeer(peer?.gender ?? 'm'));
       else if (peer?.keyChanged) out.push(t.list.keyChanged);
     }
     return out;
@@ -164,8 +165,13 @@
 </script>
 
 <section class="screen" aria-labelledby="list-title">
+  <!-- M7: no family name at the top. My avatar opens Settings; the switcher appears only with several families. -->
   <header class="screen-header">
-    <FamilySwitcher />
+    <button class="icon-btn me" type="button" aria-label={t.list.openSettings} onclick={() => nav.push({ name: 'settings' })} data-testid="open-settings">
+      <Avatar accountId={account.id} userId={account.userId} name={me?.name ?? null} hasAvatar={!!me?.avatar} size={34} />
+    </button>
+    <h1 id="list-title" class="list-title">{t.list.title}</h1>
+    {#if app.accounts.length > 1}<FamilySwitcher />{/if}
     <button class="icon-btn" type="button" aria-label={t.search.open} onclick={() => nav.push({ name: 'search' })} data-testid="open-search">
       <Icon name="search" />
     </button>
@@ -174,9 +180,6 @@
         <Icon name="plus" />
       </button>
     {/if}
-    <button class="icon-btn" type="button" aria-label={t.list.openSettings} onclick={() => nav.push({ name: 'settings' })}>
-      <Icon name="settings" />
-    </button>
   </header>
   <StatusLine {account} />
 
@@ -184,10 +187,10 @@
     {#if removed}
       <div class="banner error" role="alert">
         {#if account.revoked}
-          <strong>{t.status.revoked(account.familyName)}</strong>
+          <strong>{t.status.revoked(app.familyLabel(account.familyName))}</strong>
           <p>{t.status.revokedText}</p>
         {:else}
-          <strong>{t.status.removed(account.familyName)}</strong>
+          <strong>{t.status.removed(app.familyLabel(account.familyName))}</strong>
           <p>{t.status.removedText}</p>
         {/if}
       </div>
@@ -310,6 +313,14 @@
 </section>
 
 <style>
+  .list-title {
+    padding-left: var(--sp-1);
+  }
+
+  .me {
+    overflow: hidden;
+  }
+
   .body {
     flex: 1 1 auto;
     min-height: 0;

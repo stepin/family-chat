@@ -28,6 +28,9 @@ export default defineConfig({
   reporter: process.env['CI'] ? [['list'], ['html', { open: 'never' }]] : 'list',
   globalSetup: './e2e/support/global-setup.ts',
   use: {
+    // M7: the app picks its language from the browser; the tests find controls by their Russian names.
+    // English is covered by e2e/english.spec.ts, which asks for en-US itself.
+    locale: 'ru-RU',
     trace: 'retain-on-failure',
   },
   projects: [

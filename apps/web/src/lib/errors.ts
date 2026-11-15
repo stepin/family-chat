@@ -34,7 +34,7 @@ export function errorText(e: unknown): string {
   if (isCoreError(e, 'unsupported-server')) return t.errors.unsupported;
   if (isCoreError(e, 'removed') || isApiError(e, 'removed')) return t.errors.removed;
   if (isCoreError(e, 'revoked') || isApiError(e, 'revoked')) return t.errors.revoked;
-  if (isCoreError(e, 'peer-revoked')) return t.chat.peerRevokedComposer;
+  if (isCoreError(e, 'peer-revoked')) return t.chat.peerRevokedComposer('m');
   if (isCoreError(e, 'not-owner')) return t.group.notOwner;
   if (isCoreError(e, 'not-member') || isApiError(e, 'not_member')) return t.group.notMember;
   if (isCoreError(e, 'owner-cannot-leave')) return t.group.leaveOwnerText;
