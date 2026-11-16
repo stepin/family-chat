@@ -70,7 +70,6 @@ const UI = {
     switchLang: 'en',
     source: 'Исходный код',
     licence: 'Лицензия MIT.',
-    notAudited: 'Криптография не проходила независимый аудит.',
     homeTitle: 'Family Chat: семейный чат на своём сервере',
     notFoundTitle: 'Страница не найдена',
     notFoundText: 'Такой страницы нет. Возможно, адрес набран с ошибкой.',
@@ -93,7 +92,6 @@ const UI = {
     switchLang: 'ru',
     source: 'Source code',
     licence: 'MIT licence.',
-    notAudited: 'The cryptography has not been independently audited.',
     homeTitle: 'Family Chat: a family chat on your own server',
     notFoundTitle: 'Page not found',
     notFoundText: 'There is no such page. The address may be mistyped.',
@@ -285,7 +283,7 @@ function layout({ page, title, description, main }) {
 ${main}
 </main>
 <footer class="site-footer">
-<p>Family Chat ${esc(version())}. ${ui.licence} ${ui.notAudited} ${repoLine}</p>
+<p>Family Chat ${esc(version())}. ${ui.licence} ${repoLine}</p>
 </footer>
 </body>
 </html>
