@@ -101,41 +101,39 @@ test('a missing page answers 404 with the site layout', async ({ page }) => {
   await expect(page.locator('link[rel="stylesheet"]')).toHaveAttribute('href', `${base}site.css`);
 });
 
-test('the web client works from the app/ subpath: assets, manifest and service worker stay inside it', async ({ page, baseURL }) => {
-  const problems = guard(page, new URL(baseURL!).origin);
-  const violations: string[] = [];
-  await page.addInitScript(() => {
-    document.addEventListener('securitypolicyviolation', (e) => console.error(`[csp] ${e.violatedDirective} ${e.blockedURI}`));
-  });
-  page.on('console', (m) => {
-    if (m.text().startsWith('[csp]')) violations.push(m.text());
-  });
-  await page.goto('/app/');
-  await expect(page.getByRole('heading', { name: 'Семейный чат' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Настроить для своей семьи' })).toBeVisible();
+test('the menu: every item on one line, the current one marked but not moved (M8)', async ({ page }) => {
+  for (const path of ['/', '/install/', '/en/', '/en/faq/']) {
+    for (const width of [360, 1280]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto(path);
+      const links = page.locator('.site-header nav a');
+      const boxes = await links.evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ y: r.y, h: r.height })));
+      expect(boxes.length).toBe(5);
+      // At 360 px the menu may wrap: items on the first row share its top.
+      const firstRow = boxes.filter((b) => Math.abs(b.y - boxes[0]!.y) < b.h / 2);
+      expect(firstRow.length, `${path} at ${width}px`).toBeGreaterThanOrEqual(width >= 1280 ? 5 : 2);
+      for (const b of firstRow) expect(b.y, `${path} at ${width}px`).toBe(boxes[0]!.y);
+      for (const b of boxes) expect(b.h).toBe(boxes[0]!.h);
+      const style = (sel: string) =>
+        page.locator(sel).first().evaluate((e) => {
+          const s = getComputedStyle(e);
+          return { color: s.color, border: s.borderBottomColor };
+        });
+      const current = await style('.site-header nav a[aria-current="page"]');
+      const other = await style('.site-header nav a:not([aria-current])');
+      expect(current.color).not.toBe(other.color);
+      expect(current.border).not.toBe(other.border);
+    }
+  }
+});
 
-  // Every file the client loaded came from /app/.
-  const loaded = await page.evaluate(() => performance.getEntriesByType('resource').map((e) => new URL(e.name).pathname));
-  for (const path of loaded) expect(path.startsWith('/app/'), path).toBe(true);
-
-  const manifestHref = await page.locator('link[rel="manifest"]').getAttribute('href');
-  const manifestUrl = new URL(manifestHref!, page.url());
-  expect(manifestUrl.pathname).toBe('/app/manifest.webmanifest');
-  const manifest = (await (await page.request.get(manifestUrl.href)).json()) as { start_url: string; scope: string };
-  expect(new URL(manifest.start_url, manifestUrl).pathname).toBe('/app/');
-  expect(new URL(manifest.scope, manifestUrl).pathname).toBe('/app/');
-
-  // The service worker registers on load with the app's own scope.
-  const scope = await page.evaluate(async () => {
-    const reg = await navigator.serviceWorker.ready;
-    return new URL(reg.scope).pathname;
-  });
-  expect(scope).toBe('/app/');
-
-  // The site pages stay outside the worker's reach.
+test('no app on the site: no app/ and no links to it (M8)', async ({ page }) => {
+  for (const path of ['/', '/en/', '/install/']) {
+    await page.goto(path);
+    await expect(page.locator('a[href*="app/"]')).toHaveCount(0);
+  }
   await page.goto('/');
-  const controlled = await page.evaluate(() => navigator.serviceWorker.controller !== null);
-  expect(controlled).toBe(false);
-  expect(violations).toEqual([]);
-  expect(problems.filter((p) => !p.startsWith('console: [csp]'))).toEqual([]);
+  await expect(page.getByRole('heading', { name: 'Где открыть приложение' })).toBeVisible();
+  const res = await page.goto('/app/');
+  expect(res?.status()).toBe(404);
 });

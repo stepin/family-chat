@@ -103,7 +103,7 @@ async fn full_pack(srv: &TestServer, m: &Member, pack: &PackId) -> Vec<Vec<u8>> 
 #[tokio::test]
 async fn publish_list_fetch_and_delete() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let pack = new_pack();
 
@@ -212,7 +212,7 @@ async fn publish_list_fetch_and_delete() {
 #[tokio::test]
 async fn files_are_checked() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, _) = family(&srv).await;
     let pack = new_pack();
 
@@ -278,7 +278,7 @@ async fn files_are_checked() {
 #[tokio::test]
 async fn manifests_are_checked() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let sid = srv.server_id();
     let pack = new_pack();
@@ -396,7 +396,7 @@ async fn manifests_are_checked() {
 #[tokio::test]
 async fn pack_limits() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, _) = family(&srv).await;
 
     // At most 200 files in one pack.
@@ -426,7 +426,7 @@ async fn pack_limits() {
 async fn packs_survive_a_restart_and_drafts_expire() {
     let tmp = tempfile::tempdir().unwrap();
     let data = tmp.path().join("data");
-    let srv = start(&data, false, Overrides::default()).await;
+    let srv = start(&data, Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let pack = new_pack();
     let files = full_pack(&srv, &mama, &pack).await;
@@ -435,7 +435,7 @@ async fn packs_survive_a_restart_and_drafts_expire() {
     let before = papa.get(&srv, "/v1/packs").await.json();
     srv.stop().await;
 
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     let after = papa.get(&srv, "/v1/packs").await.json();
     assert_eq!(after, before);
     let f = papa
@@ -469,7 +469,7 @@ async fn packs_survive_a_restart_and_drafts_expire() {
 #[tokio::test]
 async fn hello_and_cors_mention_m5() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let h = get(&srv.url("/v1/hello")).await.json();
     assert_eq!(h["maxPackStickers"], fcd::envelope::MAX_PACK_STICKERS);
     assert_eq!(h["maxPackBytes"], fcd::envelope::MAX_PACK_BYTES);
@@ -508,7 +508,7 @@ async fn older_folder_gets_packs() {
     let data = tmp.path().join("data");
     copy_dir(&fixture, &data);
     assert!(!data.join("packs").exists());
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     assert!(data.join("packs").is_dir());
     let server: Value = serde_json::from_slice(&std::fs::read(data.join("server.json")).unwrap()).unwrap();
     assert_eq!(
@@ -597,7 +597,7 @@ async fn post_with(srv: &TestServer, m: &Member, chat: &fcd::ids::ChatId, hint: 
 async fn no_push_hint_skips_the_notification() {
     let (service, fake) = fake_push().await;
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     assert_eq!(
         papa.send(

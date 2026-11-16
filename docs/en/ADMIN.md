@@ -18,7 +18,7 @@ The app speaks English and Russian. Server messages in the terminal are in Engli
 
 ## Download
 
-Ready-made files are published on the releases page: https://code.example.org/family-chat/releases. Next to them
+Ready-made files are published on the releases page: https://github.com/stepin/family-chat/releases. Next to them
 is `SHA256SUMS` with checksums. Pick the file for your device:
 
 | Device | File |
@@ -29,7 +29,7 @@ is `SHA256SUMS` with checksums. Pick the file for your device:
 | Mac with Apple Silicon (M1 and newer) | `fcd-<version>-aarch64-apple-darwin.tar.gz` |
 | Mac with Intel | `fcd-<version>-x86_64-apple-darwin.tar.gz` |
 | Windows (64-bit) | `fcd-<version>-x86_64-pc-windows-msvc.zip` |
-| Docker or Podman | image `registry.example.org/family-chat/fcd` (section [Docker](#docker)) |
+| Docker or Podman | image `ghcr.io/stepin/fcd` (section [Docker](#docker)) |
 
 On Linux, `uname -m` shows the processor: `x86_64`, `aarch64` or `armv7l`. The Linux builds are static: they need
 no system libraries and work on any distribution.
@@ -102,6 +102,11 @@ The code works once: whoever joins with it becomes an administrator and the code
 `reset-admin-code` is one-time as well; it helps when every administrator has lost access. Relatives join with
 invitations.
 
+While the code is active, the app's first screen offers everyone "Set up for my family". After `reset-admin-code`
+the button is back for everyone until someone joins with the new code: that is the point, the code is reset so that
+a new administrator can join. Checking the server does not need a reset: the administrator checks it in the app
+(section [Server check](#server-check)).
+
 ### A second administrator
 
 An administrator issues invitations, disconnects members and sees disk usage. To make another member an
@@ -137,9 +142,20 @@ anything.
 | `--lang` | `FCD_LANG` | `lang` | see below | language of the server's messages: `ru` or `en` |
 | `--tls-cert`, `--tls-key` | `FCD_TLS_CERT`, `FCD_TLS_KEY` | | | HTTPS with your own certificate files (both are needed) |
 | `--web-dir` | `FCD_WEB_DIR` | | | serve the app from a folder (development) |
-| `--m0` | `FCD_M0` | | `false` | check endpoints of the `/server/` page |
-| | | `push_subject` | `mailto:fcd-admin@example.org` | contact for the Apple, Google and Mozilla push services |
-| | | `min_free_mb` | `100` | below this much free space the server refuses new data |
+| `--push-subject` | `FCD_PUSH_SUBJECT` | `push_subject` | `mailto:fcd-admin@example.org` | contact for the Apple, Google and Mozilla push services: `mailto:` or `https://` |
+| `--min-free-mb` | `FCD_MIN_FREE_MB` | `min_free_mb` | `100` | below this much free space, MB, the server refuses new data; `0`: no check |
+| `--offer-setup` | `FCD_OFFER_SETUP` | `offer_setup` | `false` | offer "Set up for my family" even when the server already has its family |
+
+**Contact for push services.** Some push services reject the default `mailto:fcd-admin@example.org`. Set your own:
+`--push-subject mailto:you@example.com` (or `FCD_PUSH_SUBJECT`, or `push_subject` in `config.toml`). A wrong value
+stops the server with an error that names the source and the value.
+
+**One family per server.** The server holds one family. While it has no administrator, the app's first screen
+offers "Set up for my family"; once the administrator has joined, the button is gone and a line under the actions
+says the server already has a family and one joins by invitation. With `--offer-setup true` the button stays: the
+web app offers to set up a new family on another server (the address field is empty; one types the address of
+their own server). The server still holds one family. Note that whoever sets up a family through the app of
+someone else's server also trusts that server's owner ([security model](SECURITY-MODEL.md)).
 
 The commands `healthcheck`, `reset-admin-code` and `admin` read the same variables where they apply (`FCD_DATA`,
 `FCD_PORT`, `FCD_LISTEN`, `FCD_LANG`). Other `FCD_*` names are ignored (`FCD_GIT_COMMIT` and `FCD_BIN` belong to the
@@ -166,7 +182,9 @@ through:
   timeout must be longer (for example 90 seconds), or the connection keeps dropping.
 - **Bodies up to 5 MB.** Files are uploaded in 4 MiB parts, one request per part.
 - **The `X-Forwarded-For` header**, so that the limit on wrong codes counts real addresses. Then start the server
-  with `--trust-forwarded-for true`. Without a proxy leave it off: anyone can forge the header.
+  with `--trust-forwarded-for true`. Without a proxy leave it off: anyone can forge the header. Behind a proxy
+  without it, every request comes from the proxy's address, and wrong sign-in attempts and server checks of the
+  whole family share one counter (10 a minute); so turn it on behind your own proxy.
 
 If the proxy runs on the same computer, start the server with `--listen 127.0.0.1` so that nobody can bypass the
 proxy.
@@ -217,7 +235,7 @@ them against a real server.
 `http://<computer with fcd>:8787`. Cloudflare Tunnel: no port forwarding needed, but HTTPS ends at Cloudflare and
 Cloudflare sees the requests (the messages stay encrypted). KeenDNS on Keenetic routers with a domain for a device
 in the home network: we have not tried this. Whatever you choose, test the long request on the
-[server check page](#the-server-check-page-server).
+[server check page](#server-check).
 
 ### Your own certificate files
 
@@ -241,9 +259,12 @@ A health check is built in: `fcd healthcheck`.
 ```sh
 docker run -d --name fcd --restart unless-stopped \
   -p 127.0.0.1:8787:8787 -v fcd-data:/data \
-  registry.example.org/family-chat/fcd:latest
-docker logs fcd 2>&1 | grep 'код администратора'
+  ghcr.io/stepin/fcd:latest
+docker logs fcd 2>&1 | grep -E 'код администратора|admin code'
 ```
+
+`latest` is the latest release. To pin a version, use its tag, for example `ghcr.io/stepin/fcd:0.1.0` (the same
+versions as on the [releases page](https://github.com/stepin/family-chat/releases), without the `v`).
 
 Settings are passed as environment variables, for example `-e FCD_TRUST_FORWARDED_FOR=true` (flags after the image
 name work too: `... fcd:latest --trust-forwarded-for true`). The image sets `FCD_DATA=/data`. The built-in health
@@ -258,7 +279,7 @@ Docker Compose, the [compose.yaml](../../compose.yaml) file in the repository ro
 ```yaml
 services:
   fcd:
-    image: registry.example.org/family-chat/fcd:latest
+    image: ghcr.io/stepin/fcd:latest
     restart: unless-stopped
     ports:
       - "127.0.0.1:8787:8787"
@@ -278,7 +299,7 @@ Server commands in a container (with the server stopped):
 
 ```sh
 docker stop fcd
-docker run --rm -v fcd-data:/data registry.example.org/family-chat/fcd:latest reset-admin-code
+docker run --rm -v fcd-data:/data ghcr.io/stepin/fcd:latest reset-admin-code
 docker start fcd
 ```
 
@@ -295,7 +316,7 @@ Podman runs a container as a systemd service from a `.container` file. For your 
 Description=Family Chat server (fcd)
 
 [Container]
-Image=registry.example.org/family-chat/fcd:latest
+Image=ghcr.io/stepin/fcd:latest
 ContainerName=fcd
 PublishPort=127.0.0.1:8787:8787
 Volume=fcd-data:/data
@@ -388,7 +409,7 @@ The data folder format has a version number. A new server upgrades an older fold
 not start on a newer folder. So make a backup before updating (next section): it is the only way back.
 
 - **Binary:** stop the server, replace `fcd`, start.
-- **Docker:** `docker pull registry.example.org/family-chat/fcd:latest`, then remove and recreate the container
+- **Docker:** `docker pull ghcr.io/stepin/fcd:latest`, then remove and recreate the container
   with the same volume (`docker compose pull && docker compose up -d`).
 - **Podman Quadlet:** updates itself (`AutoUpdate=registry`) or with `podman auto-update`.
 
@@ -443,19 +464,23 @@ lives only on phones and in archive files ([family guide](FAMILY.md#message-arch
   received stays with everyone. Owners of groups they were in get a service message.
 - Wrong codes and signatures are limited: at most 10 failures per minute from one address.
 
-## The server check page `/server/`
+## Server check
 
-`https://<your server>/server/` opens the check page. It helps during the first setup and when something does not
-work:
+Two checks show whether all is well between a phone and the server: the **long request** (whether a 25-second wait
+gets through your proxy or tunnel; if it breaks earlier, raise the proxy's timeout) and the **test notification**
+(whether notifications reach this phone). The checks are always on; no flag is needed.
 
-- "the server answers": family name, version, retention, the clock difference between device and server;
-- "check the long request": whether a 25-second wait gets through your proxy or tunnel. If it breaks earlier,
-  raise the proxy's timeout;
-- "enable notifications" and "send a test": whether notifications reach this phone.
+- **Before setup**, while nobody has joined with the admin code: the page `https://<your server>/server/` with the
+  admin code. It also shows that the server answers: family name, version, retention, the clock difference.
+- **After setup**: in the administrator's app, Settings → Family and server → Server check. The admin code is used
+  up by then; the app checks the server with its own sign-in. Ordinary members do not see the section; their
+  Diagnostics says the administrator does the check.
 
-The long request and the test notification work only when the server runs with `--m0`, and they need the
-administrator code. Restart the server without `--m0` afterwards. There is also a device check page, `/device/`:
-what this phone's browser can do.
+After the administrator has joined, the code no longer works on `/server/`, and the page says where the checks are
+now. Wrong codes count together with sign-in attempts (10 a minute from one address). If a notification did not
+arrive, the server log lines `test push sent` and `delayed test push failed` show what the push service answered.
+
+There is also a device check page, `/device/`: what this phone's browser can do.
 
 ## Is the server alive
 

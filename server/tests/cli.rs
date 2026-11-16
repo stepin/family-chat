@@ -272,3 +272,51 @@ fn settings_from_the_environment() {
     );
     assert_eq!(wrong.status.code(), Some(1), "{}", text(&wrong));
 }
+
+#[test]
+fn removed_m0_flag_stops_with_a_hint() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path().to_str().unwrap();
+    let ru = run(&["--data", data, "--m0"], &[]);
+    assert_eq!(ru.status.code(), Some(2));
+    let first = text(&ru).lines().next().unwrap_or_default().to_string();
+    assert!(
+        first.contains("--m0 убран в M8") && first.contains("Проверка сервера"),
+        "{first}"
+    );
+    let en = run(&["--data", data, "--m0", "--lang", "en"], &[]);
+    assert_eq!(en.status.code(), Some(2));
+    let t = text(&en);
+    assert!(t.contains("--m0 was removed in M8") && !has_cyrillic(&t), "{t}");
+    // Nothing was created: the server did not start.
+    assert!(!tmp.path().join("config.toml").exists());
+}
+
+#[test]
+fn fcd_m0_variable_gives_one_warning() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path().to_str().unwrap();
+    let mut srv = Server::start(
+        &[
+            "--data",
+            data,
+            "--listen",
+            "127.0.0.1",
+            "--port",
+            "0",
+            "--push",
+            "false",
+            "--lang",
+            "en",
+        ],
+        &[
+            ("FCD_M0", "1"),
+            ("FCD_PUSH_SUBJECT", "mailto:me@example.com"),
+            ("FCD_MIN_FREE_MB", "0"),
+        ],
+    );
+    srv.wait_line("listening on 127.0.0.1:");
+    srv.wait_line("admin code: ");
+    let warnings = srv.seen.iter().filter(|l| l.contains("FCD_M0")).count();
+    assert_eq!(warnings, 1, "{}", srv.seen.join("\n"));
+}

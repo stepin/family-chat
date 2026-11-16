@@ -71,7 +71,7 @@ async fn four(srv: &TestServer) -> (Member, Member, Member, Member) {
 #[tokio::test]
 async fn delete_permissions_in_direct_chats_and_groups() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa, son, daughter) = four(&srv).await;
     let sid = srv.server_id();
 
@@ -145,7 +145,7 @@ async fn delete_permissions_in_direct_chats_and_groups() {
 #[tokio::test]
 async fn deleted_record_shape_notice_and_idempotency() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa, son, _) = four(&srv).await;
     let g = create_group(&srv, &mama, &[&mama, &papa]).await;
     let msg = new_msg_id();
@@ -222,7 +222,7 @@ async fn deleted_record_shape_notice_and_idempotency() {
 async fn deletion_survives_restart() {
     let tmp = tempfile::tempdir().unwrap();
     let data = tmp.path().to_path_buf();
-    let srv = start(&data, false, Overrides::default()).await;
+    let srv = start(&data, Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let dm = mama.chat_with(&srv.server_id(), &papa);
     let a = post(&srv, &mama, &dm, b"FC1 one").await;
@@ -231,7 +231,7 @@ async fn deletion_survives_restart() {
     assert_eq!(delete(&srv, &mama, &dm, b).await.status, 204);
     srv.stop().await;
 
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     let feed = papa.feed(&srv, 0).await;
     assert_eq!(b64d(&by_gseq(&feed, a).unwrap()["body"]), b"FC1 one");
     assert_eq!(by_gseq(&feed, b).unwrap()["deleted"], true);
@@ -245,7 +245,7 @@ async fn deletion_survives_restart() {
     assert_eq!(delete(&srv, &papa, &dm, d).await.status, 204);
     srv.stop().await;
 
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     let feed = mama.feed(&srv, 0).await;
     assert_eq!(by_gseq(&feed, d).unwrap()["deleted"], true);
     assert_eq!(by_gseq(&feed, b).unwrap()["deleted"], true);

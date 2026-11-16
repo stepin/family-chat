@@ -7,7 +7,7 @@ use axum::body::Bytes;
 use axum::http::HeaderMap;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
-use common::{decrypt, get, request, start};
+use common::{decrypt, family, get, request, start};
 use fcd::config::Overrides;
 use p256::SecretKey;
 
@@ -19,7 +19,7 @@ async fn hello_reports_server_info() {
         retention_days: Some(30),
         ..Default::default()
     };
-    let srv = start(tmp.path(), false, flags).await;
+    let srv = start(tmp.path(), flags).await;
     let res = get(&srv.url("/v1/hello")).await;
     assert_eq!(res.status, 200);
     assert_eq!(res.header("access-control-allow-origin"), Some("*"));
@@ -45,7 +45,8 @@ async fn hello_reports_server_info() {
     assert_eq!(j["maxSealedKeyBytes"], 8192);
     assert_eq!(j["maxGroupMembers"], 100);
     assert_eq!(j["push"], true);
-    assert_eq!(j["m0"], false);
+    assert!(j.get("m0").is_none(), "m0 was removed in M8");
+    assert_eq!(j["offerSetup"], false);
     let key = B64.decode(j["vapidPublicKey"].as_str().unwrap()).unwrap();
     assert_eq!(key.len(), 65);
     assert_eq!(key[0], 4);
@@ -62,7 +63,6 @@ async fn hello_without_push_has_no_key() {
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(
         tmp.path(),
-        false,
         Overrides {
             push: Some(false),
             ..Default::default()
@@ -77,8 +77,8 @@ async fn hello_without_push_has_no_key() {
 #[tokio::test]
 async fn cors_preflight_and_errors() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), true, Overrides::default()).await;
-    for path in ["/v1/hello", "/v1/m0/wait", "/v1/does-not-exist"] {
+    let srv = start(tmp.path(), Overrides::default()).await;
+    for path in ["/v1/hello", "/v1/check/wait", "/v1/does-not-exist"] {
         let res = request(
             "OPTIONS",
             &srv.url(path),
@@ -103,7 +103,7 @@ async fn cors_preflight_and_errors() {
     // Errors carry CORS too, so a page on another origin can read them.
     let res = request(
         "GET",
-        &srv.url("/v1/m0/wait?seconds=0"),
+        &srv.url("/v1/check/wait?seconds=0"),
         &[("Origin", "https://client.example")],
         None,
     )
@@ -117,45 +117,39 @@ async fn cors_preflight_and_errors() {
 }
 
 #[tokio::test]
-async fn m0_endpoints_closed_without_flag() {
+async fn hello_reports_offer_setup() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
-    let auth = format!("Bearer {}", srv.admin_code);
-    let res = request(
-        "GET",
-        &srv.url("/v1/m0/wait?seconds=0"),
-        &[("Authorization", &auth)],
-        None,
+    let srv = start(
+        tmp.path(),
+        Overrides {
+            offer_setup: Some(true),
+            ..Default::default()
+        },
     )
     .await;
-    assert_eq!(res.status, 404);
-    let res = request(
-        "POST",
-        &srv.url("/v1/m0/push"),
-        &[("Authorization", &auth), ("Content-Type", "application/json")],
-        Some("{}"),
-    )
-    .await;
-    assert_eq!(res.status, 404);
+    assert_eq!(get(&srv.url("/v1/hello")).await.json()["offerSetup"], true);
 }
 
 #[tokio::test]
-async fn m0_endpoints_need_admin_code() {
+async fn check_endpoints_need_admin_code() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), true, Overrides::default()).await;
-    let res = get(&srv.url("/v1/m0/wait?seconds=0")).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
+    // Always on (M8): no value is 401, not 404.
+    let res = get(&srv.url("/v1/check/wait?seconds=0")).await;
     assert_eq!(res.status, 401);
+    assert_eq!(res.json()["error"], "unauthorized");
     let res = request(
         "GET",
-        &srv.url("/v1/m0/wait?seconds=0"),
+        &srv.url("/v1/check/wait?seconds=0"),
         &[("Authorization", "Bearer 0000-0000-0000-0000")],
         None,
     )
     .await;
     assert_eq!(res.status, 401);
+    assert_eq!(res.json()["error"], "unauthorized");
     let res = request(
         "POST",
-        &srv.url("/v1/m0/push"),
+        &srv.url("/v1/check/push"),
         &[("Content-Type", "application/json")],
         Some("{}"),
     )
@@ -165,7 +159,7 @@ async fn m0_endpoints_need_admin_code() {
     let loose = format!("Bearer {}", srv.admin_code.to_lowercase().replace('-', ""));
     let res = request(
         "GET",
-        &srv.url("/v1/m0/wait?seconds=0"),
+        &srv.url("/v1/check/wait?seconds=0"),
         &[("Authorization", &loose)],
         None,
     )
@@ -174,14 +168,194 @@ async fn m0_endpoints_need_admin_code() {
 }
 
 #[tokio::test]
+async fn check_access_after_setup() {
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = start(tmp.path(), Overrides::default()).await;
+    let code = format!("Bearer {}", srv.admin_code);
+    let (admin, member) = family(&srv).await;
+    let wait = |auth: String| {
+        let url = srv.url("/v1/check/wait?seconds=0");
+        async move { request("GET", &url, &[("Authorization", &auth)], None).await }
+    };
+    // The spent code names the device-token path.
+    let res = wait(code.clone()).await;
+    assert_eq!(res.status, 401);
+    assert_eq!(res.json()["error"], "admin_code_inactive");
+    assert!(res.json()["message"].as_str().unwrap().contains("device token"));
+    assert_eq!(wait(admin.auth()).await.status, 200);
+    let res = wait(member.auth()).await;
+    assert_eq!(res.status, 403);
+    assert_eq!(res.json()["error"], "not_admin");
+    // Bad `from`.
+    let res = request(
+        "POST",
+        &srv.url("/v1/check/push"),
+        &[("Authorization", &admin.auth()), ("Content-Type", "application/json")],
+        Some(r#"{"from":"elsewhere"}"#),
+    )
+    .await;
+    assert_eq!(res.status, 400);
+    // No stored subscription for this device.
+    let res = request(
+        "POST",
+        &srv.url("/v1/check/push"),
+        &[("Authorization", &admin.auth()), ("Content-Type", "application/json")],
+        Some(r#"{"from":"app"}"#),
+    )
+    .await;
+    assert_eq!(res.status, 409);
+    assert_eq!(res.json()["error"], "no_subscription");
+    // A device token cannot name another address.
+    let (_, _, sub) = browser_subscription("https://push.example.net/x");
+    let res = request(
+        "POST",
+        &srv.url("/v1/check/push"),
+        &[("Authorization", &admin.auth()), ("Content-Type", "application/json")],
+        Some(&format!(r#"{{"subscription":{sub}}}"#)),
+    )
+    .await;
+    assert_eq!(res.status, 400);
+    // The last outcome starts empty.
+    let res = request(
+        "GET",
+        &srv.url("/v1/check/push"),
+        &[("Authorization", &admin.auth())],
+        None,
+    )
+    .await;
+    assert_eq!(res.status, 200);
+    assert!(res.json()["last"].is_null());
+}
+
+#[tokio::test]
+async fn check_removed_member_is_forbidden() {
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = start(tmp.path(), Overrides::default()).await;
+    let (admin, second) = family(&srv).await;
+    // A removed member's token answers `removed` (checked before the role).
+    let res = admin
+        .send(&srv, "DELETE", &format!("/v1/admin/users/{}", second.user), None)
+        .await;
+    assert!(res.status == 200 || res.status == 204, "{}", res.status);
+    let res = request(
+        "GET",
+        &srv.url("/v1/check/wait?seconds=0"),
+        &[("Authorization", &second.auth())],
+        None,
+    )
+    .await;
+    assert_eq!(res.status, 403);
+    assert_eq!(res.json()["error"], "removed");
+}
+
+#[tokio::test]
+async fn check_rate_limit_spares_device_tokens() {
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = start(tmp.path(), Overrides::default()).await;
+    let (admin, _) = family(&srv).await;
+    let wait = |auth: String| {
+        let url = srv.url("/v1/check/wait?seconds=0");
+        async move { request("GET", &url, &[("Authorization", &auth)], None).await }
+    };
+    // Requests without a value are not counted as failures.
+    for _ in 0..12 {
+        assert_eq!(get(&srv.url("/v1/check/wait?seconds=0")).await.status, 401);
+    }
+    assert_eq!(wait("Bearer 0000-0000-0000-0000".into()).await.status, 401);
+    for _ in 0..10 {
+        wait("Bearer 1111-1111-1111-1111".into()).await;
+    }
+    let res = wait("Bearer 2222-2222-2222-2222".into()).await;
+    assert_eq!(res.status, 429);
+    assert!(res.header("retry-after").is_some());
+    // The administrator's device is not locked out by others' wrong codes.
+    assert_eq!(wait(admin.auth()).await.status, 200);
+    // Joining shares the limit (same secret).
+    let res = request(
+        "POST",
+        &srv.url("/v1/join"),
+        &[("Content-Type", "application/json")],
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(res.status, 429);
+}
+
+#[tokio::test]
+async fn check_push_cap_and_device_subscription() {
+    let (service, captured) = fake_push_service().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = start(tmp.path(), Overrides::default()).await;
+    let (admin, _) = family(&srv).await;
+    let (ua, auth, sub) = browser_subscription(&format!("{service}/push/dev"));
+    let res = admin.send(&srv, "PUT", "/v1/me/push", Some(&sub)).await;
+    assert_eq!(res.status, 204);
+    let headers = [
+        ("Authorization", admin.auth()),
+        ("Content-Type", "application/json".to_string()),
+    ];
+    let h: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let res = request("POST", &srv.url("/v1/check/push"), &h, Some(r#"{"from":"app"}"#)).await;
+    assert_eq!(res.status, 200, "{}", String::from_utf8_lossy(&res.body));
+    {
+        let got = captured.0.lock().unwrap();
+        assert_eq!(got.len(), 1);
+        let payload: serde_json::Value = serde_json::from_slice(&decrypt(&ua, &auth, &got[0].1)).unwrap();
+        assert_eq!(payload["kind"], "m0-test");
+        assert_eq!(payload["from"], "app");
+    }
+    let res = request("GET", &srv.url("/v1/check/push"), &h, None).await;
+    assert_eq!(res.json()["last"]["result"], "sent");
+    // At most three delayed test pushes wait at once.
+    for _ in 0..3 {
+        let res = request("POST", &srv.url("/v1/check/push"), &h, Some(r#"{"delaySeconds":300}"#)).await;
+        assert_eq!(res.status, 202);
+    }
+    let res = request("POST", &srv.url("/v1/check/push"), &h, Some(r#"{"delaySeconds":300}"#)).await;
+    assert_eq!(res.status, 429);
+    assert_eq!(res.json()["error"], "too_many_pending");
+}
+
+#[tokio::test]
+async fn check_push_failure_is_classified() {
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = start(tmp.path(), Overrides::default()).await;
+    let auth_header = format!("Bearer {}", srv.admin_code);
+    let headers = [
+        ("Authorization", auth_header.as_str()),
+        ("Content-Type", "application/json"),
+    ];
+    // Nothing listens on this port: a network failure, no raw error text.
+    let port = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let (_, _, sub) = browser_subscription(&format!("http://127.0.0.1:{port}/push/x"));
+    let res = request(
+        "POST",
+        &srv.url("/v1/check/push"),
+        &headers,
+        Some(&format!(r#"{{"subscription":{sub}}}"#)),
+    )
+    .await;
+    assert_eq!(res.status, 502);
+    let j = res.json();
+    assert_eq!(j["error"], "push_failed");
+    assert_eq!(j["reason"], "network");
+    assert!(!j["message"].as_str().unwrap().contains("127.0.0.1"), "{j}");
+    let res = request("GET", &srv.url("/v1/check/push"), &headers, None).await;
+    assert_eq!(res.json()["last"]["result"], "network");
+}
+
+#[tokio::test]
 async fn long_request_answers_after_given_time() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), true, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let auth = format!("Bearer {}", srv.admin_code);
     let t = Instant::now();
     let res = request(
         "GET",
-        &srv.url("/v1/m0/wait?seconds=2"),
+        &srv.url("/v1/check/wait?seconds=2"),
         &[("Authorization", &auth)],
         None,
     )
@@ -197,7 +371,7 @@ async fn long_request_answers_after_given_time() {
 
     let res = request(
         "GET",
-        &srv.url("/v1/m0/wait?seconds=61"),
+        &srv.url("/v1/check/wait?seconds=61"),
         &[("Authorization", &auth)],
         None,
     )
@@ -208,9 +382,9 @@ async fn long_request_answers_after_given_time() {
 #[tokio::test]
 async fn long_request_ends_on_shutdown() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), true, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let auth = format!("Bearer {}", srv.admin_code);
-    let url = srv.url("/v1/m0/wait?seconds=60");
+    let url = srv.url("/v1/check/wait?seconds=60");
     let t = Instant::now();
     let pending = tokio::spawn(async move { request("GET", &url, &[("Authorization", &auth)], None).await });
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -223,7 +397,7 @@ async fn long_request_ends_on_shutdown() {
 #[tokio::test]
 async fn serves_embedded_client() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let res = get(&srv.url("/")).await;
     assert_eq!(res.status, 200);
     assert!(res.header("content-type").unwrap().starts_with("text/html"));
@@ -316,7 +490,7 @@ fn check_push_request(headers: &HeaderMap, body: &[u8], service: &str, vapid_pub
 async fn test_push_now_and_delayed() {
     let (service, captured) = fake_push_service().await;
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), true, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let auth_header = format!("Bearer {}", srv.admin_code);
     let headers = [
         ("Authorization", auth_header.as_str()),
@@ -327,7 +501,7 @@ async fn test_push_now_and_delayed() {
     let (ua, auth, sub) = browser_subscription(&format!("{service}/push/abc"));
     let res = request(
         "POST",
-        &srv.url("/v1/m0/push"),
+        &srv.url("/v1/check/push"),
         &headers,
         Some(&format!(r#"{{"subscription":{sub}}}"#)),
     )
@@ -344,7 +518,7 @@ async fn test_push_now_and_delayed() {
 
     let res = request(
         "POST",
-        &srv.url("/v1/m0/push"),
+        &srv.url("/v1/check/push"),
         &headers,
         Some(&format!(r#"{{"subscription":{sub},"delaySeconds":1}}"#)),
     )
@@ -363,7 +537,7 @@ async fn test_push_now_and_delayed() {
 #[tokio::test]
 async fn test_push_rejects_bad_input() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), true, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let auth_header = format!("Bearer {}", srv.admin_code);
     let headers = [
         ("Authorization", auth_header.as_str()),
@@ -372,7 +546,7 @@ async fn test_push_rejects_bad_input() {
     let (_, _, sub) = browser_subscription("http://192.168.1.1/push/x");
     let res = request(
         "POST",
-        &srv.url("/v1/m0/push"),
+        &srv.url("/v1/check/push"),
         &headers,
         Some(&format!(r#"{{"subscription":{sub}}}"#)),
     )
@@ -381,13 +555,13 @@ async fn test_push_rejects_bad_input() {
     let (_, _, sub) = browser_subscription("https://push.example.net/x");
     let body = format!(r#"{{"subscription":{sub},"delaySeconds":301}}"#);
     assert_eq!(
-        request("POST", &srv.url("/v1/m0/push"), &headers, Some(&body))
+        request("POST", &srv.url("/v1/check/push"), &headers, Some(&body))
             .await
             .status,
         400
     );
     assert_eq!(
-        request("POST", &srv.url("/v1/m0/push"), &headers, Some("not json"))
+        request("POST", &srv.url("/v1/check/push"), &headers, Some("not json"))
             .await
             .status,
         400
@@ -396,7 +570,6 @@ async fn test_push_rejects_bad_input() {
     let tmp2 = tempfile::tempdir().unwrap();
     let off = start(
         tmp2.path(),
-        true,
         Overrides {
             push: Some(false),
             ..Default::default()
@@ -409,7 +582,7 @@ async fn test_push_rejects_bad_input() {
         ("Content-Type", "application/json"),
     ];
     let body = format!(r#"{{"subscription":{sub}}}"#);
-    let res = request("POST", &off.url("/v1/m0/push"), &headers, Some(&body)).await;
+    let res = request("POST", &off.url("/v1/check/push"), &headers, Some(&body)).await;
     assert_eq!(res.status, 409);
     assert_eq!(res.json()["error"], "push_disabled");
 }

@@ -206,11 +206,16 @@ self.addEventListener('push', (event) => {
   if (!data || typeof data !== 'object') data = {};
   const scope = self.registration.scope;
   const icon = new URL('icon-192.png', scope).href;
+  // Monochrome silhouette: Android draws the badge from its alpha channel (M8).
+  const badge = new URL('badge-96.png', scope).href;
 
-  // Test pushes of the server check page (/server/, fcd --m0).
+  // Test notifications of the server check (M8): the /server/ page or the
+  // app's "Server check" section. `m0-test` is the internal name on the wire,
+  // kept so that service workers installed before M8 still recognise it.
   if (data.kind === 'm0-test') {
     const sentAt = typeof data.sentAt === 'number' ? data.sentAt : 0;
     const receivedAt = Date.now();
+    const fromApp = data.from === 'app';
     event.waitUntil(
       (async () => {
         // The text is chosen here, in the app's language (M7); older servers sent their own.
@@ -219,12 +224,29 @@ self.addEventListener('push', (event) => {
         await self.registration.showNotification(data.title || 'Family Chat', {
           body: data.body || (delay ? t.testLater(delay) : t.test),
           icon,
-          badge: icon,
-          tag: `fc-m0-${sentAt || receivedAt}`,
-          data: { url: new URL(`server/?from=push&sentAt=${sentAt}`, scope).href, m0: true, sentAt },
+          badge,
+          tag: `fc-check-${sentAt || receivedAt}`,
+          data: {
+            url: fromApp ? new URL('./?open=server-check', scope).href : new URL(`server/?from=push&sentAt=${sentAt}`, scope).href,
+            check: true,
+            from: fromApp ? 'app' : 'page',
+            sentAt,
+          },
         });
         const windows = await clients.matchAll({ type: 'window', includeUncontrolled: true });
         for (const w of windows) w.postMessage({ type: 'fc-push', sentAt, receivedAt });
+      })(),
+    );
+    return;
+  }
+
+  // A kind this service worker does not know (a newer server): a plain
+  // notification, without counting it as an unread message.
+  if (typeof data.kind === 'string') {
+    event.waitUntil(
+      (async () => {
+        const t = TEXT[pickLang(await readLangPref())];
+        await self.registration.showNotification('Family Chat', { body: t.message, icon, badge, data: { url: scope } });
       })(),
     );
     return;
@@ -251,7 +273,7 @@ self.addEventListener('push', (event) => {
         await self.registration.showNotification(title, {
           body,
           icon,
-          badge: icon,
+          badge,
           // One notification per chat; a new message replaces it and alerts again.
           tag: chatId ? `fc-chat-${chatId}` : 'fc-message',
           renotify: true,
@@ -271,16 +293,22 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     (async () => {
       const windows = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const scopePath = new URL(self.registration.scope).pathname;
       for (const w of windows) {
         if (!w.url.startsWith(self.registration.scope) || !('focus' in w)) continue;
-        if (data.m0) {
+        if (data.check) {
+          // The window of the screen that asked for the test (M8).
+          const path = new URL(w.url).pathname;
+          if (data.from === 'app' ? path !== scopePath : !path.endsWith('/server/')) continue;
           await w.focus();
-          w.postMessage({ type: 'fc-notification-click', sentAt: data.sentAt });
+          w.postMessage(
+            data.from === 'app' ? { type: 'fc-open-server-check' } : { type: 'fc-notification-click', sentAt: data.sentAt },
+          );
           return;
         }
         // The main app (not the check pages) opens the chat itself.
         const path = new URL(w.url).pathname;
-        if (path === new URL(self.registration.scope).pathname) {
+        if (path === scopePath) {
           await w.focus();
           w.postMessage({ type: 'fc-open-chat', chatId: data.chatId || null, accountId: data.accountId || null });
           return;

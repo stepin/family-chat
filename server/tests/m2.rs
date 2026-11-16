@@ -85,7 +85,7 @@ async fn four(srv: &TestServer) -> (Member, Member, Member, Member) {
 #[tokio::test]
 async fn group_lifecycle_and_notices() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa, son, daughter) = four(&srv).await;
     let g = new_chat_id();
 
@@ -305,7 +305,7 @@ async fn group_lifecycle_and_notices() {
     // Everything survives a restart.
     let data = tmp.path().to_path_buf();
     srv.stop().await;
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     let chats = daughter.get(&srv, "/v1/chats").await.json();
     assert_eq!(chats["chats"][0]["owner"], daughter.user.to_string());
     assert_eq!(chats["chats"][0]["members"], json!([daughter.user.to_string()]));
@@ -327,7 +327,7 @@ async fn group_lifecycle_and_notices() {
 #[tokio::test]
 async fn concurrent_state_changes_exactly_one_wins() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let g = new_chat_id();
     assert_eq!(create_group(&srv, &mama, &g, &[&mama, &papa]).await.status, 201);
@@ -394,7 +394,7 @@ async fn concurrent_state_changes_exactly_one_wins() {
 #[tokio::test]
 async fn group_requests_are_validated() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa, son, daughter) = four(&srv).await;
     let g = new_chat_id();
     assert_eq!(create_group(&srv, &mama, &g, &[&mama, &papa]).await.status, 201);
@@ -573,7 +573,7 @@ async fn group_requests_are_validated() {
 #[tokio::test]
 async fn family_removal_and_revocation_notify_group_owners() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa, son, daughter) = four(&srv).await;
     let g1 = new_chat_id();
     assert_eq!(create_group(&srv, &mama, &g1, &[&mama, &papa, &son]).await.status, 201);
@@ -646,7 +646,7 @@ async fn family_removal_and_revocation_notify_group_owners() {
 #[tokio::test]
 async fn revocation_stops_the_identity() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let dm = mama.chat_with(&srv.server_id(), &papa);
     assert_eq!(mama.post_event(&srv, &dm, &new_msg_id(), b"hi").await.status, 200);
@@ -750,7 +750,7 @@ async fn revocation_stops_the_identity() {
     )
     .unwrap();
     assert_eq!(f["payload"], env.payload);
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     assert_eq!(papa.get(&srv, "/v1/me").await.status, 403);
 }
 
@@ -759,7 +759,6 @@ async fn invitation_details_before_joining() {
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(
         tmp.path(),
-        false,
         Overrides {
             family_name: Some("Ивановы".into()),
             ..Default::default()
@@ -808,7 +807,7 @@ async fn invitation_details_before_joining() {
     let expires = fcd::datadir::now_ms() + 1500;
     f["expiresAt"] = json!(expires);
     std::fs::write(&p, f.to_string()).unwrap();
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     let check = |code: String| {
         let url = srv.url("/v1/invites/check");
         async move {
@@ -846,7 +845,7 @@ async fn invitation_details_before_joining() {
 #[tokio::test]
 async fn chat_with_oneself() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let tablet = second_device(&srv, &mama).await;
     let me = mama.chat_with(&srv.server_id(), &mama);
@@ -882,7 +881,7 @@ async fn chat_with_oneself() {
 #[tokio::test]
 async fn events_carry_the_oldest_time() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let j = mama.get(&srv, "/v1/events").await.json();
     assert!(j["oldestTime"].is_null(), "empty log");
@@ -912,7 +911,7 @@ fn webp(n: usize) -> Vec<u8> {
 #[tokio::test]
 async fn avatars() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
 
     let res = mama
@@ -1025,7 +1024,7 @@ async fn avatars() {
     // After a restart the avatar is still served.
     let data = tmp.path().to_path_buf();
     srv.stop().await;
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     let path2 = format!("/v1/users/{}/avatar/{}", mama.user, a2["sha256"].as_str().unwrap());
     let res = papa.get(&srv, &path2).await;
     assert_eq!(res.status, 200);
@@ -1036,7 +1035,7 @@ async fn avatars() {
 #[tokio::test]
 async fn security_headers_on_static_and_api() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let csp = fcd::headers::client_csp_header();
     assert!(csp.ends_with("; frame-ancestors 'none'"));
     let index = get(&srv.url("/")).await;
@@ -1078,7 +1077,7 @@ async fn security_headers_on_static_and_api() {
 #[tokio::test]
 async fn group_keys_of_an_unfinished_change_are_dropped_at_start() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let g = new_chat_id();
     assert_eq!(create_group(&srv, &mama, &g, &[&mama, &papa]).await.status, 201);
@@ -1095,7 +1094,7 @@ async fn group_keys_of_an_unfinished_change_are_dropped_at_start() {
     .unwrap();
     let sdir = data.join("chats").join(g.to_string()).join("state");
     std::fs::write(sdir.join("2.enc"), b"orphan state").unwrap();
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     assert!(!orphan.exists());
     assert_eq!(
         papa.get(&srv, "/v1/keys").await.json()["keys"]

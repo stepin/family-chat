@@ -12,8 +12,10 @@ Most important: Family Chat uses its own cryptographic protocol, and it **has no
   device. Neither the server nor its administrator has the keys.
 - The server knows who is in the family, who talks to whom, when and how much. It could not deliver messages
   otherwise.
-- Whoever runs the server also serves the app. If they want to, they can technically replace the app and get the
-  keys. Only an app loaded from another address protects against that.
+- The app comes from the server whose address you opened it from, and whoever runs that server is a trusted party:
+  if they want to, they can technically replace the app and get the keys. Usually that is your family's server. If
+  the family was set up through the app of someone else's server (one started with `--offer-setup`), you trust its
+  owner as well.
 
 ## What the server sees
 
@@ -36,12 +38,10 @@ coordinates, file names. These are ciphertext, and the server has no keys for th
   owner's app removes them from its groups and changes the group key as soon as it is online.
 - See the metadata listed above, delete data or switch the server off. Family Chat does not protect availability.
 - Set the retention (7 to 90 days) and switch notifications off.
-- **Replace the app** if it is opened from their server. The app is loaded from the server on every update; changed
+- **Replace the app**: it opens from their server. The app is loaded from the server on every update; changed
   code could read the keys on the device. That is why the "Family and server" screen always shows a line saying
   that the app was loaded from the family server and whoever runs it can technically replace it. For a family the
-  administrator is usually one of the parents, and that is acceptable. Those who want more open the app from the
-  project's address: then the server administrator sees only ciphertext, and the trust moves to whoever publishes
-  the project site.
+  administrator is usually one of the parents, and that is acceptable: they are a trusted party.
 
 What the administrator cannot do without replacing the app: read messages, write in someone else's name (messages
 are signed with the author's key), quietly add themselves to someone's group (group membership is signed by its
@@ -90,12 +90,13 @@ person or by phone and marked as checked. If the key of someone you know changes
 - The app uses no analytics and contacts no third-party sites. Diagnostics stay on the device until you copy the
   report yourself.
 
-## The app from the project address
+## Where the app comes from
 
-The same web client is published on the project site (see "The app from the project address" on the home page). It
-is built from the same source and connects to your server directly. Then your server's administrator cannot
-replace the app, but you trust whoever publishes the site instead: a replaced app there would affect everyone who
-uses it. That app has its own browser storage, separate from the app opened from your server's address.
+The app opens only from your own server: the project site does not carry it, the site and the server are not
+connected. When you open the app you trust whoever runs the server whose address you opened it from. Usually that is
+your family's administrator. If a server runs with `--offer-setup` and its app was used to set up a family on
+another server, the app still comes from the first server, and its owner stays a trusted party
+([installation](ADMIN.md#settings)).
 
 ## More
 

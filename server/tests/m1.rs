@@ -39,7 +39,7 @@ fn all_files(p: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 async fn admin_code_works_once_and_files_are_private() {
     let tmp = tempfile::tempdir().unwrap();
     let data = tmp.path().join("data");
-    let srv = start(&data, false, Overrides::default()).await;
+    let srv = start(&data, Overrides::default()).await;
     let hello = get(&srv.url("/v1/hello")).await.json();
     assert_eq!(hello["adminCodeActive"], true);
     assert_eq!(hello["maxEventBytes"], 262144);
@@ -100,7 +100,7 @@ async fn admin_code_works_once_and_files_are_private() {
 #[tokio::test]
 async fn invitation_is_one_time_and_expires() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let admin = join(&srv, "Мама", "adminCode", &srv.admin_code).await;
     let res = admin.send(&srv, "POST", "/v1/admin/invites", None).await;
     assert_eq!(res.status, 201);
@@ -193,7 +193,7 @@ async fn invitation_is_one_time_and_expires() {
     let mut f: serde_json::Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
     f["expiresAt"] = json!(fcd::datadir::now_ms() - 1);
     std::fs::write(&p, f.to_string()).unwrap();
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     let res = request(
         "POST",
         &srv.url("/v1/join"),
@@ -208,7 +208,7 @@ async fn invitation_is_one_time_and_expires() {
 #[tokio::test]
 async fn direct_messages_long_poll_and_history() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let sid = srv.server_id();
     let chat = mama.chat_with(&sid, &papa);
@@ -325,7 +325,7 @@ async fn direct_messages_long_poll_and_history() {
 #[tokio::test]
 async fn idempotent_repeat() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let code = invite(&srv, &mama).await;
     let son = join(&srv, "Сын", "invite", &code).await;
@@ -354,7 +354,7 @@ async fn idempotent_repeat() {
 #[tokio::test]
 async fn foreign_chat_is_forbidden() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let code = invite(&srv, &mama).await;
     let son = join(&srv, "Сын", "invite", &code).await;
@@ -392,7 +392,7 @@ async fn foreign_chat_is_forbidden() {
 #[tokio::test]
 async fn size_and_header_limits() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let chat = mama.chat_with(&srv.server_id(), &papa);
 
@@ -474,7 +474,7 @@ async fn size_and_header_limits() {
 #[tokio::test]
 async fn profile_update_rules() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let p = testkit::profile(&mama.key, &mama.user, "Мама Оля", 2);
     let res = mama
@@ -523,7 +523,7 @@ async fn profile_update_rules() {
 #[tokio::test]
 async fn second_device_by_signature() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let sid = srv.server_id();
 
@@ -625,7 +625,7 @@ async fn second_device_by_signature() {
 #[tokio::test]
 async fn removed_member_is_cut_off() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let chat = mama.chat_with(&srv.server_id(), &papa);
     assert_eq!(mama.post_event(&srv, &chat, &new_msg_id(), b"hi").await.status, 200);
@@ -704,7 +704,7 @@ async fn removed_member_is_cut_off() {
     // Stays removed after a restart.
     let data = tmp.path().to_path_buf();
     srv.stop().await;
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     assert_eq!(papa.get(&srv, "/v1/me").await.status, 403);
     assert_eq!(mama.get(&srv, "/v1/me").await.status, 200);
 }
@@ -712,7 +712,7 @@ async fn removed_member_is_cut_off() {
 #[tokio::test]
 async fn rate_limit_for_wrong_codes() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let wrong = |xff: &'static str| {
         let url = srv.url("/v1/join");
         async move {
@@ -748,7 +748,6 @@ async fn rate_limit_for_wrong_codes() {
     let tmp2 = tempfile::tempdir().unwrap();
     let srv2 = start(
         tmp2.path(),
-        false,
         Overrides {
             trust_forwarded_for: Some(true),
             ..Default::default()
@@ -779,7 +778,7 @@ async fn rate_limit_for_wrong_codes() {
 async fn restart_keeps_events_and_cursors() {
     let tmp = tempfile::tempdir().unwrap();
     let data = tmp.path().to_path_buf();
-    let srv = start(&data, false, Overrides::default()).await;
+    let srv = start(&data, Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let sid = srv.server_id();
     let chat = mama.chat_with(&sid, &papa);
@@ -792,7 +791,7 @@ async fn restart_keeps_events_and_cursors() {
     assert_eq!(cursor, 3);
     srv.stop().await;
 
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     assert!(srv.admin_code.is_empty(), "no new admin code");
     let feed = papa.get(&srv, &format!("/v1/events?after={cursor}")).await.json();
     assert_eq!(feed["events"], json!([]));
@@ -857,7 +856,7 @@ async fn starts_on_m0_folder() {
         std::fs::set_permissions(data.join("config.toml"), std::fs::Permissions::from_mode(0o644)).unwrap();
     }
 
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     assert!(srv.admin_code.is_empty());
     assert_eq!(srv.server_id(), "c2VydmVyLWlkLW0wLXRlc3Q");
     assert_eq!(srv.dir.vapid.public_key_b64(), vapid.public_key_b64());
@@ -876,12 +875,11 @@ async fn starts_on_m0_folder() {
 async fn storage_full_answers_507() {
     let tmp = tempfile::tempdir().unwrap();
     let data = tmp.path().to_path_buf();
-    let srv = start(&data, false, Overrides::default()).await;
+    let srv = start(&data, Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     srv.stop().await;
     let srv = open(
         &data,
-        false,
         Overrides {
             min_free_mb: Some(u64::MAX / (1024 * 1024)),
             ..Default::default()
@@ -897,7 +895,7 @@ async fn storage_full_answers_507() {
 #[tokio::test]
 async fn admin_stats() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let chat = mama.chat_with(&srv.server_id(), &papa);
     mama.post_event(&srv, &chat, &new_msg_id(), b"x").await;
@@ -972,7 +970,7 @@ async fn wait_for(cond: impl Fn() -> bool) {
 async fn push_on_new_event() {
     let (service, fake) = fake_push().await;
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let chat = mama.chat_with(&srv.server_id(), &papa);
 
@@ -1025,7 +1023,7 @@ async fn push_on_new_event() {
 async fn push_reaches_senders_other_devices() {
     let (service, fake) = fake_push().await;
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let tablet = second_device(&srv, &mama).await;
     for (m, name) in [(&mama, "mama-phone"), (&tablet, "mama-tablet"), (&papa, "papa")] {
@@ -1066,7 +1064,6 @@ async fn push_disabled_refuses_subscriptions() {
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(
         tmp.path(),
-        false,
         Overrides {
             push: Some(false),
             ..Default::default()
@@ -1086,7 +1083,7 @@ async fn push_disabled_refuses_subscriptions() {
 async fn admin_list_and_add_from_the_command_line() {
     let tmp = tempfile::tempdir().unwrap();
     let data = tmp.path().to_path_buf();
-    let srv = start(&data, false, Overrides::default()).await;
+    let srv = start(&data, Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     srv.stop().await;
 

@@ -57,7 +57,9 @@
     const chatParam = params.get('chat');
     const accountParam = params.get('account');
     const shareParam = params.get('share');
-    if (chatParam !== null || shareParam !== null) history.replaceState(history.state, '', location.pathname);
+    // M8: a tap on the app's test notification opens Family and server.
+    const openServerCheck = params.get('open') === 'server-check';
+    if (chatParam !== null || shareParam !== null || openServerCheck) history.replaceState(history.state, '', location.pathname);
 
     const wideQuery = matchMedia('(min-width: 900px)');
     app.wide = wideQuery.matches;
@@ -68,6 +70,7 @@
       if (data?.type === 'fc-open-chat') {
         void openChatById(typeof data.chatId === 'string' ? data.chatId : null, typeof data.accountId === 'string' ? data.accountId : null);
       }
+      if (data?.type === 'fc-open-server-check' && app.phase === 'ready' && app.account) nav.push({ name: 'server' });
     });
 
     void (async () => {
@@ -84,6 +87,7 @@
             nav.push({ name: 'add-family' });
           }
         }
+        if (openServerCheck) nav.push({ name: 'server' });
         if (chatParam && /^[a-z2-7]{26}$/.test(chatParam)) {
           await openChatById(chatParam, accountParam && ID.test(accountParam) ? accountParam : null);
         }

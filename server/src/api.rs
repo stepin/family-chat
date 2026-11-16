@@ -75,7 +75,7 @@ impl FromRequestParts<Arc<AppState>> for ClientIp {
     }
 }
 
-fn bearer(headers: &HeaderMap) -> Option<&str> {
+pub fn bearer(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(header::AUTHORIZATION)?
         .to_str()

@@ -60,6 +60,7 @@ const en: Strings = {
     restore: 'Restore with my words',
     installedTitle: 'Welcome',
     installedLead: 'Paste the invitation you copied in Safari, or the link a relative sent you.',
+    taken: 'This server already has a family. To join it, ask one of its members for an invitation.',
   },
 
   pasteInvite: {
@@ -138,6 +139,12 @@ const en: Strings = {
     inviteStep: 'Invite your family',
     inviteLead: 'Show the QR code to a relative or send them the link. Each invitation works for one person for 7 days.',
     finish: 'Go to chats',
+    checkingPage: 'Checking the server…',
+    otherServerLead: 'This server already has a family. Enter the address of your own server.',
+    otherServerHint: 'The address of the server you installed for your family',
+    adminTakenAt: (url: string) => `The server ${url} already has an administrator. Ask them for an invitation to join.`,
+    noAnswerAt: (url: string) => `The server ${url} isn’t answering. Check the address and that the server is running.`,
+    notServerAt: (url: string) => `${url} isn’t a Family Chat server. Check the address.`,
   },
 
   phrase: {
@@ -185,7 +192,8 @@ const en: Strings = {
     notServer: 'There’s no Family Chat server at this address.',
     unsupported: 'The server is too new or too old for this version of the app. Update the app.',
     badAddress: 'That doesn’t look like a server address. Example: https://chat.example.com',
-    rateLimited: 'Too many attempts. Wait a minute and try again.',
+    rateLimited: (seconds?: number) =>
+      `Too many attempts from this address. Wait ${seconds ? `${seconds} s` : 'a minute'} and try again.`,
     removed: 'You’ve been removed from this family. Ask the administrator for a new invitation.',
     storageFull: 'The family server is running out of space. Let the administrator know.',
     badName: 'The name must be 1 to 64 characters, without control characters.',
@@ -917,6 +925,27 @@ const en: Strings = {
     serverVersion: (v: string) => `Server version ${v}`,
     push: (on: boolean) => (on ? 'Notifications are on for the server' : 'Notifications are off for the server'),
     loadFailed: 'Couldn’t load the details from the server.',
+    check: 'Server check',
+    checkLead: 'Whether long requests get through your proxy and notifications reach this device.',
+    checkWait: (n: number) => `Long request (${n} s)`,
+    checkWaiting: (n: number, total: number) => `Waiting for the answer… ${n} of ${total} s`,
+    checkWaitOk: (n: number) => `The answer came after ${n} s: long requests get through.`,
+    checkPushNow: 'Send a test notification',
+    checkPushLater: (n: number) => `In ${n} seconds, time to lock the phone`,
+    checkPushSent: 'Sent. The notification should arrive within a minute; if not, see',
+    checkPushScheduled: (n: number) => `Sending in ${n} s: lock the phone or put the app in the background. If it doesn’t arrive, see`,
+    checkPushNeedsNotify: 'To get a test notification, turn notifications on for this device.',
+    checkLast: (time: string, result: string) => `Last test notification: ${time}, ${result}.`,
+    checkLastResult: (r: string) =>
+      ({
+        sent: 'accepted by the push service',
+        gone: 'the subscription expired',
+        unauthorized: 'refused by the push service',
+        rejected: 'rejected by the push service',
+        network: 'the push service was unreachable',
+      })[r] ?? r,
+    checkFaq: 'the FAQ',
+    checkMore: 'More',
   },
 
   invites: {
@@ -953,6 +982,9 @@ const en: Strings = {
     checks: 'Checks',
     deviceCheck: 'Check this device',
     serverCheck: 'Check the server',
+    serverCheckOf: (family: string) => `Check the server of “${family}”`,
+    serverCheckPage: 'Check a server before setup (the /server/ page)',
+    serverCheckAdminOnly: 'The family administrator checks the server.',
     serverUnknown: 'Server version unknown (no connection)',
     outbox: (n: number) => `Waiting to send: ${n}`,
   },

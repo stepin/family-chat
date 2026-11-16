@@ -1,21 +1,20 @@
-// Values that are only known at publication. Everything else on the site is
-// generated from the repository.
+// Where the project lives. Everything else on the site is generated from the
+// repository.
 //
-// The documentation in docs/ uses obvious placeholders for them; the site
-// build replaces the placeholders with these values when they are set (either
-// here or through the environment variables in brackets).
+// The documentation in docs/ names the project's own repository and image.
+// A fork that publishes its own site sets its values here or through the
+// environment variables in brackets; the build then writes them in place of
+// the project's ones (apps/site/README.md).
 
-export const PLACEHOLDER_REPOSITORY = 'https://code.example.org/family-chat';
-export const PLACEHOLDER_IMAGE = 'registry.example.org/family-chat/fcd';
+/** The project's repository and image, as written in docs/. */
+export const PROJECT_REPOSITORY = 'https://github.com/stepin/family-chat';
+export const PROJECT_IMAGE = 'ghcr.io/stepin/fcd';
 
 export default {
-  // Public repository, for example https://github.com/<owner>/family-chat
-  // (SITE_REPOSITORY_URL). Releases are expected at <repositoryUrl>/releases.
-  // Empty: not published yet, the site says so instead of linking.
-  repositoryUrl: process.env.SITE_REPOSITORY_URL ?? '',
-  // Published Docker image without a tag, for example ghcr.io/<owner>/fcd
-  // (SITE_IMAGE). Empty: the placeholder stays in the examples.
-  image: process.env.SITE_IMAGE ?? '',
+  // Public repository (SITE_REPOSITORY_URL). Releases are at <repositoryUrl>/releases.
+  repositoryUrl: process.env.SITE_REPOSITORY_URL || PROJECT_REPOSITORY,
+  // Docker image without a tag (SITE_IMAGE).
+  image: process.env.SITE_IMAGE || PROJECT_IMAGE,
   // Path the site is served under, with slashes on both ends (SITE_BASE_PATH):
   // "/" for its own domain, "/family-chat/" for a GitHub Pages project site.
   // Only 404.html needs it (it is shown for any missing address); every other

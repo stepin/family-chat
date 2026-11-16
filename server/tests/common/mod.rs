@@ -56,18 +56,18 @@ impl TestServer {
 }
 
 /// Starts the router in-process on 127.0.0.1 with a fresh data folder.
-pub async fn start(data: &Path, m0: bool, flags: Overrides) -> TestServer {
-    let srv = open(data, m0, flags).await;
+pub async fn start(data: &Path, flags: Overrides) -> TestServer {
+    let srv = open(data, flags).await;
     assert!(!srv.admin_code.is_empty(), "first start");
     srv
 }
 
 /// Starts on a folder that may already exist.
-pub async fn open(data: &Path, m0: bool, flags: Overrides) -> TestServer {
+pub async fn open(data: &Path, flags: Overrides) -> TestServer {
     let (dir, settings) = DataDir::open(data, flags).expect("open data dir");
     let admin_code = dir.new_admin_code.clone().unwrap_or_default();
     let (tx, rx) = watch::channel(false);
-    let state = AppState::new(&dir, settings, Assets::Embedded, m0, rx.clone()).expect("state");
+    let state = AppState::new(&dir, settings, Assets::Embedded, rx.clone()).expect("state");
     app::spawn_maintenance(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

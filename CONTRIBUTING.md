@@ -48,7 +48,8 @@ pnpm test:e2e:site
 - `pnpm test:e2e`: несколько браузеров-родственников против настоящего `fcd`; любые нарушения CSP и ошибки страницы
   валят тест, ключевые экраны проверяются axe.
 - `pnpm test:e2e:site`: страницы сайта в светлой и тёмной теме, на 360 px и на компьютере, axe, клавиатура, нет
-  запросов к другим сайтам; приложение в `app/` открывается из подпапки, service worker и манифест в её пределах.
+  запросов к другим сайтам; пункты меню на одной высоте; приложения на сайте нет (оно открывается только со своего
+  сервера).
 - Долгие проверки отдельно: `pnpm test:e2e:big` (файл 200 МБ), `pnpm --filter @family-chat/web run test:e2e:perf`
   (поиск по 50 000 сообщений).
 
@@ -56,7 +57,7 @@ pnpm test:e2e:site
 
 | Путь | Что |
 |---|---|
-| `server/src/` | `fcd`: `lib.rs` (флаги, запуск), `app.rs` (маршруты), `api.rs`, `groups.rs`, `blobs.rs`, `packs.rs` (запросы), `store.rs` (состояние и единственный писатель), `eventlog.rs` (журнал по дням), `datadir.rs` (папка данных, блокировка), `webpush.rs`, `tls.rs`, `headers.rs` (CSP), `healthcheck.rs` |
+| `server/src/` | `fcd`: `lib.rs` (флаги, запуск), `app.rs` (маршруты), `api.rs`, `groups.rs`, `blobs.rs`, `packs.rs` (запросы), `check.rs` (проверка сервера), `store.rs` (состояние и единственный писатель), `eventlog.rs` (журнал по дням), `datadir.rs` (папка данных, блокировка), `webpush.rs`, `tls.rs`, `headers.rs` (CSP), `healthcheck.rs` |
 | `server/tests/` | интеграционные тесты: сервер в процессе или настоящий бинарник на временной папке |
 | `packages/protocol/` | идентичность, ключи, шифрование, конверты, группы, архив; без ввода-вывода |
 | `packages/core/` | ядро клиента: транспорт, IndexedDB (Dexie), синхронизация, очередь отправки, поиск |
@@ -93,3 +94,10 @@ pnpm test:e2e:site
 ## Выпуск
 
 Как собрать и опубликовать версию: [docs/RELEASING.md](docs/RELEASING.md).
+
+## Иконка
+
+Источник иконки: `docs/design/icon.png`. Все размеры (`apps/web/public/icon.svg`, `icon-192.png`, `icon-512.png`,
+`apple-touch-icon.png`, `favicon-32.png`, `badge-96.png` и `icon-maskable-512.png`, если нужен) делает скрипт
+`node apps/web/scripts/make-icons.mjs`. Ему нужен ImageMagick 7 (`brew install imagemagick` или
+`apt install imagemagick`); запускается вручную, готовые файлы коммитятся, сборке и CI ImageMagick не нужен.

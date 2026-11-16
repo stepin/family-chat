@@ -11,8 +11,23 @@
   // report to copy, and the device and server check pages.
   let entries = $state.raw<DiagnosticEntry[]>([]);
   let status = $state<string | null>(null);
+  // M8: server checks run in the app for administrators ("Server check" in
+  // Family and server); the /server/ page is for a server not yet set up.
+  const adminAccounts = $derived(app.accounts.filter((a) => a.admin && a.status === 'active'));
+  let pageCodeActive = $state(false);
 
-  onMount(() => follow(app.core.diagnostics, (list) => (entries = [...list].reverse().slice(0, 200))));
+  onMount(() => {
+    void app.core
+      .serverInfo(location.origin)
+      .then((h) => (pageCodeActive = h.adminCodeActive))
+      .catch(() => undefined);
+    return follow(app.core.diagnostics, (list) => (entries = [...list].reverse().slice(0, 200)));
+  });
+
+  async function openServerCheck(accountId: string): Promise<void> {
+    if (app.account?.id !== accountId) await app.switchAccount(accountId);
+    nav.push({ name: 'server' });
+  }
 
   /** One line per family server: its version, or why it is unknown. */
   async function serverLines(): Promise<string[]> {
@@ -65,8 +80,20 @@
     <h2 id="diag-checks">{t.diagnostics.checks}</h2>
     <ul class="links">
       <li><a href="./device/">{t.diagnostics.deviceCheck}</a></li>
-      <li><a href="./server/">{t.diagnostics.serverCheck}</a></li>
+      {#each adminAccounts as a (a.id)}
+        <li>
+          <button class="link-btn" type="button" onclick={() => openServerCheck(a.id)}>
+            {adminAccounts.length > 1 ? t.diagnostics.serverCheckOf(a.familyName) : t.diagnostics.serverCheck}
+          </button>
+        </li>
+      {/each}
+      {#if app.accounts.length === 0 || pageCodeActive}
+        <li><a href="./server/">{t.diagnostics.serverCheckPage}</a></li>
+      {/if}
     </ul>
+    {#if app.accounts.length > 0 && adminAccounts.length === 0}
+      <p class="muted small" data-testid="server-check-admin-only">{t.diagnostics.serverCheckAdminOnly}</p>
+    {/if}
   </section>
 </Page>
 

@@ -7,15 +7,17 @@
 //   apps/site/src/            home pages (HTML fragments) and site.css
 //   apps/site/screenshots/    screenshots of the app (scripts in screenshots/)
 //   apps/web/src/styles/tokens.css, apps/web/public/icon.svg   the app's look
-//   apps/web/dist/            the built web client, published under app/
 //
-//   node build.mjs [--out DIR] [--no-app]
+// The site does not carry the app (M8): the app always opens from the
+// family's own server, and the site and the server are not connected.
+//
+//   node build.mjs [--out DIR]
 
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Marked } from 'marked';
-import config, { PLACEHOLDER_IMAGE, PLACEHOLDER_REPOSITORY } from './site.config.mjs';
+import config, { PROJECT_IMAGE, PROJECT_REPOSITORY } from './site.config.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repo = resolve(here, '../..');
@@ -24,8 +26,7 @@ export const repo = resolve(here, '../..');
  * Content-Security-Policy of every site page (a <meta> tag, so it works on
  * any static host). No scripts at all, styles and images only from the site.
  * Hosts that can send headers should send the same policy plus
- * `frame-ancestors 'none'` (apps/site/README.md). The app under app/ has its
- * own, wider policy in its own index.html.
+ * `frame-ancestors 'none'` (apps/site/README.md).
  */
 export const SITE_CSP = [
   "default-src 'none'",
@@ -68,7 +69,6 @@ const UI = {
     switchTo: 'English',
     switchLang: 'en',
     source: 'Исходный код',
-    notPublished: 'Исходный код будет опубликован вместе с первой версией.',
     licence: 'Лицензия MIT.',
     notAudited: 'Криптография не проходила независимый аудит.',
     homeTitle: 'Family Chat: семейный чат на своём сервере',
@@ -92,7 +92,6 @@ const UI = {
     switchTo: 'Русский',
     switchLang: 'ru',
     source: 'Source code',
-    notPublished: 'The source code will be published with the first release.',
     licence: 'MIT licence.',
     notAudited: 'The cryptography has not been independently audited.',
     homeTitle: 'Family Chat: a family chat on your own server',
@@ -167,12 +166,9 @@ const MD_TO_PAGE = new Map(PAGES.filter((p) => p.md).map((p) => [p.md, p.path]))
 
 /**
  * Where a link in a Markdown file points on the site: another rendered page,
- * the repository (when its address is known), or nowhere (null: the link
- * text stays, without a link).
+ * the repository, or nowhere (null: the link text stays, without a link).
  */
 export function rewriteLink(href, mdPath, pagePath, repositoryUrl = config.repositoryUrl) {
-  // The placeholder address is not a link until the real one is known.
-  if (href.startsWith(PLACEHOLDER_REPOSITORY)) return repositoryUrl ? href : null;
   if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('#')) return href;
   const [p = '', hash] = href.split('#');
   const resolved = posix.normalize(posix.join(posix.dirname(mdPath), p));
@@ -180,11 +176,8 @@ export function rewriteLink(href, mdPath, pagePath, repositoryUrl = config.repos
   const page = MD_TO_PAGE.get(resolved);
   if (page !== undefined) return relUrl(pagePath, page) + anchor;
   if (resolved.startsWith('..')) return null;
-  if (repositoryUrl) {
-    const kind = existsSync(join(repo, resolved)) && !resolved.includes('.') ? 'tree' : 'blob';
-    return `${repositoryUrl}/${kind}/main/${resolved}${anchor}`;
-  }
-  return null;
+  const kind = existsSync(join(repo, resolved)) && !resolved.includes('.') ? 'tree' : 'blob';
+  return `${repositoryUrl.replace(/\/+$/, '')}/${kind}/main/${resolved}${anchor}`;
 }
 
 /** Renders one Markdown document for the page at `pagePath`. */
@@ -229,19 +222,13 @@ export function renderMarkdown(source, mdPath, pagePath, lang = 'ru') {
   return { title, html, toc, description };
 }
 
-/** Fills the placeholders of the documentation with the publication values. */
+/** A fork's own repository and image in place of the project's (site.config.mjs). */
 export function publicationValues(html, c = config) {
   let out = html;
-  if (c.repositoryUrl) out = out.split(PLACEHOLDER_REPOSITORY).join(c.repositoryUrl.replace(/\/+$/, ''));
-  if (c.image) out = out.split(PLACEHOLDER_IMAGE).join(c.image);
+  const repoUrl = c.repositoryUrl.replace(/\/+$/, '');
+  if (repoUrl !== PROJECT_REPOSITORY) out = out.split(PROJECT_REPOSITORY).join(repoUrl);
+  if (c.image !== PROJECT_IMAGE) out = out.split(PROJECT_IMAGE).join(c.image);
   return out;
-}
-
-/** `{{#name}}…{{/name}}` kept when the flag is on, `{{^name}}…{{/name}}` when off. */
-function sections(html, flags) {
-  return html.replace(/\{\{([#^])(\w+)\}\}([\s\S]*?)\{\{\/\2\}\}/g, (_, kind, name, body) =>
-    (kind === '#') === Boolean(flags[name]) ? body : '',
-  );
 }
 
 function shot(root, name, alt, caption, siteDir) {
@@ -256,7 +243,7 @@ function shot(root, name, alt, caption, siteDir) {
   return `<figure class="shot shot-${kind}"><picture>${darkSource}<img src="${root}screenshots/${name}-light.png" alt="${esc(alt)}" width="${width}" height="${height}" loading="lazy" decoding="async"></picture><figcaption>${caption}</figcaption></figure>`;
 }
 
-function layout({ page, title, description, main, withApp }) {
+function layout({ page, title, description, main }) {
   const ui = UI[page.lang];
   const root = relUrl(page.path, '');
   const navId = page.nav ?? page.id;
@@ -269,10 +256,7 @@ function layout({ page, title, description, main, withApp }) {
       return `<li><a href="${relUrl(page.path, pathOf(id))}"${current}>${label}</a></li>`;
     })
     .join('');
-  const repoLine = config.repositoryUrl
-    ? `<a href="${esc(config.repositoryUrl)}">${ui.source}</a>.`
-    : ui.notPublished;
-  const appLink = withApp ? ` <a href="${root}app/">${page.lang === 'ru' ? 'Приложение' : 'Web app'}</a>.` : '';
+  const repoLine = `<a href="${esc(config.repositoryUrl)}">${ui.source}</a>.`;
   return `<!doctype html>
 <html lang="${page.lang}">
 <head>
@@ -284,6 +268,7 @@ function layout({ page, title, description, main, withApp }) {
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(description)}">
 <link rel="icon" href="${root}icon.svg" type="image/svg+xml">
+<link rel="icon" href="${root}favicon-32.png" sizes="32x32" type="image/png">
 <link rel="stylesheet" href="${root}site.css">
 <link rel="alternate" hreflang="${other.lang}" href="${relUrl(page.path, other.path)}">
 </head>
@@ -300,7 +285,7 @@ function layout({ page, title, description, main, withApp }) {
 ${main}
 </main>
 <footer class="site-footer">
-<p>Family Chat ${esc(version())}. ${ui.licence} ${ui.notAudited} ${repoLine}${appLink}</p>
+<p>Family Chat ${esc(version())}. ${ui.licence} ${ui.notAudited} ${repoLine}</p>
 </footer>
 </body>
 </html>
@@ -312,14 +297,13 @@ function renderPage(page, ctx) {
   const root = relUrl(page.path, '');
   if (page.html) {
     let body = readFileSync(join(repo, page.html), 'utf8');
-    body = sections(body, { app: ctx.withApp, repo: Boolean(config.repositoryUrl) });
     body = body
       .replace(/\{\{root\}\}/g, root)
       .replace(/\{\{version\}\}/g, esc(version()))
       .replace(/\{\{releases\}\}/g, esc(`${config.repositoryUrl.replace(/\/+$/, '')}/releases`))
       .replace(/<!--shot:([\w-]+)\|([^|]*)\|([^>]*)-->/g, (_, name, alt, caption) => shot(root, name, alt, caption, ctx.siteDir));
     const description = plain(/<p class="lead">([\s\S]*?)<\/p>/.exec(body)?.[1] ?? '');
-    return layout({ page, title: ui.homeTitle, description, main: `<div class="home">${body}</div>`, withApp: ctx.withApp });
+    return layout({ page, title: ui.homeTitle, description, main: `<div class="home">${body}</div>` });
   }
   const source = readFileSync(join(repo, page.md), 'utf8');
   const { title, html, toc, description } = renderMarkdown(source, page.md, page.path, page.lang);
@@ -330,10 +314,10 @@ function renderPage(page, ctx) {
           .join('')}</ol></nav>`
       : '';
   const withToc = html.replace(/(<\/h1>\n)/, `$1${tocHtml}`);
-  return layout({ page, title: `${title}: Family Chat`, description, main: `<article class="doc">${withToc}</article>`, withApp: ctx.withApp });
+  return layout({ page, title: `${title}: Family Chat`, description, main: `<article class="doc">${withToc}</article>` });
 }
 
-function notFound(lang, withApp) {
+function notFound(lang) {
   const ui = UI[lang];
   const page = { id: '404', lang, path: lang === 'en' ? 'en/404/' : '404/' };
   // 404.html is served for any missing path, so its links must not depend on
@@ -343,15 +327,11 @@ function notFound(lang, withApp) {
     title: `${ui.notFoundTitle}: Family Chat`,
     description: ui.notFoundText,
     main: `<article class="doc"><h1>${ui.notFoundTitle}</h1><p>${ui.notFoundText}</p><p><a href="${relUrl(page.path, lang === 'en' ? 'en/' : '')}">${ui.toHome}</a></p></article>`,
-    withApp,
   });
 }
 
 /** Builds the whole site into `outDir`. */
-export function build({ outDir = join(here, 'dist'), withApp = true } = {}) {
-  const webDist = join(repo, 'apps/web/dist');
-  const app = withApp && existsSync(join(webDist, 'index.html'));
-  if (withApp && !app) console.warn('site: apps/web/dist is missing, building without app/ (run pnpm build in apps/web)');
+export function build({ outDir = join(here, 'dist') } = {}) {
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
 
@@ -359,6 +339,7 @@ export function build({ outDir = join(here, 'dist'), withApp = true } = {}) {
   const siteCss = readFileSync(join(here, 'src/site.css'), 'utf8');
   writeFileSync(join(outDir, 'site.css'), `/* From apps/web/src/styles/tokens.css: the app's design tokens. */\n${tokens}\n${siteCss}`);
   cpSync(join(repo, 'apps/web/public/icon.svg'), join(outDir, 'icon.svg'));
+  cpSync(join(repo, 'apps/web/public/favicon-32.png'), join(outDir, 'favicon-32.png'));
   cpSync(join(here, 'screenshots'), join(outDir, 'screenshots'), {
     recursive: true,
     filter: (src) => !src.endsWith('.ts') && !src.endsWith('.md'),
@@ -366,7 +347,7 @@ export function build({ outDir = join(here, 'dist'), withApp = true } = {}) {
   // GitHub Pages: serve files as they are.
   writeFileSync(join(outDir, '.nojekyll'), '');
 
-  const ctx = { withApp: app, siteDir: outDir };
+  const ctx = { siteDir: outDir };
   for (const page of PAGES) {
     const file = join(outDir, page.path, 'index.html');
     mkdirSync(dirname(file), { recursive: true });
@@ -374,17 +355,16 @@ export function build({ outDir = join(here, 'dist'), withApp = true } = {}) {
   }
   // The Russian page answers at /404.html (static hosts look for it there).
   const base = config.basePath.replace(/\/*$/, '/');
-  const missing = notFound('ru', app).replace(/(href|src)="\.\.\//g, `$1="${base}`);
+  const missing = notFound('ru').replace(/(href|src)="\.\.\//g, `$1="${base}`);
   writeFileSync(join(outDir, '404.html'), missing);
 
-  if (app) cpSync(webDist, join(outDir, 'app'), { recursive: true });
-  return { outDir, pages: PAGES.length, app };
+  return { outDir, pages: PAGES.length };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const outIdx = args.indexOf('--out');
   const outDir = outIdx >= 0 ? resolve(args[outIdx + 1]) : undefined;
-  const r = build({ outDir, withApp: !args.includes('--no-app') });
-  console.log(`site: ${r.pages} pages${r.app ? ' and app/' : ''} in ${r.outDir}`);
+  const r = build({ outDir });
+  console.log(`site: ${r.pages} pages in ${r.outDir}`);
 }

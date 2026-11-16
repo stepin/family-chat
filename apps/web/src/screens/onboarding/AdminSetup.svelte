@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { AccountView } from '@family-chat/core';
+  import { onMount } from 'svelte';
+  import { isApiError, isNetworkError, type AccountView } from '@family-chat/core';
   import GenderPicker from '../../components/GenderPicker.svelte';
   import Page from '../../components/Page.svelte';
   import RecoveryPhrase from '../../components/RecoveryPhrase.svelte';
@@ -8,12 +9,22 @@
   import { errorText, joinProblem } from '../../lib/errors.ts';
   import { pageServerUrl } from '../../lib/invite.ts';
   import { nav } from '../../lib/nav.svelte.ts';
+  import { pageHello, setupField, type HelloState, type SetupField } from '../../lib/page-hello.ts';
   import { t, type Gender } from '../../lib/strings.ts';
 
   // Administrator route (docs/PLAN.md 8.1 with docs/PLAN-v2.md 8): server
   // address and admin code → name → recovery phrase → invite the family.
   let step = $state<'server' | 'profile' | 'phrase' | 'invite'>('server');
-  let serverUrl = $state(pageServerUrl(location));
+  const pageUrl = pageServerUrl(location);
+  // M8: the field is decided by the hello of the page's server, however the
+  // person got here: its address; empty with a hint when this server is taken
+  // and runs with `--offer-setup` (setup goes to another server); "an
+  // administrator already exists" when it is taken without the flag. While
+  // hello is pending (at most 5 s) the field is locked and empty.
+  let helloState = $state<HelloState>('pending');
+  let field = $state<SetupField>({ kind: 'page' });
+  let touched = false;
+  let serverUrl = $state('');
   let code = $state('');
   let name = $state('');
   let gender = $state<Gender>('m');
@@ -22,6 +33,25 @@
   let error = $state<string | null>(null);
   let account = $state<AccountView | null>(null);
 
+  onMount(() => {
+    void pageHello(app.core, pageUrl).then((h) => {
+      helloState = h ? 'done' : 'failed';
+      field = setupField(helloState, h);
+      // What the person typed is never overwritten.
+      if (!touched && field.kind !== 'other') serverUrl = pageUrl;
+      if (field.kind === 'taken') error = t.admin.adminTaken;
+    });
+  });
+
+  /** Errors about another server name the address that was typed. */
+  function serverError(err: unknown): string {
+    if (field.kind !== 'other') return errorText(err);
+    const at = serverUrl.trim();
+    if (isNetworkError(err) || (isApiError(err) && err.status >= 500)) return t.admin.noAnswerAt(at);
+    if (isApiError(err, 'unexpected_response') || isApiError(err, 'not_found') || err instanceof TypeError) return t.admin.notServerAt(at);
+    return errorText(err);
+  }
+
   async function checkServer(e: SubmitEvent): Promise<void> {
     e.preventDefault();
     busy = true;
@@ -29,13 +59,13 @@
     try {
       const hello = await app.core.serverInfo(serverUrl);
       if (!hello.adminCodeActive) {
-        error = t.admin.adminTaken;
+        error = field.kind === 'other' ? t.admin.adminTakenAt(serverUrl.trim()) : t.admin.adminTaken;
         return;
       }
       family = hello.familyName;
       step = 'profile';
     } catch (err) {
-      error = errorText(err);
+      error = serverError(err);
       app.log('warn', 'setup', 'server check failed', err);
     } finally {
       busy = false;
@@ -80,8 +110,12 @@
 
 <Page {title} onback={back} narrow>
   {#if step === 'server'}
-    <form class="stack" onsubmit={checkServer} novalidate>
-      <p>{t.admin.serverLead}</p>
+    <form class="stack" onsubmit={checkServer} novalidate data-hello={helloState}>
+      {#if field.kind === 'other'}
+        <p class="notice" data-testid="setup-other-server">{t.admin.otherServerLead}</p>
+      {:else}
+        <p>{t.admin.serverLead}</p>
+      {/if}
       <div class="field">
         <label for="admin-server">{t.admin.serverLabel}</label>
         <input
@@ -92,9 +126,15 @@
           autocomplete="off"
           autocapitalize="off"
           spellcheck="false"
+          disabled={helloState === 'pending'}
+          placeholder={helloState === 'pending' ? t.admin.checkingPage : field.kind === 'other' ? t.admin.otherServerHint : ''}
+          aria-describedby={field.kind === 'other' ? 'admin-server-hint' : undefined}
+          oninput={() => (touched = true)}
           bind:value={serverUrl}
         />
+        {#if field.kind === 'other'}<span id="admin-server-hint" class="hint">{t.admin.otherServerHint}</span>{/if}
       </div>
+      {#if field.kind !== 'taken'}
       <div class="field">
         <label for="admin-code">{t.admin.codeLabel}</label>
         <input
@@ -109,10 +149,13 @@
         />
         <span id="admin-code-hint" class="hint">{t.admin.codeHint}</span>
       </div>
+      {/if}
       {#if error}<p class="error-text" role="alert">{error}</p>{/if}
-      <button class="btn block" type="submit" disabled={busy || serverUrl.trim() === '' || code.trim() === ''}>
-        {busy ? t.admin.checking : t.common.next}
-      </button>
+      {#if field.kind !== 'taken'}
+        <button class="btn block" type="submit" disabled={busy || helloState === 'pending' || serverUrl.trim() === '' || code.trim() === ''}>
+          {busy ? t.admin.checking : t.common.next}
+        </button>
+      {/if}
     </form>
   {:else if step === 'profile'}
     <form class="stack" onsubmit={create} novalidate>

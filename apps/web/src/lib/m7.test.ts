@@ -93,7 +93,7 @@ describe('appearance settings', () => {
     expect(appearanceAttributes(DEFAULT_APPEARANCE)).toEqual({
       data: { theme: null, palette: null, radius: null, chatBg: null },
       scale: null,
-      themeColor: { light: '#2f5d50', dark: '#1c211f' },
+      themeColor: { light: '#1e4e41', dark: '#1c211f' },
     });
     const a = appearanceAttributes({ theme: 'dark', palette: 'blue', textSize: 3, radius: 'small', background: 'grid' });
     expect(a.data).toEqual({ theme: 'dark', palette: 'blue', radius: 'small', chatBg: 'grid' });

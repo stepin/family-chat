@@ -65,7 +65,7 @@ async fn starts_on_an_m1_folder() {
     f["expiresAt"] = json!(fcd::datadir::now_ms() + 86_400_000);
     std::fs::write(&inv, f.to_string()).unwrap();
 
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     assert!(srv.admin_code.is_empty(), "not a first start");
     assert_eq!(srv.server_id(), info["serverId"]);
     let server: Value = serde_json::from_slice(&std::fs::read(data.join("server.json")).unwrap()).unwrap();
@@ -148,7 +148,7 @@ async fn starts_on_an_m1_folder() {
     // And everything is there after another restart; the direct chat files
     // keep the M1 format.
     srv.stop().await;
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     assert_eq!(
         mama.get(&srv, "/v1/chats").await.json()["chats"]
             .as_array()

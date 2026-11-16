@@ -10,6 +10,9 @@ import { systemClock, type Clock } from '../util/clock.ts';
 import { ApiError, isServerErrorCode, NetworkError } from './errors.ts';
 import type {
   AdminUser,
+  CheckLastPush,
+  CheckPushResult,
+  CheckWaitResult,
   AvatarUpload,
   BlobInfo,
   BlobPartResult,
@@ -132,7 +135,7 @@ export class Transport {
       time: num(o, 'time'),
       maxEventBytes: num(o, 'maxEventBytes'),
       adminCodeActive: bool(o, 'adminCodeActive'),
-      m0: o.m0 === true,
+      offerSetup: o.offerSetup === true,
       maxPartBytes: optNum(o, 'maxPartBytes', 4194560),
       maxBlobBytes: optNum(o, 'maxBlobBytes', num(o, 'maxFileMb') * 1048576 + 65536),
       maxAvatarBytes: optNum(o, 'maxAvatarBytes', 262144),
@@ -605,6 +608,55 @@ export class Transport {
     };
   }
 
+  // ---- server checks (M8) ----
+
+  /**
+   * Long request: the server answers after `seconds`. The timeout is the
+   * duration plus 10 s, so a healthy server never looks like a cut proxy.
+   */
+  async checkWait(token: string, seconds: number, signal?: AbortSignal): Promise<CheckWaitResult> {
+    const o = obj(
+      await this.#json({
+        method: 'GET',
+        path: '/v1/check/wait',
+        template: '/v1/check/wait',
+        token,
+        query: { seconds },
+        signal,
+        timeoutMs: seconds * 1000 + 10_000,
+      }),
+      'check wait',
+    );
+    return { seconds: num(o, 'seconds'), startedAt: num(o, 'startedAt'), finishedAt: num(o, 'finishedAt') };
+  }
+
+  /** Test notification to this device's stored subscription, now or after `delaySeconds`. */
+  async checkPush(token: string, delaySeconds: number, signal?: AbortSignal): Promise<CheckPushResult> {
+    const o = obj(
+      await this.#json({
+        method: 'POST',
+        path: '/v1/check/push',
+        template: '/v1/check/push',
+        token,
+        json: { delaySeconds, from: 'app' },
+        signal,
+        timeoutMs: this.#timeoutMs * 2,
+      }),
+      'check push',
+    );
+    return { sent: o.sent === true, scheduled: o.scheduled === true, sendAt: typeof o.sendAt === 'number' ? o.sendAt : null };
+  }
+
+  /** The last test notification of this device, or null. */
+  async checkLastPush(token: string, signal?: AbortSignal): Promise<CheckLastPush | null> {
+    const o = obj(
+      await this.#json({ method: 'GET', path: '/v1/check/push', template: '/v1/check/push', token, signal }),
+      'check last push',
+    );
+    if (!isObject(o.last)) return null;
+    return { at: num(o.last, 'at'), result: str(o.last, 'result') };
+  }
+
   // ---- plumbing ----
 
   /** Performs a request; returns parsed JSON (or undefined for an empty 2xx body). */
@@ -737,8 +789,9 @@ export class Transport {
         }
         const ra = Number(res.headers.get('retry-after'));
         const retryAfterMs = Number.isFinite(ra) && ra > 0 ? ra * 1000 : undefined;
+        const reason = typeof o.reason === 'string' && /^[a-z_]{1,32}$/.test(o.reason) ? o.reason : undefined;
         report(res.status, code);
-        throw new ApiError(res.status, code, where, { retryAfterMs, details });
+        throw new ApiError(res.status, code, where, { retryAfterMs, details, reason });
       }
 
       const events = isObject(data) && Array.isArray(data.events) ? data.events.length : undefined;

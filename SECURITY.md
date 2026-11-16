@@ -3,8 +3,9 @@
 Если вы нашли уязвимость в Family Chat (сервер `fcd`, приложение, протокол), пожалуйста, не публикуйте её в
 открытых задачах. Напишите сначала нам, чтобы исправление успело выйти раньше описания.
 
-**Контакт для сообщений:** `TO BE FILLED IN AT PUBLICATION` (адрес будет указан при публикации проекта; до этого
-сообщайте владельцу репозитория лично).
+**Куда сообщать:** закрытое сообщение через GitHub,
+https://github.com/stepin/family-chat/security/advisories/new (вкладка Security, кнопка «Report a vulnerability»).
+Его видят только вы и сопровождающие проекта.
 
 Что поможет разобраться:
 
@@ -24,6 +25,7 @@
 
 ## In English
 
-Please do not report vulnerabilities in public issues. Contact: `TO BE FILLED IN AT PUBLICATION`. Include the
+Please do not report vulnerabilities in public issues. Report them privately through GitHub:
+https://github.com/stepin/family-chat/security/advisories/new (Security tab, "Report a vulnerability"). Include the
 version, what is affected, and how to reproduce it. The [security model](docs/en/SECURITY-MODEL.md) lists what
 Family Chat promises and what it does not.

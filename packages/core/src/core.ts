@@ -33,6 +33,9 @@ import type {
   NewInvite,
   PushSubscriptionInput,
   ServerStats,
+  CheckLastPush,
+  CheckPushResult,
+  CheckWaitResult,
 } from './api/types.ts';
 import { commitEvents, decodeEvents, deleteLocally } from './apply.ts';
 import { exportArchive, importArchive, toReadableStream, type ArchiveSource, type ExportOptions, type ImportResult } from './archive.ts';
@@ -1202,6 +1205,34 @@ export class FamilyChatCore {
       return rt.session.call((t) => rt.session.transport.stats(t));
     },
   };
+
+  // ---- server check (M8) ----
+
+  /**
+   * Server checks for an administrator's device (Settings → Family and
+   * server → Server check): a long request and a test notification to this
+   * device's stored subscription. Errors are ApiError / NetworkError.
+   */
+  serverCheck(accountId: string): {
+    wait: (seconds: number, signal?: AbortSignal) => Promise<CheckWaitResult>;
+    push: (delaySeconds: number) => Promise<CheckPushResult>;
+    lastPush: () => Promise<CheckLastPush | null>;
+  } {
+    return {
+      wait: async (seconds, signal) => {
+        const rt = await this.#runtime(accountId);
+        return rt.session.call((t) => rt.session.transport.checkWait(t, seconds, signal));
+      },
+      push: async (delaySeconds) => {
+        const rt = await this.#runtime(accountId);
+        return rt.session.call((t) => rt.session.transport.checkPush(t, delaySeconds));
+      },
+      lastPush: async () => {
+        const rt = await this.#runtime(accountId);
+        return rt.session.call((t) => rt.session.transport.checkLastPush(t));
+      },
+    };
+  }
 
   // ---- push ----
 

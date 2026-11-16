@@ -68,9 +68,13 @@ test('iOS Safari: install first, copy the invitation, no identity created', asyn
   );
   expect(identities).toBe(0);
 
-  // Setup and restore are also deferred until the app is installed.
+  // Restore is also deferred until the app is installed. This server already
+  // has its administrator, so setup is not offered at all (M8).
   await page.goto(`${fcd.url}/`);
-  await page.getByRole('button', { name: 'Настроить для своей семьи' }).click();
+  await expect(page.locator('main.welcome')).toHaveAttribute('data-hello', 'done');
+  await expect(page.getByRole('button', { name: 'Настроить для своей семьи' })).toHaveCount(0);
+  await expect(page.getByTestId('server-taken')).toBeVisible();
+  await page.getByRole('button', { name: 'Восстановить по фразе' }).click();
   await expect(page.getByRole('heading', { name: 'Сначала установите приложение' })).toBeVisible();
 });
 

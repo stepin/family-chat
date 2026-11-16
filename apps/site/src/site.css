@@ -115,6 +115,12 @@ main,
   padding-bottom: var(--sp-2);
 }
 
+/* Every menu item on one line: the general `li + li` spacing below would push
+   all items but the first down (M8). */
+.site-header nav li + li {
+  margin-top: 0;
+}
+
 .site-header nav a {
   display: inline-block;
   padding: var(--sp-1) 0;

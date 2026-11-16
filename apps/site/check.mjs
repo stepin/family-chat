@@ -1,11 +1,10 @@
 // Checks a built site: every internal link and image points to an existing
 // file (and anchor), no page loads anything from another site, no page has
-// a script, and every page carries the strict Content-Security-Policy.
+// a script, every page carries the strict Content-Security-Policy, no
+// placeholder address is left, and there is no app on the site (M8: the app
+// opens only from the family's own server).
 //
 //   node check.mjs [DIR]      (default: dist)
-//
-// The web client under app/ is Vite output with its own checks (apps/web);
-// links into it are checked, its own files are not.
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -13,16 +12,34 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-function htmlFiles(dir, root = dir) {
+/** Placeholders of the time before publication; none may come back. */
+export const PLACEHOLDERS = ['code.example.org', 'registry.example.org', 'TO BE FILLED'];
+
+function files(dir, ext) {
   const out = [];
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
-    if (statSync(p).isDirectory()) {
-      if (relative(root, p) === 'app') continue;
-      out.push(...htmlFiles(p, root));
-    } else if (name.endsWith('.html')) out.push(p);
+    if (statSync(p).isDirectory()) out.push(...files(p, ext));
+    else if (ext.some((e) => name.endsWith(e))) out.push(p);
   }
   return out;
+}
+
+const htmlFiles = (dir) => files(dir, ['.html']);
+
+/** `file:line: found "<placeholder>"` for every placeholder in the text files of `dir`. */
+export function findPlaceholders(dir) {
+  const root = resolve(dir);
+  const problems = [];
+  for (const file of files(root, ['.html', '.css', '.txt', '.xml', '.json'])) {
+    const page = relative(root, file).split(sep).join('/');
+    readFileSync(file, 'utf8')
+      .split('\n')
+      .forEach((line, i) => {
+        for (const p of PLACEHOLDERS) if (line.includes(p)) problems.push(`${page}:${i + 1}: found "${p}"`);
+      });
+  }
+  return problems;
 }
 
 function ids(html) {
@@ -32,7 +49,8 @@ function ids(html) {
 /** Returns a list of problems (empty when the site is fine). */
 export function checkSite(dir, { basePath = '/' } = {}) {
   const root = resolve(dir);
-  const problems = [];
+  const problems = [...findPlaceholders(root)];
+  if (existsSync(join(root, 'app'))) problems.push('app/: the site must not carry the app (it opens from the family server)');
   const cache = new Map();
   const read = (f) => {
     if (!cache.has(f)) cache.set(f, readFileSync(f, 'utf8'));
@@ -46,6 +64,7 @@ export function checkSite(dir, { basePath = '/' } = {}) {
     if (/<(iframe|object|embed)\b/i.test(html)) problems.push(`${page}: embeds other content`);
     if (!/<html lang="(ru|en)">/.test(html)) problems.push(`${page}: no lang on <html>`);
     if (!/<h1[\s>]/.test(html)) problems.push(`${page}: no <h1>`);
+    if (/\shref="[^"]*\bapp\/[^"]*"/.test(html)) problems.push(`${page}: links to app/`);
     for (const m of html.matchAll(/<img\b[^>]*>/g)) {
       if (!/\salt="/.test(m[0])) problems.push(`${page}: <img> without alt: ${m[0]}`);
     }

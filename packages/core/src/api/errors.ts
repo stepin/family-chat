@@ -48,7 +48,13 @@ export type ServerErrorCode =
   | 'file_mismatch'
   | 'not_author'
   | 'bad_manifest'
-  | 'too_many_packs';
+  | 'too_many_packs'
+  // M8: server checks
+  | 'admin_code_inactive'
+  | 'push_failed'
+  | 'no_subscription'
+  | 'too_many_pending'
+  | 'shutting_down';
 
 const SERVER_CODES: ReadonlySet<string> = new Set<ServerErrorCode>([
   'bad_request',
@@ -96,6 +102,11 @@ const SERVER_CODES: ReadonlySet<string> = new Set<ServerErrorCode>([
   'not_author',
   'bad_manifest',
   'too_many_packs',
+  'admin_code_inactive',
+  'push_failed',
+  'no_subscription',
+  'too_many_pending',
+  'shutting_down',
 ]);
 
 /**
@@ -117,18 +128,21 @@ export class ApiError extends Error {
   readonly retryAfterMs: number | undefined;
   /** Extra numeric fields of the error body: `epoch`, `limit`, `rev`, `version`. */
   readonly details: Readonly<Record<string, number>>;
+  /** `reason` of the error body (`push_failed`: gone, unauthorized, rejected, network). */
+  readonly reason: string | undefined;
 
   constructor(
     status: number,
     code: ApiErrorCode,
     where: string,
-    options: { retryAfterMs?: number | undefined; details?: Record<string, number> } = {},
+    options: { retryAfterMs?: number | undefined; details?: Record<string, number>; reason?: string | undefined } = {},
   ) {
     super(`${where}: HTTP ${status} ${code}`);
     this.status = status;
     this.code = code;
     this.retryAfterMs = options.retryAfterMs;
     this.details = options.details ?? {};
+    this.reason = options.reason;
   }
 }
 

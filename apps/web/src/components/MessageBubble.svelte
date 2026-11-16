@@ -7,6 +7,7 @@
   import { formatTime } from '../lib/format.ts';
   import { lazy } from '../lib/lazy.ts';
   import { linkify } from '../lib/linkify.ts';
+  import { isSingleEmoji } from '../lib/single-emoji.ts';
   import { sendStatus } from '../lib/status.ts';
   import { t } from '../lib/strings.ts';
 
@@ -70,6 +71,17 @@
   const sticker = $derived(!deleted && message.kind === 'msg' ? (message.sticker ?? null) : null);
   const reactions = $derived(message.reactions ?? []);
   const quote = $derived(message.replyTo ?? null);
+  // M8: a text that is one emoji is twice as large; without a quote or
+  // "forwarded" it also loses the bubble background, like a sticker.
+  const emojiOnly = $derived(
+    !deleted &&
+      message.kind === 'msg' &&
+      sticker === null &&
+      (message.attachments?.length ?? 0) === 0 &&
+      !message.location &&
+      isSingleEmoji(message.body),
+  );
+  const bare = $derived(emojiOnly && quote === null && !message.fwd);
   const quoteText = $derived.by(() => {
     if (!quote || !quote.available) return t.msg.unavailable;
     const body = quote.body.replace(/\s+/g, ' ').trim();
@@ -171,7 +183,8 @@
     <div
       class="bubble"
       class:deleted
-      class:sticker-bubble={sticker !== null}
+      class:sticker-bubble={sticker !== null || bare}
+      class:emoji-only={emojiOnly}
       bind:this={bubbleEl}
       oncontextmenu={onContextMenu}
       onpointerdown={(e) => longPress(e, () => openMenu())}
@@ -222,7 +235,7 @@
         <p class="text muted">{t.chat.updateRequired}</p>
       {:else if message.body.length > 0}
         <!-- prettier-ignore -->
-        <p class="text">{#each segments as s, i (i)}{#if s.kind === 'link'}<a href={s.href} target="_blank" rel="noopener noreferrer nofollow">{s.text}</a>{:else}{s.text}{/if}{/each}</p>
+        <p class="text" class:emoji-text={emojiOnly}>{#each segments as s, i (i)}{#if s.kind === 'link'}<a href={s.href} target="_blank" rel="noopener noreferrer nofollow">{s.text}</a>{:else}{s.text}{/if}{/each}</p>
       {/if}
       {/if}
       <span class="meta">
@@ -557,6 +570,17 @@
     border-radius: 999px;
     background: var(--surface);
     color: var(--muted);
+  }
+
+  /* One emoji (M8): twice the message text size, following the text size setting. */
+  .text.emoji-text {
+    font-size: calc(2 * var(--text-m));
+    line-height: 1.2;
+  }
+
+  .bubble.emoji-only {
+    min-width: 44px;
+    min-height: 44px;
   }
 
   .sticker-wait {

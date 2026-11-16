@@ -42,10 +42,11 @@ export const APPEARANCE_STORAGE_KEY = 'fc.appearance';
 
 /**
  * Colour of the browser's bar (`theme-color`) per palette: the light value
- * is the accent, the dark one the surface of the dark theme.
+ * is the accent (green: the icon's background, M8), the dark one the surface
+ * of the dark theme.
  */
 export const THEME_COLORS: Record<Palette, { readonly light: string; readonly dark: string }> = {
-  green: { light: '#2f5d50', dark: '#1c211f' },
+  green: { light: '#1e4e41', dark: '#1c211f' },
   blue: { light: '#1e5aa0', dark: '#1a2029' },
   violet: { light: '#5b3d99', dark: '#1f1b26' },
   rose: { light: '#a3325a', dark: '#251b1e' },

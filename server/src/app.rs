@@ -5,27 +5,27 @@ use std::time::Duration;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Query, Request, State};
+use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
-use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::watch;
 
 use crate::api;
 use crate::assets::Assets;
 use crate::blobs;
+use crate::check::{self, Checks};
 use crate::config::Settings;
-use crate::datadir::{DataDir, check_admin_code, now_ms};
+use crate::datadir::{DataDir, now_ms};
 pub use crate::error::ApiError;
 use crate::groups;
 use crate::headers;
 use crate::packs::{self, PackStore};
 use crate::ratelimit::RateLimiter;
 use crate::store::{Store, StoreConfig};
-use crate::webpush::{PushClient, Subscription, VapidKey};
+use crate::webpush::{PushClient, VapidKey};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_WAIT_SECONDS: u64 = 60;
@@ -39,8 +39,6 @@ pub struct AppState {
     pub vapid: VapidKey,
     /// `None` when push is disabled in the settings.
     pub push: Option<PushClient>,
-    /// `--m0`: the check endpoints are available.
-    pub m0: bool,
     pub assets: Assets,
     /// Becomes `true` when the server starts shutting down.
     pub shutdown: watch::Receiver<bool>,
@@ -48,6 +46,8 @@ pub struct AppState {
     /// Sticker packs (`packs/`).
     pub packs: PackStore,
     pub limiter: RateLimiter,
+    /// Server checks (`/v1/check/*`): pending delayed pushes, last outcomes.
+    pub checks: Checks,
 }
 
 impl AppState {
@@ -56,7 +56,6 @@ impl AppState {
         dir: &DataDir,
         settings: Settings,
         assets: Assets,
-        m0: bool,
         shutdown: watch::Receiver<bool>,
     ) -> Result<Arc<AppState>, String> {
         let store = Store::open(
@@ -77,12 +76,12 @@ impl AppState {
             settings,
             server_id: dir.server.server_id.clone(),
             vapid: dir.vapid.clone(),
-            m0,
             assets,
             shutdown,
             store,
             packs,
             limiter: RateLimiter::default(),
+            checks: Checks::default(),
         }))
     }
 }
@@ -150,8 +149,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/admin/users", get(api::admin_users))
         .route("/v1/admin/users/{id}", delete(api::remove_user))
         .route("/v1/admin/stats", get(api::stats))
-        .route("/v1/m0/wait", get(m0_wait))
-        .route("/v1/m0/push", post(m0_push))
+        .route("/v1/check/wait", get(check::wait))
+        .route("/v1/check/push", get(check::last_push).post(check::push))
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(fallback)
         .layer(middleware::from_fn(cors))
@@ -247,76 +246,9 @@ async fn hello(State(st): State<Arc<AppState>>) -> Response {
         "maxPackStickers": crate::envelope::MAX_PACK_STICKERS,
         "maxPackBytes": crate::envelope::MAX_PACK_BYTES,
         "adminCodeActive": st.store.read(|m| !m.server.admin_code_hash.is_empty()),
-        "m0": st.m0,
+        "offerSetup": s.offer_setup,
     }))
     .into_response()
-}
-
-/// M0 check endpoints exist only with `--m0` and need the administrator code
-/// as `Authorization: Bearer <code>`.
-fn require_m0_admin(st: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
-    if !st.m0 {
-        return Err(ApiError::new(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            "no such API endpoint",
-        ));
-    }
-    let code = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(str::trim)
-        .unwrap_or("");
-    let hash = st.store.read(|m| m.server.admin_code_hash.clone());
-    if code.is_empty() || !check_admin_code(&hash, code) {
-        return Err(ApiError::new(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "administrator code required",
-        ));
-    }
-    Ok(())
-}
-
-#[derive(Deserialize)]
-struct WaitQuery {
-    seconds: Option<u64>,
-}
-
-/// Long request: answers after `seconds` (default 25, at most 60), sending
-/// nothing before that. Checks that proxies keep such requests open.
-async fn m0_wait(
-    State(st): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Query(q): Query<WaitQuery>,
-) -> Result<Response, ApiError> {
-    require_m0_admin(&st, &headers)?;
-    let seconds = q.seconds.unwrap_or(25);
-    if seconds > MAX_WAIT_SECONDS {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "bad_request",
-            "seconds must be at most 60",
-        ));
-    }
-    let started = now_ms();
-    let mut shutdown = st.shutdown.clone();
-    tokio::select! {
-        _ = tokio::time::sleep(Duration::from_secs(seconds)) => {}
-        _ = shutdown.wait_for(|v| *v) => {
-            return Err(ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "shutting_down", "server is shutting down"));
-        }
-    }
-    Ok(Json(json!({ "seconds": seconds, "startedAt": started, "finishedAt": now_ms() })).into_response())
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PushRequest {
-    subscription: Subscription,
-    #[serde(default)]
-    delay_seconds: u64,
 }
 
 /// Push endpoints must be HTTPS; plain HTTP only to loopback (tests).
@@ -330,75 +262,6 @@ pub fn endpoint_allowed(endpoint: &str) -> bool {
         return matches!(host, "127.0.0.1" | "localhost" | "[::1]");
     }
     false
-}
-
-/// The test notification carries no human text (M7): the service worker
-/// words it in the language of the app (public/push-sw.js), `delay` says
-/// whether it was sent later.
-fn test_payload(delay: u64) -> Vec<u8> {
-    json!({ "kind": "m0-test", "delay": delay, "sentAt": now_ms() })
-        .to_string()
-        .into_bytes()
-}
-
-/// Sends a test notification to the given subscription, now or after
-/// `delaySeconds` (at most 300, enough to close the app).
-async fn m0_push(
-    State(st): State<Arc<AppState>>,
-    headers: HeaderMap,
-    body: Result<Json<PushRequest>, axum::extract::rejection::JsonRejection>,
-) -> Result<Response, ApiError> {
-    require_m0_admin(&st, &headers)?;
-    let Json(req) = body.map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, "bad_request", e.body_text()))?;
-    let Some(client) = st.push.clone() else {
-        return Err(ApiError::new(
-            StatusCode::CONFLICT,
-            "push_disabled",
-            "push is disabled on this server",
-        ));
-    };
-    if req.delay_seconds > MAX_PUSH_DELAY_SECONDS {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "bad_request",
-            "delaySeconds must be at most 300",
-        ));
-    }
-    if !endpoint_allowed(&req.subscription.endpoint) {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "bad_request",
-            "subscription endpoint must be https",
-        ));
-    }
-    let delay = req.delay_seconds;
-    if delay == 0 {
-        let outcome = client
-            .send(&st.vapid, &req.subscription, &test_payload(0))
-            .await
-            .map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, "push_failed", e.to_string()))?;
-        tracing::info!(service = %outcome.service, status = outcome.status, "test push sent");
-        return Ok(Json(json!({ "sent": true, "outcome": outcome })).into_response());
-    }
-
-    let send_at = now_ms() + delay * 1000;
-    let st2 = st.clone();
-    tokio::spawn(async move {
-        let mut shutdown = st2.shutdown.clone();
-        tokio::select! {
-            _ = tokio::time::sleep(Duration::from_secs(delay)) => {}
-            _ = shutdown.wait_for(|v| *v) => return,
-        }
-        match client.send(&st2.vapid, &req.subscription, &test_payload(delay)).await {
-            Ok(o) => tracing::info!(service = %o.service, status = o.status, delay, "delayed test push sent"),
-            Err(e) => tracing::warn!(delay, "delayed test push failed: {e}"),
-        }
-    });
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(json!({ "sent": false, "scheduled": true, "sendAt": send_at })),
-    )
-        .into_response())
 }
 
 #[cfg(test)]

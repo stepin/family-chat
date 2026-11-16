@@ -20,7 +20,7 @@ fn bytes(n: usize, seed: u8) -> Vec<u8> {
 #[tokio::test]
 async fn upload_resume_download_delete() {
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
     let b = new_blob();
     let max_part = fcd::blobs::MAX_PART_BYTES as usize;
@@ -112,7 +112,7 @@ async fn upload_resume_download_delete() {
     // Kept across a restart.
     let data = tmp.path().to_path_buf();
     srv.stop().await;
-    let srv = open(&data, false, Overrides::default()).await;
+    let srv = open(&data, Overrides::default()).await;
     assert_eq!(papa.get(&srv, &format!("/v1/blobs/{b}/1")).await.body, p1);
     let info = papa.get(&srv, &format!("/v1/blobs/{b}")).await.json();
     assert_eq!(info["total"], max_part + 12345);
@@ -134,7 +134,6 @@ async fn total_size_limit_and_free_space() {
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(
         tmp.path(),
-        false,
         Overrides {
             max_file_mb: Some(1),
             ..Default::default()
@@ -187,7 +186,6 @@ async fn total_size_limit_and_free_space() {
 
     let srv = open(
         &data,
-        false,
         Overrides {
             min_free_mb: Some(u64::MAX / (1024 * 1024 * 2)),
             ..Default::default()
@@ -208,7 +206,6 @@ async fn retention_removes_old_attachment_days() {
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(
         tmp.path(),
-        false,
         Overrides {
             retention_days: Some(7),
             ..Default::default()
@@ -239,7 +236,6 @@ async fn retention_removes_old_attachment_days() {
     .unwrap();
     let srv = open(
         &data,
-        false,
         Overrides {
             retention_days: Some(7),
             ..Default::default()
@@ -263,7 +259,7 @@ async fn retention_removes_old_attachment_days() {
 async fn chunked_upload_over_the_limit_is_cut_off() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let tmp = tempfile::tempdir().unwrap();
-    let srv = start(tmp.path(), false, Overrides::default()).await;
+    let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, _papa) = family(&srv).await;
     let b = new_blob();
     let send = |total: usize| {

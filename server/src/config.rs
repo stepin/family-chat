@@ -32,6 +32,8 @@ pub struct Overrides {
     pub push_subject: Option<String>,
     pub min_free_mb: Option<u64>,
     pub trust_forwarded_for: Option<bool>,
+    /// M8: offer family setup on the first screen even when a family exists.
+    pub offer_setup: Option<bool>,
     /// M7: language of the console output, `ru` or `en` (only in the file; the flag is `--lang`).
     pub lang: Option<String>,
 }
@@ -49,6 +51,7 @@ impl Overrides {
             push_subject: self.push_subject.or(lower.push_subject),
             min_free_mb: self.min_free_mb.or(lower.min_free_mb),
             trust_forwarded_for: self.trust_forwarded_for.or(lower.trust_forwarded_for),
+            offer_setup: self.offer_setup.or(lower.offer_setup),
             lang: self.lang.or(lower.lang),
         }
     }
@@ -67,6 +70,9 @@ pub struct Settings {
     /// Take the client address for rate limiting from `X-Forwarded-For`
     /// (only behind a reverse proxy that sets it).
     pub trust_forwarded_for: bool,
+    /// The web app offers family setup even when this server has its family
+    /// (to set up a family on another server). Still one family per server.
+    pub offer_setup: bool,
 }
 
 impl Settings {
@@ -106,12 +112,12 @@ impl Settings {
             .into());
         }
         let push_subject = o.push_subject.unwrap_or_else(|| DEFAULT_PUSH_SUBJECT.into());
+        // Flags and variables are checked when parsed, so a bad value here comes from the file.
         if !(push_subject.starts_with("mailto:") || push_subject.starts_with("https://")) {
-            return Err(crate::lang::l(
-                "push_subject должен начинаться с mailto: или https://",
-                "push_subject must start with mailto: or https://",
-            )
-            .into());
+            return Err(tr!(
+                "push_subject в config.toml: недопустимое значение «{push_subject}»: нужно mailto: или https://",
+                "push_subject in config.toml: invalid value “{push_subject}”: expected mailto: or https://"
+            ));
         }
         if let Some(l) = o.lang.as_deref()
             && crate::lang::Lang::parse(l).is_none_or(|p| p.code() != l)
@@ -131,6 +137,7 @@ impl Settings {
             push_subject,
             min_free_mb: o.min_free_mb.unwrap_or(DEFAULT_MIN_FREE_MB),
             trust_forwarded_for: o.trust_forwarded_for.unwrap_or(false),
+            offer_setup: o.offer_setup.unwrap_or(false),
         })
     }
 }
@@ -151,6 +158,7 @@ pub fn read_config_file(path: &Path) -> Result<Overrides, String> {
 /// commented in the server's language.
 pub fn config_template(s: &Settings) -> String {
     let family = toml::Value::String(s.family_name.clone()).to_string();
+    let offer_setup = s.offer_setup;
     let (port, ip, retention, max_file, push, min_free, trust_xff) = (
         s.listen.port(),
         s.listen.ip(),
@@ -191,6 +199,11 @@ min_free_mb = {min_free}
 # который этот заголовок выставляет; иначе его может подделать кто угодно.
 trust_forwarded_for = {trust_xff}
 
+# true: первый экран веб-приложения предлагает «Настроить для своей семьи», даже когда
+# семья на этом сервере уже есть, чтобы настроить семью на другом сервере.
+# Сервер по-прежнему держит одну семью.
+offer_setup = {offer_setup}
+
 # Язык сообщений сервера: "ru" или "en". Без этой строки: флаг --lang,
 # затем переменные LC_ALL, LC_MESSAGES, LANG, иначе русский.
 # lang = "ru"
@@ -224,6 +237,11 @@ min_free_mb = {min_free}
 # X-Forwarded-For header. Only turn it on behind a reverse proxy that sets
 # this header; otherwise anyone can fake it.
 trust_forwarded_for = {trust_xff}
+
+# true: the web app's first screen offers "Set up for my family" even when this
+# server already has its family, to set up a family on another server.
+# The server still holds one family.
+offer_setup = {offer_setup}
 
 # Language of the server's messages: "ru" or "en". Without this line: the
 # --lang flag, then the LC_ALL, LC_MESSAGES, LANG variables, else Russian.
@@ -311,5 +329,28 @@ mod tests {
         let s = Settings::resolve(flags.or(file)).unwrap();
         assert_eq!(s.listen.port(), 2);
         assert_eq!(s.family_name, "A");
+    }
+
+    #[test]
+    fn push_subject_from_file_names_the_file_and_value() {
+        let e = Settings::resolve(Overrides {
+            push_subject: Some("me@example.com".into()),
+            ..Default::default()
+        })
+        .unwrap_err();
+        assert!(e.contains("config.toml") && e.contains("me@example.com"), "{e}");
+    }
+
+    #[test]
+    fn offer_setup_round_trips_and_defaults_to_false() {
+        let s = Settings::resolve(Overrides::default()).unwrap();
+        assert!(!s.offer_setup);
+        let on = Settings::resolve(Overrides {
+            offer_setup: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+        let back: Overrides = toml::from_str(&config_template(&on)).unwrap();
+        assert_eq!(back.offer_setup, Some(true));
     }
 }

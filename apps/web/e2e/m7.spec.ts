@@ -289,7 +289,7 @@ test('M7: emoji picker by mouse and touch, invitations, header, gender, appearan
     await page.getByRole('button', { name: 'Настройки' }).click();
     await page.getByRole('button', { name: /Оформление/ }).click();
     await page.getByTestId('appearance-reset').click();
-    expect(await attrs()).toEqual({ theme: null, palette: null, radius: null, bg: null, scale: '', color: '#2f5d50' });
+    expect(await attrs()).toEqual({ theme: null, palette: null, radius: null, bg: null, scale: '', color: '#1e4e41' });
     await page.getByRole('button', { name: 'Назад' }).click();
     await page.getByRole('button', { name: 'Назад' }).click();
   });

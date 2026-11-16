@@ -7,6 +7,7 @@ pub mod api;
 pub mod app;
 pub mod assets;
 pub mod blobs;
+pub mod check;
 pub mod config;
 pub mod datadir;
 pub mod envelope;
@@ -72,9 +73,21 @@ pub struct Cli {
     /// X-Forwarded-For for rate limiting.
     #[arg(long, value_name = "BOOL", value_parser = parse_bool)]
     pub trust_forwarded_for: Option<bool>,
-    /// Setup check endpoints.
-    #[arg(long)]
+    /// Contact sent to push services (RFC 8292).
+    #[arg(long, value_name = "URI", value_parser = parse_push_subject)]
+    pub push_subject: Option<String>,
+    /// Free disk space floor, MB.
+    #[arg(long, value_name = "MB")]
+    pub min_free_mb: Option<u64>,
+    /// Offer family setup on the first screen even when this server has a family.
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool)]
+    pub offer_setup: Option<bool>,
+    /// Removed in M8: kept hidden only to stop with a hint ([`M0_REMOVED`]).
+    #[arg(long, hide = true)]
     pub m0: bool,
+    /// `FCD_M0` was set: one warning at start (it is ignored since M8).
+    #[arg(skip)]
+    pub legacy_m0_env: bool,
     /// Web client from a folder.
     #[arg(long, value_name = "DIR")]
     pub web_dir: Option<PathBuf>,
@@ -100,6 +113,28 @@ pub fn parse_bool(v: &str) -> Result<bool, String> {
     }
 }
 
+/// `mailto:` or `https://` contact for push services; errors give the value.
+pub fn parse_push_subject(v: &str) -> Result<String, String> {
+    let v = v.trim();
+    if v.starts_with("mailto:") || v.starts_with("https://") {
+        Ok(v.to_string())
+    } else {
+        Err(lang::l("нужно mailto: или https://", "expected mailto: or https://").to_string())
+    }
+}
+
+/// First line printed when the removed `--m0` flag is given (M8).
+pub fn m0_removed() -> &'static str {
+    lang::l(
+        "--m0 убран в M8: удалите его из команды или юнита; проверки сервера доступны всегда (до настройки — \
+         /server/ с кодом администратора, после — в приложении: Настройки → Семья и сервер → Проверка сервера). \
+         См. CHANGELOG, M8",
+        "--m0 was removed in M8: delete it from the command or unit; server checks are always available (before \
+         setup: /server/ with the admin code; after: in the app, Settings → Family and server → Server check). \
+         See CHANGELOG, M8",
+    )
+}
+
 /// Environment variables (M7): every option of the command line, by its
 /// argument id. A variable counts exactly like its flag (a flag on the
 /// command line wins); an empty variable counts as not set. Order of
@@ -113,7 +148,9 @@ pub const ENV_VARS: &[(&str, &str)] = &[
     ("max_file_mb", "FCD_MAX_FILE_MB"),
     ("push", "FCD_PUSH"),
     ("trust_forwarded_for", "FCD_TRUST_FORWARDED_FOR"),
-    ("m0", "FCD_M0"),
+    ("push_subject", "FCD_PUSH_SUBJECT"),
+    ("min_free_mb", "FCD_MIN_FREE_MB"),
+    ("offer_setup", "FCD_OFFER_SETUP"),
     ("web_dir", "FCD_WEB_DIR"),
     ("tls_cert", "FCD_TLS_CERT"),
     ("tls_key", "FCD_TLS_KEY"),
@@ -193,11 +230,32 @@ impl Cli {
         {
             self.trust_forwarded_for = Some(parse_bool(&v).map_err(|why| bad(n, &v, &why))?);
         }
-        if !self.m0
-            && let Some((n, v)) = var("m0")
+        if self.push_subject.is_none()
+            && let Some((n, v)) = var("push_subject")
         {
-            self.m0 = parse_bool(&v).map_err(|why| bad(n, &v, &why))?;
+            self.push_subject = Some(parse_push_subject(&v).map_err(|why| bad(n, &v, &why))?);
         }
+        if self.min_free_mb.is_none()
+            && let Some((n, v)) = var("min_free_mb")
+        {
+            self.min_free_mb = Some(num(&v).ok_or_else(|| {
+                bad(
+                    n,
+                    &v,
+                    lang::l(
+                        "нужно целое число мегабайт (0 — не проверять)",
+                        "expected a whole number of megabytes (0: no check)",
+                    ),
+                )
+            })?);
+        }
+        if self.offer_setup.is_none()
+            && let Some((n, v)) = var("offer_setup")
+        {
+            self.offer_setup = Some(parse_bool(&v).map_err(|why| bad(n, &v, &why))?);
+        }
+        // Removed in M8; ignored with one warning at start.
+        self.legacy_m0_env = lang::non_empty(&get, "FCD_M0").is_some();
         if self.web_dir.is_none() {
             self.web_dir = var("web_dir").map(|(_, v)| PathBuf::from(v));
         }
@@ -251,8 +309,7 @@ const HELP: HelpText = HelpText {
     after_help: (
         "\
 Настройки лежат и в <DIR>/config.toml (он пишется при первом запуске); флаги важнее файла.
-Только в config.toml: push_subject (контакт для push-сервисов), min_free_mb (если свободного
-места на диске меньше, новые сообщения не принимаются, по умолчанию 100) и lang.
+Каждый параметр, кроме --data, есть и в config.toml; lang пишется туда же флагом --lang.
 
 Примеры:
   fcd --data /srv/family-chat                     первый запуск печатает адрес и код администратора
@@ -268,8 +325,7 @@ const HELP: HelpText = HelpText {
 Журнал: RUST_LOG=debug для подробностей, NO_COLOR=1 для вывода без цвета.",
         "\
 Settings also live in <DIR>/config.toml (written at first start); flags win over the file.
-Only in config.toml: push_subject (contact sent to push services), min_free_mb (below this much
-free disk space new messages are refused, default 100) and lang.
+Every option except --data is also a key in config.toml; lang is written there by --lang too.
 
 Examples:
   fcd --data /srv/family-chat                     first start prints the address and the admin code
@@ -326,9 +382,19 @@ Logging: RUST_LOG=debug for more detail, NO_COLOR=1 for plain output.",
             "Take the client address for rate limiting from X-Forwarded-For; only behind a reverse proxy that sets it [default: false].",
         ),
         (
-            "m0",
-            "Включить точки проверки для страницы /server/ (длинный запрос, пробное уведомление; нужен код администратора).",
-            "Enable the setup check endpoints used by the /server/ page (long request, test push; admin code required).",
+            "push_subject",
+            "Контакт для push-сервисов (RFC 8292): mailto:адрес или https://адрес; адрес по умолчанию некоторые сервисы отклоняют [по умолчанию: mailto:fcd-admin@example.org].",
+            "Contact sent to push services (RFC 8292): mailto:address or https://address; some services reject the default [default: mailto:fcd-admin@example.org].",
+        ),
+        (
+            "min_free_mb",
+            "Если свободного места на диске меньше, МБ, новые сообщения и файлы не принимаются; 0 — не проверять [по умолчанию: 100].",
+            "Below this much free disk space, MB, new messages and files are refused; 0: no check [default: 100].",
+        ),
+        (
+            "offer_setup",
+            "Предлагать на первом экране «Настроить для своей семьи», даже когда семья на сервере уже есть: веб-приложение поможет настроить семью на другом сервере. Сервер по-прежнему держит одну семью [по умолчанию: false].",
+            "Offer “Set up for my family” on the first screen even when this server already has a family: the web app helps set up a family on another server. The server still holds one family [default: false].",
         ),
         (
             "web_dir",
@@ -579,9 +645,10 @@ impl Cli {
             retention_days: self.retention_days,
             max_file_mb: self.max_file_mb,
             push: self.push,
-            push_subject: None,
-            min_free_mb: None,
+            push_subject: self.push_subject.clone(),
+            min_free_mb: self.min_free_mb,
             trust_forwarded_for: self.trust_forwarded_for,
+            offer_setup: self.offer_setup,
             lang: self.lang.clone(),
         }
     }
@@ -606,6 +673,10 @@ pub fn init_tracing() {
 
 /// Entry point used by `main`. Returns the process exit code.
 pub async fn main_with(cli: Cli) -> i32 {
+    if cli.m0 {
+        eprintln!("{}: {}", lang::l("ошибка", "error"), m0_removed());
+        return 2;
+    }
     if let Some(Command::Healthcheck) = cli.command {
         let addr = match healthcheck::target(cli.data.as_deref(), &cli.overrides()) {
             Ok(a) => a,
@@ -774,7 +845,7 @@ pub async fn main_with(cli: Cli) -> i32 {
     let local = listener.local_addr().unwrap_or(settings.listen);
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let state = match AppState::new(&dir, settings.clone(), assets, cli.m0, shutdown_rx) {
+    let state = match AppState::new(&dir, settings.clone(), assets, shutdown_rx) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!("{e}");
@@ -819,12 +890,21 @@ pub async fn main_with(cli: Cli) -> i32 {
             )
         );
     }
-    if cli.m0 {
+    if cli.legacy_m0_env {
+        tracing::warn!(
+            "{}",
+            lang::l(
+                "FCD_M0 больше не используется, уберите её: проверки сервера доступны всегда",
+                "FCD_M0 is no longer used, remove it: server checks are always available"
+            )
+        );
+    }
+    if settings.offer_setup {
         tracing::info!(
             "{}",
             lang::l(
-                "включены проверочные точки M0 (--m0)",
-                "M0 check endpoints are on (--m0)"
+                "первый экран предлагает настроить семью (--offer-setup)",
+                "the first screen offers family setup (--offer-setup)"
             )
         );
     }
@@ -1043,6 +1123,9 @@ mod cli_tests {
                 ("FCD_MAX_FILE_MB", "50"),
                 ("FCD_PUSH", "0"),
                 ("FCD_TRUST_FORWARDED_FOR", "TRUE"),
+                ("FCD_PUSH_SUBJECT", "mailto:me@example.com"),
+                ("FCD_MIN_FREE_MB", "0"),
+                ("FCD_OFFER_SETUP", "1"),
                 ("FCD_M0", "1"),
                 ("FCD_WEB_DIR", "/w"),
                 ("FCD_TLS_CERT", "/c.pem"),
@@ -1059,7 +1142,15 @@ mod cli_tests {
         assert_eq!(c.max_file_mb, Some(50));
         assert_eq!(c.push, Some(false));
         assert_eq!(c.trust_forwarded_for, Some(true));
-        assert!(c.m0);
+        assert_eq!(c.push_subject.as_deref(), Some("mailto:me@example.com"));
+        assert_eq!(c.min_free_mb, Some(0));
+        assert_eq!(c.offer_setup, Some(true));
+        assert!(!c.m0, "FCD_M0 does not turn the removed flag on");
+        assert!(c.legacy_m0_env);
+        let o = c.overrides();
+        assert_eq!(o.push_subject.as_deref(), Some("mailto:me@example.com"));
+        assert_eq!(o.min_free_mb, Some(0));
+        assert_eq!(o.offer_setup, Some(true));
         assert_eq!(c.web_dir.as_deref(), Some(Path::new("/w")));
         assert_eq!(c.tls_cert.as_deref(), Some(Path::new("/c.pem")));
         assert_eq!(c.tls_key.as_deref(), Some(Path::new("/k.pem")));
@@ -1068,7 +1159,7 @@ mod cli_tests {
         let cmd = command(lang::Lang::Ru);
         for a in cmd
             .get_arguments()
-            .filter(|a| !matches!(a.get_id().as_str(), "help" | "version"))
+            .filter(|a| !matches!(a.get_id().as_str(), "help" | "version" | "m0"))
         {
             assert!(
                 env_name(a.get_id().as_str()).is_some(),
@@ -1116,7 +1207,9 @@ mod cli_tests {
         for (var, value) in [
             ("FCD_PORT", "eighty"),
             ("FCD_PUSH", "yes"),
-            ("FCD_M0", "on"),
+            ("FCD_OFFER_SETUP", "on"),
+            ("FCD_MIN_FREE_MB", "lots"),
+            ("FCD_PUSH_SUBJECT", "me@example.com"),
             ("FCD_RETENTION_DAYS", "-1"),
             ("FCD_LANG", "de"),
         ] {
@@ -1125,6 +1218,41 @@ mod cli_tests {
         }
         let e = cli(&[], &[("FCD_TLS_CERT", "/c.pem")]).unwrap_err();
         assert!(e.contains("FCD_TLS_KEY"), "{e}");
+    }
+
+    #[test]
+    fn new_flags_win_over_variables() {
+        let c = cli(
+            &[
+                "--push-subject",
+                "https://example.com/c",
+                "--min-free-mb",
+                "5",
+                "--offer-setup",
+                "false",
+            ],
+            &[
+                ("FCD_PUSH_SUBJECT", "mailto:x@example.com"),
+                ("FCD_MIN_FREE_MB", "7"),
+                ("FCD_OFFER_SETUP", "true"),
+            ],
+        )
+        .unwrap();
+        assert_eq!(c.push_subject.as_deref(), Some("https://example.com/c"));
+        assert_eq!(c.min_free_mb, Some(5));
+        assert_eq!(c.offer_setup, Some(false));
+        assert!(!c.legacy_m0_env);
+        // A bad flag value names the flag and the value.
+        let e = cli(&["--push-subject", "me@example.com"], &[]).unwrap_err();
+        assert!(e.contains("--push-subject") && e.contains("me@example.com"), "{e}");
+    }
+
+    #[test]
+    fn removed_m0_flag_parses_but_is_hidden() {
+        assert!(cli(&["--m0"], &[]).unwrap().m0);
+        let help = command(lang::Lang::En).render_long_help().to_string();
+        assert!(!help.contains("--m0"), "{help}");
+        assert!(m0_removed().contains("--m0"));
     }
 
     #[test]

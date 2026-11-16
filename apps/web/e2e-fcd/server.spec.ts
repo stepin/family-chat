@@ -10,7 +10,8 @@ test('server check page is served by fcd, shows hello and passes a long request'
   await expect(page.locator('#server')).toHaveValue(new URL(page.url()).origin);
   await expect(page.locator('#hello-status')).toContainText('Сервер отвечает');
   await expect(page.locator('#hello')).toContainText('E2E');
-  await expect(page.locator('#hello')).toContainText('включены');
+  // M8: the checks are always on; before setup the admin code is active.
+  await expect(page.locator('#hello')).toContainText('действует');
 
   await page.locator('#code').fill(code!);
   const button = page.getByRole('button', { name: 'Проверить длинный запрос (2 с)' });
@@ -21,7 +22,7 @@ test('server check page is served by fcd, shows hello and passes a long request'
   await expect(page.locator('#log li.ok').first()).toContainText('длинный запрос 2 с');
 
   const report = await page.locator('#report').inputValue();
-  expect(report).toContain('Family Chat: проверка сервера (M0v2)');
+  expect(report).toContain('Family Chat: проверка сервера');
   expect(report).toContain('семья «E2E»');
   expect(report).toContain('[OK] длинный запрос 2 с');
   expect(report).not.toContain(code!);
@@ -38,5 +39,7 @@ test('a wrong admin code is reported, not crashed on', async ({ page }) => {
   await page.goto('/server/?wait=1');
   await page.locator('#code').fill('0000-0000-0000-0000');
   await page.getByRole('button', { name: 'Проверить длинный запрос (1 с)' }).click();
-  await expect(page.locator('#check-status')).toContainText('HTTP 401');
+  // The shared table words it and points to the in-app check (M8).
+  await expect(page.locator('#check-status')).toContainText('Код не подходит');
+  await expect(page.locator('#check-status')).toContainText('Настройки → Семья и сервер → Проверка сервера');
 });

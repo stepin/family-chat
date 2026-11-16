@@ -20,11 +20,13 @@ In order:
 5. The administrator has not switched notifications off on the server (`push = false`). Then the app says that
    notifications are off on the family server.
 6. The server needs internet access to the Apple, Google and Mozilla push services. If an iPhone gets nothing at
-   all, the administrator should put their own contact into `config.toml`: `push_subject = "mailto:address"` (Apple
-   wants a contact that looks real), then restart the server.
+   all, the administrator should set their own contact: `--push-subject mailto:address` (or `FCD_PUSH_SUBJECT`, or
+   `push_subject` in `config.toml`; Apple wants a contact that looks real), then restart the server.
 
-You can test delivery on your server's `/server/` page: "send a test" (the server must run with `--m0`, and the
-administrator code is needed). More: [installation](ADMIN.md#the-server-check-page-server).
+The administrator can test delivery: in the app, Settings → Family and server → Server check → "Send a test
+notification" (before the family is set up, the `/server/` page does the same with the admin code). If nothing
+arrives, look for the server log lines `test push sent` and `delayed test push failed`. More:
+[installation](ADMIN.md#server-check).
 
 ### I lost my 24 words
 
@@ -83,8 +85,9 @@ Used and free space are shown in the app: “Settings”, “Family and server�
 ### The connection keeps dropping behind a proxy or tunnel
 
 The app waits for new messages in one request for up to 30 seconds. If the proxy cuts requests earlier, the status
-flips between connecting and connected, and messages arrive late. Check on the `/server/` page ("check the long
-request", server with `--m0`) and raise the proxy's response timeout:
+flips between connecting and connected, and messages arrive late. Check with the long request
+(administrator: Settings → Family and server → Server check; before setup, the `/server/` page) and raise the
+proxy's response timeout:
 
 - nginx: `proxy_read_timeout 90s;`
 - Caddy: no limit by default;

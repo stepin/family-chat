@@ -50,9 +50,25 @@ async function setting(factory: IDBFactory, key: string): Promise<unknown> {
   return (row as { value?: unknown } | undefined)?.value;
 }
 
-function worker(factory: IDBFactory, badge = true, languages: readonly string[] = ['ru-RU']) {
+interface FakeWindow {
+  url: string;
+  focus: () => Promise<void>;
+  postMessage: (m: unknown) => void;
+  messages: unknown[];
+}
+
+function fakeWindow(url: string): FakeWindow {
+  const messages: unknown[] = [];
+  return { url, messages, focus: async () => undefined, postMessage: (m) => void messages.push(m) };
+}
+
+function worker(factory: IDBFactory, badge = true, languages: readonly string[] = ['ru-RU'], windows: FakeWindow[] = []) {
+  const opened: string[] = [];
   const listeners = new Map<string, Listener[]>();
-  const notifications: { title: string; options: { body?: string; data?: { url?: string; accountId?: string | null } } }[] = [];
+  const notifications: {
+    title: string;
+    options: { body?: string; tag?: string; badge?: string; data?: { url?: string; accountId?: string | null; check?: boolean; from?: string } };
+  }[] = [];
   const setAppBadge = vi.fn(async () => undefined);
   const self = {
     addEventListener: (type: string, fn: Listener) => listeners.set(type, [...(listeners.get(type) ?? []), fn]),
@@ -62,7 +78,7 @@ function worker(factory: IDBFactory, badge = true, languages: readonly string[] 
     },
     navigator: badge ? { setAppBadge, languages } : { languages },
   };
-  const clients = { matchAll: async () => [], openWindow: async () => null };
+  const clients = { matchAll: async () => windows, openWindow: async (u: string) => void opened.push(u) };
   new Function('self', 'clients', 'indexedDB', CODE)(self, clients, factory);
   const dispatch = async (type: string, event: Record<string, unknown>) => {
     const waits: Promise<unknown>[] = [];
@@ -72,7 +88,7 @@ function worker(factory: IDBFactory, badge = true, languages: readonly string[] 
     await Promise.all(waits);
     return response;
   };
-  return { dispatch, notifications, setAppBadge };
+  return { dispatch, notifications, setAppBadge, opened };
 }
 
 describe('push: badge and routing', () => {
@@ -102,6 +118,49 @@ describe('push: badge and routing', () => {
     const empty = worker(new IDBFactory());
     await empty.dispatch('push', { data: { json: () => ({ chatId: 'zzz', gseq: 1 }) } });
     expect(empty.notifications[0]!.title).toBe('Family Chat');
+  });
+});
+
+describe('push: server check notifications (M8)', () => {
+  it('a test from the app or the page: own tag, monochrome badge, no unread count', async () => {
+    const factory = new IDBFactory();
+    await appDb(factory);
+    const w = worker(factory);
+    await w.dispatch('push', { data: { json: () => ({ kind: 'm0-test', delay: 0, sentAt: 5, from: 'app' }) } });
+    await w.dispatch('push', { data: { json: () => ({ kind: 'm0-test', delay: 30, sentAt: 6 }) } });
+    expect(await setting(factory, SETTING_BADGE_COUNT)).toBe(4);
+    expect(w.setAppBadge).not.toHaveBeenCalled();
+    const [app, page] = w.notifications;
+    expect(app!.options).toMatchObject({ tag: 'fc-check-5', badge: `${SCOPE}badge-96.png`, data: { check: true, from: 'app', url: `${SCOPE}?open=server-check` } });
+    expect(page!.options.body).toBe('Пробное уведомление дошло (отправлено через 30 с).');
+    expect(page!.options.data).toMatchObject({ check: true, from: 'page', url: `${SCOPE}server/?from=push&sentAt=6` });
+  });
+
+  it('an unknown kind is a plain notification without the unread count', async () => {
+    const factory = new IDBFactory();
+    await appDb(factory);
+    const w = worker(factory);
+    await w.dispatch('push', { data: { json: () => ({ kind: 'something-new', chatId: 'c'.repeat(26) }) } });
+    expect(w.notifications).toHaveLength(1);
+    expect(w.notifications[0]).toMatchObject({ title: 'Family Chat', options: { body: 'Новое сообщение' } });
+    expect(await setting(factory, SETTING_BADGE_COUNT)).toBe(4);
+    expect(w.setAppBadge).not.toHaveBeenCalled();
+  });
+
+  it('a tap opens the screen that asked for the test', async () => {
+    const app = fakeWindow(SCOPE);
+    const page = fakeWindow(`${SCOPE}server/`);
+    const click = (data: unknown) => ({ notification: { close: () => undefined, data } });
+    const w = worker(new IDBFactory(), true, ['ru-RU'], [page, app]);
+    await w.dispatch('notificationclick', click({ check: true, from: 'app', url: `${SCOPE}?open=server-check` }));
+    expect(app.messages).toEqual([{ type: 'fc-open-server-check' }]);
+    expect(page.messages).toEqual([]);
+    await w.dispatch('notificationclick', click({ check: true, from: 'page', sentAt: 6, url: `${SCOPE}server/` }));
+    expect(page.messages).toEqual([{ type: 'fc-notification-click', sentAt: 6 }]);
+    // No such window: the address is opened.
+    const lone = worker(new IDBFactory(), true, ['ru-RU'], [fakeWindow(`${SCOPE}server/`)]);
+    await lone.dispatch('notificationclick', click({ check: true, from: 'app', url: `${SCOPE}?open=server-check` }));
+    expect(lone.opened).toEqual([`${SCOPE}?open=server-check`]);
   });
 });
 

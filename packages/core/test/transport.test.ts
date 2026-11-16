@@ -60,7 +60,7 @@ describe('Transport', () => {
       time: 5,
       maxEventBytes: 262144,
       adminCodeActive: true,
-      m0: false,
+      offerSetup: false,
     };
     const { t, calls } = client(() => json(hello));
     // An M1 server sends no limits and no commit: the defaults of docs/API.md 1.7 fill in.
@@ -282,6 +282,48 @@ describe('Transport', () => {
     });
     await t.events(TOKEN, { wait: 25 });
     expect(timeout).toBe(26_000);
+  });
+
+  it('server check: wait timeout is the duration plus 10 s, even with the default 20 s', async () => {
+    let timeout = 0;
+    let fire: (() => void) | null = null;
+    const clock: Clock = {
+      now: () => 0,
+      setTimeout: (fn, ms) => {
+        timeout = ms;
+        fire = fn;
+        return 1;
+      },
+      clearTimeout: () => {},
+    };
+    // The server answers after 25 s; the client must not give up at 20 s.
+    const t = new Transport({
+      baseUrl: 'https://fc.test',
+      clock,
+      fetch: async (url) => {
+        expect(url).toBe('https://fc.test/v1/check/wait?seconds=25');
+        return json({ seconds: 25, startedAt: 1, finishedAt: 25_001 });
+      },
+    });
+    expect(await t.checkWait(TOKEN, 25)).toEqual({ seconds: 25, startedAt: 1, finishedAt: 25_001 });
+    expect(timeout).toBe(35_000);
+    expect(fire).not.toBeNull();
+  });
+
+  it('server check: push and last push; push_failed carries its reason', async () => {
+    const { t, calls } = client((c) => {
+      if (c.init.method === 'POST') return json({ sent: false, scheduled: true, sendAt: 9 }, 202);
+      return json({ last: { at: 5, result: 'gone' } });
+    });
+    expect(await t.checkPush(TOKEN, 30)).toEqual({ sent: false, scheduled: true, sendAt: 9 });
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ delaySeconds: 30, from: 'app' });
+    expect(await t.checkLastPush(TOKEN)).toEqual({ at: 5, result: 'gone' });
+    const { t: t2 } = client(() => json({ error: 'push_failed', message: 'x', reason: 'network' }, 502));
+    const e = (await t2.checkPush(TOKEN, 0).catch((x: unknown) => x)) as ApiError;
+    expect(e.code).toBe('push_failed');
+    expect(e.reason).toBe('network');
+    const { t: t3 } = client(() => json({ error: 'admin_code_inactive', message: 'x' }, 401));
+    expect(await t3.checkWait(TOKEN, 1).catch((x: unknown) => x)).toMatchObject({ code: 'admin_code_inactive' });
   });
 
   it('error helpers', () => {

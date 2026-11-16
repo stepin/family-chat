@@ -2,7 +2,7 @@
 Description=Family Chat server (fcd)
 
 [Container]
-Image=registry.example.org/family-chat/fcd:latest
+Image=ghcr.io/stepin/fcd:latest
 ContainerName=fcd
 PublishPort=127.0.0.1:8787:8787
 Volume=fcd-data:/data

@@ -15,7 +15,7 @@
   var BACKGROUNDS = ['plain', 'tint', 'dots', 'grid', 'diagonal', 'waves'];
   var SCALES = [0.875, 1, 1.125, 1.25, 1.4];
   var COLORS = {
-    green: ['#2f5d50', '#1c211f'],
+    green: ['#1e4e41', '#1c211f'],
     blue: ['#1e5aa0', '#1a2029'],
     violet: ['#5b3d99', '#1f1b26'],
     rose: ['#a3325a', '#251b1e'],

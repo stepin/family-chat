@@ -19,7 +19,11 @@ export interface Hello {
   readonly time: number;
   readonly maxEventBytes: number;
   readonly adminCodeActive: boolean;
-  readonly m0: boolean;
+  /**
+   * M8 (`fcd --offer-setup`): the first screen offers family setup even when this
+   * server has its family (to set one up on another server). Absent: false.
+   */
+  readonly offerSetup: boolean;
   /** Limits (M2). Older servers do not send them; defaults from docs/API.md 1.7 are used. */
   readonly maxPartBytes: number;
   readonly maxBlobBytes: number;
@@ -221,6 +225,28 @@ export interface AdminUser {
   readonly revoked: boolean;
   readonly revokedAt: number | null;
   readonly devices: readonly AdminDevice[];
+}
+
+/** `GET /v1/check/wait` (M8 server check). */
+export interface CheckWaitResult {
+  readonly seconds: number;
+  readonly startedAt: number;
+  readonly finishedAt: number;
+}
+
+/** `POST /v1/check/push`. */
+export interface CheckPushResult {
+  readonly sent: boolean;
+  readonly scheduled: boolean;
+  /** When the delayed notification goes out, server clock, ms. */
+  readonly sendAt: number | null;
+}
+
+/** `GET /v1/check/push`: the last test notification of this device. */
+export interface CheckLastPush {
+  readonly at: number;
+  /** `sent`, or the `push_failed` reason: `gone`, `unauthorized`, `rejected`, `network`. */
+  readonly result: string;
 }
 
 export interface ServerStats {

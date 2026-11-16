@@ -127,6 +127,21 @@ describe('facade', () => {
     unsub();
   });
 
+  it('server check for administrators (M8)', async () => {
+    const { a, b, accA, accB } = await setup();
+    const check = a.serverCheck(accA.id);
+    const w = await check.wait(0);
+    expect(w.seconds).toBe(0);
+    await expect(b.serverCheck(accB.id).wait(0)).rejects.toMatchObject({ code: 'not_admin', status: 403 });
+    // No subscription on this device yet.
+    expect(await check.lastPush()).toBeNull();
+    await expect(check.push(0)).rejects.toMatchObject({ code: 'no_subscription', status: 409 });
+    await a.push.register(accA.id, { endpoint: 'https://push.example/x', keys: { p256dh: 'p', auth: 'a' } });
+    expect(await check.push(0)).toMatchObject({ sent: true });
+    expect(await check.push(30)).toMatchObject({ scheduled: true });
+    expect((await check.lastPush())?.result).toBe('sent');
+  });
+
   it('lists members with fingerprints and chat ids', async () => {
     const { a, accA, accB } = await setup();
     const members = await until(a.members(accA.id), (m) => m.length === 2);

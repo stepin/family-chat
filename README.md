@@ -19,16 +19,17 @@ English: [installation](docs/en/ADMIN.md), [family guide](docs/en/FAMILY.md), [s
 
 ## Быстрый старт
 
-Docker (образ будет опубликован вместе с первым выпуском):
+Docker (образ `ghcr.io/stepin/fcd`; `latest` это последний выпуск, для закрепления берите тег версии, например
+`ghcr.io/stepin/fcd:0.1.0`):
 
 ```sh
 docker run -d --name fcd --restart unless-stopped \
   -p 127.0.0.1:8787:8787 -v fcd-data:/data \
-  registry.example.org/family-chat/fcd:latest
-docker logs fcd 2>&1 | grep 'код администратора'
+  ghcr.io/stepin/fcd:latest
+docker logs fcd 2>&1 | grep -E 'код администратора|admin code'
 ```
 
-Готовый файл для своей системы со страницы выпусков (https://code.example.org/family-chat/releases):
+Готовый файл для своей системы со страницы выпусков (https://github.com/stepin/family-chat/releases):
 
 ```sh
 tar xzf fcd-<версия>-x86_64-unknown-linux-musl.tar.gz
@@ -71,8 +72,8 @@ pnpm build                # протокол, ядро, веб-приложен�
 cd server && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked && cd ..
 pnpm test:integration     # ядро против настоящего fcd
 pnpm test:e2e             # приложение в Chromium против настоящего fcd (Playwright)
-pnpm test:e2e:fcd         # страница /server/ против fcd --m0
-pnpm test:e2e:site        # сайт: доступность, клавиатура, 360 px, приложение в app/
+pnpm test:e2e:fcd         # страница /server/ против настоящего fcd
+pnpm test:e2e:site        # сайт: доступность, клавиатура, 360 px, меню, без приложения
 pnpm site:preview         # собранный сайт на http://127.0.0.1:4180/
 ```
 
@@ -86,7 +87,7 @@ server              сервер fcd на Rust: API, хранение, очис�
 packages/protocol   идентичность, шифрование, форматы событий (TypeScript, без ввода-вывода)
 packages/core       ядро клиента без DOM: API, локальная база, синхронизация, очередь отправки
 apps/web            веб-приложение (Svelte 5, PWA); страницы проверки /device/ и /server/
-apps/site           сайт проекта: страницы из docs/, снимки экрана, приложение в app/
+apps/site           сайт проекта (https://stepin.github.io/family-chat/): страницы из docs/, снимки экрана
 docs                документация, протокол, API, тестовые векторы
 deploy              примеры: systemd, Podman Quadlet, Caddy, nginx
 scripts             сборка выпуска (release.sh)

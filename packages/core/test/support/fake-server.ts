@@ -108,6 +108,10 @@ export class FakeServer {
   oldestGseq = 1;
   nextGseq = 1;
   now = 1_800_000_000_000;
+  /** `/v1/hello` offerSetup (M8 `fcd --offer-setup`). */
+  offerSetup = false;
+  /** Test notifications sent by `/v1/check/push`: device and delay. */
+  readonly checkPushes: { dev: string; delaySeconds: number }[] = [];
   readonly msPerSecond: number;
   readonly push: boolean;
 
@@ -334,7 +338,7 @@ export class FakeServer {
           maxEventBytes: 262144,
           maxBlobBytes: this.maxBlobBytes,
           adminCodeActive: this.adminCodeActive,
-          m0: false,
+          offerSetup: this.offerSetup,
         },
       };
     }
@@ -570,6 +574,33 @@ export class FakeServer {
           this.#waiters.add(done);
           req.signal?.addEventListener('abort', done);
         });
+      }
+    }
+    if (p === '/v1/check/wait' || p === '/v1/check/push') {
+      if (!a.user.admin) return err(403, 'not_admin');
+      if (m === 'GET' && p === '/v1/check/wait') {
+        const seconds = Number(req.query.get('seconds') ?? 25);
+        const startedAt = this.now;
+        await new Promise<void>((resolve) => {
+          const t = setTimeout(resolve, seconds * 1000);
+          req.signal?.addEventListener('abort', () => (clearTimeout(t), resolve()));
+        });
+        return { status: 200, body: { seconds, startedAt, finishedAt: startedAt + seconds * 1000 } };
+      }
+      const sub = a.user.devices.get(a.dev)!.push;
+      if (m === 'POST') {
+        if (!this.push) return err(409, 'push_disabled');
+        if (!sub) return err(409, 'no_subscription');
+        const b = req.json() as { delaySeconds?: number; from?: string };
+        const delaySeconds = b.delaySeconds ?? 0;
+        this.checkPushes.push({ dev: a.dev, delaySeconds });
+        return delaySeconds > 0
+          ? { status: 202, body: { sent: false, scheduled: true, sendAt: this.now + delaySeconds * 1000 } }
+          : { status: 200, body: { sent: true, outcome: { status: 201, service: 'push.example' } } };
+      }
+      if (m === 'GET') {
+        const last = this.checkPushes.some((x) => x.dev === a.dev) ? { at: this.now, result: 'sent' } : null;
+        return { status: 200, body: { last } };
       }
     }
     if (p.startsWith('/v1/admin/')) {

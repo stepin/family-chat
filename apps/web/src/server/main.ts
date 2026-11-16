@@ -3,9 +3,12 @@ import './page.css';
 import { registerServiceWorker } from '../pwa.ts';
 import { intlLocale } from '../lib/locale.ts';
 import { localizePage, pageLang, tr } from '../lib/page-lang.ts';
+import { importStrings } from '../lib/strings.ts';
 import {
   base64UrlToBytes,
+  describeCheckFailure,
   describeError,
+  docsLink,
   fetchHello,
   formatLogEntry,
   formatReport,
@@ -15,6 +18,7 @@ import {
   sameBytes,
   sendTestPush,
   waitSecondsFromQuery,
+  type CheckFailure,
   type Hello,
   type LogEntry,
   type Outcome,
@@ -47,6 +51,27 @@ let hello: Outcome<Hello> | null = null;
 let helloBase = '';
 let clockOffsetSec: number | null = null;
 let log: LogEntry[] = loadLog();
+
+// "Settings → Family and server → Server check", from the app's own strings.
+let settingsPath = tr('Настройки → Семья и сервер → Проверка сервера', 'Settings → Family and server → Server check');
+void importStrings(pageLang)
+  .then((s) => (settingsPath = `${s.settings.title} → ${s.settings.family} → ${s.server.check}`))
+  .catch(() => undefined);
+
+/** Shows a failed check: the text from the shared table, and a documentation link when it has one. */
+function showFailure(f: CheckFailure, longRequestSeconds?: number): string {
+  const msg = describeCheckFailure(f, { context: 'page', settingsPath, lang: pageLang, ...(longRequestSeconds ? { longRequestSeconds } : {}) });
+  checkStatus.replaceChildren(msg.text);
+  if (msg.link) {
+    const a = document.createElement('a');
+    a.href = docsLink(msg.link, pageLang);
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = tr('Подробнее', 'More');
+    checkStatus.append(' ', a);
+  }
+  return msg.text;
+}
 
 function loadLog(): LogEntry[] {
   try {
@@ -147,7 +172,12 @@ function renderHello(): void {
     [tr('Хранение', 'Kept for'), tr(`${h.retentionDays} дн.`, `${h.retentionDays} days`)],
     [tr('Предел файла', 'File limit'), `${h.maxFileMb} ${tr('МБ', 'MB')}`],
     ['Push', h.push ? tr('включён', 'on') : tr('выключен', 'off')],
-    [tr('Проверки M0', 'M0 checks'), h.m0 ? tr('включены', 'on') : tr('выключены (запустите fcd с --m0)', 'off (start fcd with --m0)')],
+    [
+      tr('Код администратора', 'Admin code'),
+      h.adminCodeActive === false
+        ? tr(`уже использован: проверяйте сервер в приложении (${settingsPath})`, `already used: check the server in the app (${settingsPath})`)
+        : tr('действует', 'active'),
+    ],
     [
       tr('Часы сервера', 'Server clock'),
       tr(`${new Date(h.time).toLocaleString(locale)} (разница ${clockOffsetSec ?? '?'} с)`, `${new Date(h.time).toLocaleString(locale)} (off by ${clockOffsetSec ?? '?'} s)`),
@@ -217,8 +247,8 @@ waitBtn.addEventListener('click', () =>
       checkStatus.textContent = tr(`Длинный запрос прошёл за ${sec} с.`, `The long request went through in ${sec} s.`);
       addLog(true, tr(`длинный запрос ${waitSeconds} с: ответ через ${sec} с`, `long request ${waitSeconds} s: answered after ${sec} s`));
     } else {
-      checkStatus.textContent = tr(`Длинный запрос не прошёл: ${r.error}.`, `The long request failed: ${r.error}.`);
-      addLog(false, tr(`длинный запрос ${waitSeconds} с: ${r.error} через ${sec} с`, `long request ${waitSeconds} s: ${r.error} after ${sec} s`));
+      const text = showFailure(r, waitSeconds);
+      addLog(false, tr(`длинный запрос ${waitSeconds} с: ${r.error} через ${sec} с: ${text}`, `long request ${waitSeconds} s: ${r.error} after ${sec} s: ${text}`));
     }
   }),
 );
@@ -271,8 +301,15 @@ async function testPush(btn: HTMLButtonElement, delaySeconds: number): Promise<v
     if (!sub) return;
     const r = await sendTestPush(server(), code, sub.toJSON(), delaySeconds);
     if (!r.ok) {
-      checkStatus.textContent = tr(`Сервер не отправил уведомление: ${r.error}.`, `The server didn’t send the notification: ${r.error}.`);
-      addLog(false, tr(`пробное уведомление${delaySeconds ? ` через ${delaySeconds} с` : ''}: ${r.error}`, `test notification${delaySeconds ? ` in ${delaySeconds} s` : ''}: ${r.error}`));
+      const text = showFailure(r);
+      const reason = r.reason ? ` (${r.reason})` : '';
+      addLog(
+        false,
+        tr(
+          `пробное уведомление${delaySeconds ? ` через ${delaySeconds} с` : ''}: ${r.error}${reason}: ${text}`,
+          `test notification${delaySeconds ? ` in ${delaySeconds} s` : ''}: ${r.error}${reason}: ${text}`,
+        ),
+      );
       return;
     }
     if (r.value.scheduled) {
@@ -285,8 +322,7 @@ async function testPush(btn: HTMLButtonElement, delaySeconds: number): Promise<v
       checkStatus.textContent = ok
         ? tr('Push-сервис принял уведомление, оно должно появиться.', 'The push service accepted the notification; it should appear.')
         : tr(`Push-сервис ответил ${o?.status}.`, `The push service answered ${o?.status}.`);
-      const detail = o?.detail ? ` (${o.detail})` : '';
-      addLog(ok, tr(`пробное уведомление: push-сервис ${o?.service} ответил ${o?.status}${detail}`, `test notification: push service ${o?.service} answered ${o?.status}${detail}`));
+      addLog(ok, tr(`пробное уведомление: push-сервис ${o?.service} ответил ${o?.status}`, `test notification: push service ${o?.service} answered ${o?.status}`));
     }
   });
 }

@@ -3,6 +3,7 @@
   import type { Member, ServerStats } from '@family-chat/core';
   import InviteFamily from '../components/InviteFamily.svelte';
   import Page from '../components/Page.svelte';
+  import ServerCheck from '../components/ServerCheck.svelte';
   import { app } from '../lib/app.svelte.ts';
   import { formatBytes } from '../lib/format.ts';
   import { nav } from '../lib/nav.svelte.ts';
@@ -10,7 +11,7 @@
 
   // Family and server (docs/PLAN-v2.md 8, screen 21). Everyone: address,
   // family name, retention, members. Administrator: invitations, removing a
-  // member, disk statistics.
+  // member, disk statistics, server check (M8).
   const account = $derived(app.account!);
   const members = $derived(
     [...app.members].sort((a, b) => Number(b.isMe) - Number(a.isMe) || (a.name ?? '').localeCompare(b.name ?? '', 'ru')),
@@ -127,6 +128,11 @@
       {:else}
         <p class="muted">{t.common.loading}</p>
       {/if}
+    </section>
+
+    <section class="section" aria-labelledby="srv-check">
+      <h2 id="srv-check">{t.server.check}</h2>
+      <ServerCheck accountId={account.id} />
     </section>
   {/if}
 </Page>

@@ -114,7 +114,7 @@ export default defineConfig({
       // subfolders register the same root-scoped worker.
       injectRegister: false,
       useCredentials: true,
-      includeAssets: ['icon.svg', 'apple-touch-icon.png'],
+      includeAssets: ['icon.svg', 'apple-touch-icon.png', 'favicon-32.png', 'badge-96.png'],
       manifest: {
         name: 'Family Chat',
         short_name: 'Family Chat',
@@ -126,11 +126,12 @@ export default defineConfig({
         scope: './',
         display: 'standalone',
         background_color: '#f6f3ee',
-        theme_color: '#2f5d50',
+        theme_color: '#1e4e41',
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
-          { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          // The bubble scaled into the safe zone (scripts/make-icons.mjs).
+          { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
         // Web Share Target (M5): "Поделиться" from other apps into a chat. The
         // service worker (public/push-sw.js) answers this POST, keeps the
