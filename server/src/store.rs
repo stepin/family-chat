@@ -436,7 +436,7 @@ fn is_zero(v: &u64) -> bool {
     *v == 0
 }
 
-/// `chats/<id>/meta.json`. Direct chats keep the M1 fields only.
+/// `chats/<id>/meta.json`. Direct chats have no owner, version or periods.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ChatMeta {
@@ -543,7 +543,7 @@ pub fn segment_path(root: &Path, day: i64) -> PathBuf {
 }
 
 /// Retention reference time: the smaller of "now" and "newest event + 7
-/// days" (docs/PLAN-v2.md, section 6), so a clock that jumped forward does
+/// days", so a clock that jumped forward does
 /// not wipe everything and a clock set back only delays the cleanup.
 pub fn reference_time(now: u64, newest_event: Option<u64>) -> u64 {
     match newest_event {
@@ -1650,7 +1650,6 @@ impl Writer {
                     );
                 }
             }
-            AvatarRef::Legacy => return Err(ApiError::bad_request("avatar must be null or {sha256, type}")),
         }
         if let Some(r) = stored_rev
             && p.rev <= r
@@ -2316,7 +2315,7 @@ mod tests {
             fs::create_dir_all(root.join(d)).unwrap();
         }
         let server = ServerFile {
-            format_version: 1,
+            format_version: datadir::FORMAT_VERSION,
             server_id: "srv".into(),
             created_at: 0,
             admin_code_hash: String::new(),

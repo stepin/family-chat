@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 // Writes and reads 1 MB through a sync access handle (the path iOS supports).
-// It reports facts only; the page words them in its language (M7).
+// It reports facts only; the page words them in its language.
 (async () => {
   try {
     const dir = await navigator.storage.getDirectory();

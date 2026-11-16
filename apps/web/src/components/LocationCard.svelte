@@ -4,7 +4,7 @@
   import { formatAccuracy, formatCoords, mapsLink, type Place } from '../lib/location.ts';
   import { t } from '../lib/strings.ts';
 
-  // A place in a message (docs/PLAN.md 8.6): the main action "Открыть в
+  // A place in a message: the main action "Открыть в
   // картах", coordinates and accuracy second. No map picture: tiles from a
   // third party would tell it where the family is.
   let { place }: { place: Place } = $props();

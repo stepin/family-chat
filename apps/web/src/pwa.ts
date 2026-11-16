@@ -2,7 +2,7 @@
  * Registers the app-shell service worker. Bundles live in `<root>/assets/`,
  * so `../sw.js` relative to this module is the app root on any path.
  *
- * A new version waits until the person confirms it (docs/PLAN.md 7.6):
+ * A new version waits until the person confirms it:
  * `onUpdate` receives a function that activates it and reloads the page.
  */
 export function registerServiceWorker(onUpdate?: (apply: () => void) => void): void {

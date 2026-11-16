@@ -1,4 +1,4 @@
-// Which language the interface speaks (M7). Russian and English; Russian by
+// Which language the interface speaks. Russian and English; Russian by
 // default. The person can pick one in Settings, otherwise the system's
 // language list decides: the first of ru/en in it wins, and Russian when
 // neither is there. The choice is per device: kept in localStorage (read

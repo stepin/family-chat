@@ -141,7 +141,7 @@ describe('identity and joining', () => {
     await expect(updateProfile(rt, '')).rejects.toBeInstanceOf(ProtocolError);
   });
 
-  it('M7: the profile carries the gender; changing it keeps the name and the other way round', async () => {
+  it('the profile carries the gender; changing it keeps the name and the other way round', async () => {
     const { ctx, row, rt } = await admin();
     // A new profile always writes the field ("m" by default).
     expect((await ctx.db.users.get([row.id, row.userId]))!.gender).toBe('m');

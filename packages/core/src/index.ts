@@ -1,4 +1,4 @@
-// @family-chat/core: the client core (stage M5; no UI, no DOM).
+// @family-chat/core: the client core (no UI, no DOM).
 // API client, local database, session and identity, sync engine, outbox,
 // directory, groups, attachments, avatars, revocation, archive,
 // administration, push, and the facade for the UI.
@@ -10,7 +10,6 @@ export type {
   AccountView,
   JoinResult,
   Member,
-  ChatListItem,
   ChatView,
   MessageView,
   MessageStatus,
@@ -25,7 +24,7 @@ export type {
   StickerPackView,
   IdentityLinkView,
 } from './core.ts';
-// M5: stickers, badge, shared content.
+// Stickers, badge, shared content.
 export { StickerError, isStickerError } from './stickers/errors.ts';
 export type { StickerErrorCode } from './stickers/errors.ts';
 // The import pipeline (zip.ts, import.ts, tgs.ts) is reached through the facade

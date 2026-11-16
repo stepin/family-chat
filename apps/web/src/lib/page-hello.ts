@@ -1,4 +1,4 @@
-// The hello of the server the app was opened from (M8): Welcome and
+// The hello of the server the app was opened from: Welcome and
 // AdminSetup share one request per address, so both screens agree on
 // pending/done/failed and the request is not sent twice.
 //

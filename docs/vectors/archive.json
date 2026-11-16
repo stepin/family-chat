@@ -1,5 +1,5 @@
 {
-  "note": "Test vectors for docs/PROTOCOL.md (M2). Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only. Users alice, bob and carol are the ones of identity.json.",
+  "note": "Test vectors for docs/PROTOCOL.md. Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only. Users alice, bob and carol are the ones of identity.json.",
   "rule": "header = \"FCA\" || 0x01 || salt(16) || check(16); archiveKey = HKDF(selfKey, \"fc/v1/archive\" || salt); check = HKDF(archiveKey, \"fc/v1/archive-check\")[0..16]; block i = AES-256-GCM(archiveKey, nonce = 8 zero bytes || u32 i, plaintext_i, AAD = header || u32 i || u8 last); plaintext = records u16 type || u32 len || data; blocks of 1 MiB plaintext, the last one shorter (possibly empty) and flagged",
   "owner": "alice",
   "small": {

@@ -180,7 +180,7 @@ function normalize(a: JsonObject): Attachment {
 }
 
 /**
- * Strict validation of a received attachment descriptor (PLAN.md 6.12 "Имена и описатели").
+ * Strict validation of a received attachment descriptor.
  * `maxSize` is the server's file limit when known. Throws `malformed`; returns a normalised copy
  * without unknown fields.
  */

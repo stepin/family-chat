@@ -1,5 +1,5 @@
 {
-  "note": "Test vectors for docs/PROTOCOL.md (M2). Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only. Users alice, bob and carol are the ones of identity.json.",
+  "note": "Test vectors for docs/PROTOCOL.md. Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only. Users alice, bob and carol are the ones of identity.json.",
   "rule": "part i (0-based) = AES-256-GCM(key, nonce = 8 zero bytes || u32 i, plaintext_i, AAD = \"fc/v1/blob\\n\" || lp(blobId raw 16 bytes) || u32 i || u32 parts); parts = ceil(size / partSize), 1 for an empty file",
   "plaintextPattern": "byte j of the file = (j * 31 + seed) mod 256",
   "single": {

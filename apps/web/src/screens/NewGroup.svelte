@@ -8,7 +8,7 @@
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // "Новая группа" (docs/PLAN.md screen 8): name and members; I become the
+  // "Новая группа": name and members; I become the
   // owner. Also opened from a frozen group with its members preselected.
   let { members: preselected = [], title = '' }: { members?: readonly string[]; title?: string } = $props();
 

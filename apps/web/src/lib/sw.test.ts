@@ -100,7 +100,7 @@ describe('push: badge and routing', () => {
     expect(await setting(factory, SETTING_BADGE_COUNT)).toBe(5);
     expect(w.setAppBadge).toHaveBeenCalledWith(5);
     expect(w.notifications).toHaveLength(1);
-    // M7: the chat is the title; the family is named only because two share the device.
+    // The chat is the title; the family is named only because two share the device.
     expect(w.notifications[0]!.title).toBe('Бабушка');
     expect(w.notifications[0]!.options.body).toBe('Новое сообщение · Петровы');
     expect(w.notifications[0]!.options.data!.url).toBe(`${SCOPE}?chat=${'c'.repeat(26)}&account=accountbbbbbbbbb`);
@@ -121,13 +121,13 @@ describe('push: badge and routing', () => {
   });
 });
 
-describe('push: server check notifications (M8)', () => {
+describe('push: server check notifications', () => {
   it('a test from the app or the page: own tag, monochrome badge, no unread count', async () => {
     const factory = new IDBFactory();
     await appDb(factory);
     const w = worker(factory);
-    await w.dispatch('push', { data: { json: () => ({ kind: 'm0-test', delay: 0, sentAt: 5, from: 'app' }) } });
-    await w.dispatch('push', { data: { json: () => ({ kind: 'm0-test', delay: 30, sentAt: 6 }) } });
+    await w.dispatch('push', { data: { json: () => ({ kind: 'check-test', delay: 0, sentAt: 5, from: 'app' }) } });
+    await w.dispatch('push', { data: { json: () => ({ kind: 'check-test', delay: 30, sentAt: 6 }) } });
     expect(await setting(factory, SETTING_BADGE_COUNT)).toBe(4);
     expect(w.setAppBadge).not.toHaveBeenCalled();
     const [app, page] = w.notifications;
@@ -164,7 +164,7 @@ describe('push: server check notifications (M8)', () => {
   });
 });
 
-describe('push: wording and language (M7)', () => {
+describe('push: wording and language', () => {
   const push = { data: { json: () => ({ chatId: 'c'.repeat(26), gseq: 1 }) } };
 
   it('with one family the family is not named', async () => {

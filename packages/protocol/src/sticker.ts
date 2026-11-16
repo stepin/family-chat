@@ -1,4 +1,4 @@
-// Sticker packs (docs/PROTOCOL.md, "Наборы стикеров"; docs/PLAN.md 6.1, 6.10, 7.5).
+// Sticker packs (docs/PROTOCOL.md, "Наборы стикеров").
 //
 // A pack is a signed manifest (envelope kind `sticker-pack`) plus its files. Each file is named
 // by its content: hash32 = base32 of the first 20 bytes of SHA-256 of the file. The server and

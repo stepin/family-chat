@@ -125,7 +125,7 @@ describe('event round trip', () => {
     expect(e.payload).toMatchObject({ kind: 'update-required', t: 'poll', id });
   });
 
-  it('delivers edit, delete and react as typed payloads (M4)', async () => {
+  it('delivers edit, delete and react as typed payloads', async () => {
     const dev = newDevId();
     const target = { author: alice.userId, id: newMessageId() };
     const edit = encodeEditPayload({ id: newMessageId(), dev, seq: 2, target, body: 'новый текст' });

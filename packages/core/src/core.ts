@@ -169,30 +169,8 @@ export interface Member {
   readonly verified: boolean;
   /** Avatar reference from the verified profile (blob: core.avatar()). */
   readonly avatar: AvatarRef | null;
-  /** Gender from the verified profile (M7); `m` when the profile has none or is unknown. */
+  /** Gender from the verified profile; `m` when the profile has none or is unknown. */
   readonly gender: Gender;
-}
-
-export interface ChatListItem {
-  readonly accountId: string;
-  readonly chatId: string;
-  readonly peerId: string;
-  readonly peerName: string | null;
-  readonly peerRemoved: boolean;
-  readonly familyName: string;
-  readonly lastMessage: {
-    readonly senderId: string;
-    readonly outgoing: boolean;
-    readonly kind: MessageKind;
-    readonly body: string;
-    readonly time: number;
-  } | null;
-  /** Server time of the last message (null for an empty chat). */
-  readonly lastTime: number | null;
-  readonly unread: number;
-  /** Messages of this chat still in the outbox. */
-  readonly pending: number;
-  readonly draft: string | null;
 }
 
 export type { MessageStatus, MessageView } from './views.ts';
@@ -236,7 +214,7 @@ export interface ChatView {
   reveal(gseq: number): Promise<boolean>;
 }
 
-/** Result of the global search (M4): messages on this device plus chats and contacts by name. */
+/** Result of the global search: messages on this device plus chats and contacts by name. */
 export interface GlobalSearchResult {
   /** Normalized query words, for highlighting. */
   readonly words: readonly string[];
@@ -305,11 +283,11 @@ export interface OutgoingMessage {
   /** A place (the UI takes it from the Geolocation API); the message may have no text then. */
   readonly location?: Location;
   readonly fwd?: boolean;
-  /** A sticker (M5): `text` must then be its emoji; no attachments or place. */
+  /** A sticker: `text` must then be its emoji; no attachments or place. */
   readonly sticker?: StickerRef;
 }
 
-/** A published sticker pack of a family (M5). */
+/** A published sticker pack of a family. */
 export interface StickerPackView {
   readonly accountId: string;
   readonly packId: string;
@@ -321,7 +299,7 @@ export interface StickerPackView {
   readonly publishedAt: number | null;
 }
 
-/** "The same person as…" (M5): an older identity shown together with a newer one. */
+/** "The same person as…": an older identity shown together with a newer one. */
 export interface IdentityLinkView {
   readonly accountId: string;
   /** The older identity. */
@@ -354,11 +332,6 @@ export class FamilyChatCore {
   readonly accounts: Readable<AccountView[]>;
   /** Connection state per account id. */
   readonly connection: Readable<Record<string, ConnectionState>>;
-  /**
-   * Direct chats with other members, most recent first (the M1 list; groups
-   * and the chat with myself are not in it). New screens use `chatList`.
-   */
-  readonly chats: Readable<ChatListItem[]>;
   /** Every chat: the chat with myself pinned first, then groups and direct chats by last activity. */
   readonly chatList: Readable<ChatSummary[]>;
   /** Uploads and downloads that are queued, running or failed. */
@@ -368,7 +341,7 @@ export class FamilyChatCore {
   readonly drafts: Readable<DraftItem[]>;
   /** The diagnostics log, oldest first (at most 500 entries). */
   readonly diagnostics: Readable<DiagnosticEntry[]>;
-  /** M5: total unread over the accounts that are still members (the app icon badge and the title). */
+  /** Total unread over the accounts that are still members (the app icon badge and the title). */
   readonly unreadTotal: Readable<number>;
 
   constructor(options: CoreOptions = {}) {
@@ -390,7 +363,6 @@ export class FamilyChatCore {
 
     this.accounts = live<AccountView[]>([], async () => (await db.accounts.toArray()).map(accountView), onError);
     this.connection = { subscribe: (run) => this.#connection.subscribe(run), get: () => this.#connection.get() };
-    this.chats = live<ChatListItem[]>([], () => this.#chatList(), onError);
     this.chatList = live<ChatSummary[]>([], () => chatSummaries(db), onError);
     this.transfers = live<TransferView[]>(
       [],
@@ -548,13 +520,13 @@ export class FamilyChatCore {
     rt.outbox.kick();
   }
 
-  /** Signs and uploads a new profile: a new name (a string, as before M7) or any of name and gender. */
+  /** Signs and uploads a new profile: a new name (a string) or any of name and gender. */
   async updateProfile(accountId: string, change: string | { readonly name?: string; readonly gender?: Gender }): Promise<void> {
     await updateProfile(await this.#runtime(accountId), change);
   }
 
   /**
-   * M5: removes an account (one family) from this device: its history,
+   * Removes an account (one family) from this device: its history,
    * files, group keys and token. Other accounts keep running. The identity's
    * seed is removed too when no other account here uses it.
    */
@@ -716,7 +688,7 @@ export class FamilyChatCore {
     };
   }
 
-  // ---- M4: edit, delete, reactions, forward, search ----
+  // ---- edit, delete, reactions, forward, search ----
 
   /** Changes the text (or caption) of my message. A message still on the device is changed in place. */
   async editMessage(accountId: string, chatId: string, msgId: string, text: string): Promise<void> {
@@ -1206,7 +1178,7 @@ export class FamilyChatCore {
     },
   };
 
-  // ---- server check (M8) ----
+  // ---- server check ----
 
   /**
    * Server checks for an administrator's device (Settings → Family and
@@ -1251,7 +1223,7 @@ export class FamilyChatCore {
     return handlePush(this.#ctx, payload, (id) => this.#runtime(id));
   }
 
-  // ---- M5: sticker packs ----
+  // ---- sticker packs ----
 
   /** Published sticker packs of a family (live), oldest first. */
   stickerPacks(accountId: string): Readable<StickerPackView[]> {
@@ -1330,7 +1302,7 @@ export class FamilyChatCore {
     });
   }
 
-  // ---- M5: identity links ----
+  // ---- identity links ----
 
   /** Links of a family on this device (live). */
   identityLinks(accountId: string): Readable<IdentityLinkView[]> {
@@ -1365,7 +1337,7 @@ export class FamilyChatCore {
     await unlinkIdentity(this.#ctx, accountId, userId);
   }
 
-  // ---- M5: badge and shared content ----
+  // ---- badge and shared content ----
 
   /** Stores the total the app shows on the icon, for the service worker's count (badge.ts). */
   async noteBadge(total: number): Promise<void> {
@@ -1449,56 +1421,6 @@ export class FamilyChatCore {
     });
     if (this.#started) rt.start();
     return accountView((await this.db.accounts.get(row.id)) ?? row);
-  }
-
-  async #chatList(): Promise<ChatListItem[]> {
-    const db = this.db;
-    const [accounts, chats, users, drafts, outbox] = await Promise.all([
-      db.accounts.toArray(),
-      db.chats.toArray(),
-      db.users.toArray(),
-      db.drafts.toArray(),
-      db.outbox.toArray(),
-    ]);
-    const acc = new Map(accounts.map((a) => [a.id, a]));
-    const user = new Map(users.map((u) => [`${u.accountId}/${u.userId}`, u]));
-    const draft = new Map(drafts.map((d) => [`${d.accountId}/${d.chatId}`, d.text]));
-    const pending = new Map<string, number>();
-    for (const o of outbox) {
-      if (o.control) continue;
-      pending.set(`${o.accountId}/${o.chatId}`, (pending.get(`${o.accountId}/${o.chatId}`) ?? 0) + 1);
-    }
-    const items: (ChatListItem & { sortKey: number })[] = [];
-    for (const c of chats) {
-      const a = acc.get(c.accountId);
-      if (!a || c.kind !== 'dm') continue;
-      const peer = user.get(`${c.accountId}/${c.peerId}`);
-      const key = `${c.accountId}/${c.chatId}`;
-      items.push({
-        accountId: c.accountId,
-        chatId: c.chatId,
-        peerId: c.peerId,
-        peerName: peer?.name ?? null,
-        peerRemoved: peer?.removed ?? false,
-        familyName: a.familyName,
-        lastMessage: c.last
-          ? {
-              senderId: c.last.senderId,
-              outgoing: c.last.senderId === a.userId,
-              kind: c.last.kind,
-              body: c.last.body,
-              time: c.last.time,
-            }
-          : null,
-        lastTime: c.last?.time ?? null,
-        unread: c.unread,
-        pending: pending.get(key) ?? 0,
-        draft: draft.get(key) ?? null,
-        sortKey: c.last?.time ?? c.createdAt,
-      });
-    }
-    items.sort((x, y) => y.sortKey - x.sortKey);
-    return items.map(({ sortKey: _sortKey, ...rest }) => rest);
   }
 }
 

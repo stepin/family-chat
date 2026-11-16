@@ -4,7 +4,7 @@ import { forgetPageHello, offerSetup, pageHello, setupField } from './page-hello
 
 const h = (adminCodeActive: boolean, offer: boolean) => ({ adminCodeActive, offerSetup: offer });
 
-describe('setup button on the first screen (M8)', () => {
+describe('setup button on the first screen', () => {
   afterEach(() => forgetPageHello());
 
   it('is offered on a free server, with the flag, or when hello failed', () => {

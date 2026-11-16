@@ -82,12 +82,6 @@ pub struct Cli {
     /// Offer family setup on the first screen even when this server has a family.
     #[arg(long, value_name = "BOOL", value_parser = parse_bool)]
     pub offer_setup: Option<bool>,
-    /// Removed in M8: kept hidden only to stop with a hint ([`M0_REMOVED`]).
-    #[arg(long, hide = true)]
-    pub m0: bool,
-    /// `FCD_M0` was set: one warning at start (it is ignored since M8).
-    #[arg(skip)]
-    pub legacy_m0_env: bool,
     /// Web client from a folder.
     #[arg(long, value_name = "DIR")]
     pub web_dir: Option<PathBuf>,
@@ -97,7 +91,7 @@ pub struct Cli {
     /// HTTPS private key.
     #[arg(long, value_name = "PEM", requires = "tls_cert")]
     pub tls_key: Option<PathBuf>,
-    /// Language of the console output (M7); read before parsing, see [`lang`].
+    /// Language of the console output; read before parsing, see [`lang`].
     #[arg(long, global = true, value_name = "LANG", value_parser = ["ru", "en"], hide_possible_values = true)]
     pub lang: Option<String>,
     #[command(subcommand)]
@@ -123,19 +117,7 @@ pub fn parse_push_subject(v: &str) -> Result<String, String> {
     }
 }
 
-/// First line printed when the removed `--m0` flag is given (M8).
-pub fn m0_removed() -> &'static str {
-    lang::l(
-        "--m0 убран в M8: удалите его из команды или юнита; проверки сервера доступны всегда (до настройки — \
-         /server/ с кодом администратора, после — в приложении: Настройки → Семья и сервер → Проверка сервера). \
-         См. CHANGELOG, M8",
-        "--m0 was removed in M8: delete it from the command or unit; server checks are always available (before \
-         setup: /server/ with the admin code; after: in the app, Settings → Family and server → Server check). \
-         See CHANGELOG, M8",
-    )
-}
-
-/// Environment variables (M7): every option of the command line, by its
+/// Environment variables: every option of the command line, by its
 /// argument id. A variable counts exactly like its flag (a flag on the
 /// command line wins); an empty variable counts as not set. Order of
 /// precedence: flag, variable, `config.toml`, default.
@@ -254,8 +236,6 @@ impl Cli {
         {
             self.offer_setup = Some(parse_bool(&v).map_err(|why| bad(n, &v, &why))?);
         }
-        // Removed in M8; ignored with one warning at start.
-        self.legacy_m0_env = lang::non_empty(&get, "FCD_M0").is_some();
         if self.web_dir.is_none() {
             self.web_dir = var("web_dir").map(|(_, v)| PathBuf::from(v));
         }
@@ -673,10 +653,6 @@ pub fn init_tracing() {
 
 /// Entry point used by `main`. Returns the process exit code.
 pub async fn main_with(cli: Cli) -> i32 {
-    if cli.m0 {
-        eprintln!("{}: {}", lang::l("ошибка", "error"), m0_removed());
-        return 2;
-    }
     if let Some(Command::Healthcheck) = cli.command {
         let addr = match healthcheck::target(cli.data.as_deref(), &cli.overrides()) {
             Ok(a) => a,
@@ -890,15 +866,6 @@ pub async fn main_with(cli: Cli) -> i32 {
             )
         );
     }
-    if cli.legacy_m0_env {
-        tracing::warn!(
-            "{}",
-            lang::l(
-                "FCD_M0 больше не используется, уберите её: проверки сервера доступны всегда",
-                "FCD_M0 is no longer used, remove it: server checks are always available"
-            )
-        );
-    }
     if settings.offer_setup {
         tracing::info!(
             "{}",
@@ -942,7 +909,7 @@ pub async fn main_with(cli: Cli) -> i32 {
         );
     }
     if let Some(code) = &dir.new_admin_code {
-        // The only time the code is logged (docs/PLAN-v2.md, section 5).
+        // The only time the code is logged.
         tracing::info!(
             "{}",
             lang::l(
@@ -1126,7 +1093,6 @@ mod cli_tests {
                 ("FCD_PUSH_SUBJECT", "mailto:me@example.com"),
                 ("FCD_MIN_FREE_MB", "0"),
                 ("FCD_OFFER_SETUP", "1"),
-                ("FCD_M0", "1"),
                 ("FCD_WEB_DIR", "/w"),
                 ("FCD_TLS_CERT", "/c.pem"),
                 ("FCD_TLS_KEY", "/k.pem"),
@@ -1145,8 +1111,6 @@ mod cli_tests {
         assert_eq!(c.push_subject.as_deref(), Some("mailto:me@example.com"));
         assert_eq!(c.min_free_mb, Some(0));
         assert_eq!(c.offer_setup, Some(true));
-        assert!(!c.m0, "FCD_M0 does not turn the removed flag on");
-        assert!(c.legacy_m0_env);
         let o = c.overrides();
         assert_eq!(o.push_subject.as_deref(), Some("mailto:me@example.com"));
         assert_eq!(o.min_free_mb, Some(0));
@@ -1159,7 +1123,7 @@ mod cli_tests {
         let cmd = command(lang::Lang::Ru);
         for a in cmd
             .get_arguments()
-            .filter(|a| !matches!(a.get_id().as_str(), "help" | "version" | "m0"))
+            .filter(|a| !matches!(a.get_id().as_str(), "help" | "version"))
         {
             assert!(
                 env_name(a.get_id().as_str()).is_some(),
@@ -1241,18 +1205,9 @@ mod cli_tests {
         assert_eq!(c.push_subject.as_deref(), Some("https://example.com/c"));
         assert_eq!(c.min_free_mb, Some(5));
         assert_eq!(c.offer_setup, Some(false));
-        assert!(!c.legacy_m0_env);
         // A bad flag value names the flag and the value.
         let e = cli(&["--push-subject", "me@example.com"], &[]).unwrap_err();
         assert!(e.contains("--push-subject") && e.contains("me@example.com"), "{e}");
-    }
-
-    #[test]
-    fn removed_m0_flag_parses_but_is_hidden() {
-        assert!(cli(&["--m0"], &[]).unwrap().m0);
-        let help = command(lang::Lang::En).render_long_help().to_string();
-        assert!(!help.contains("--m0"), "{help}");
-        assert!(m0_removed().contains("--m0"));
     }
 
     #[test]

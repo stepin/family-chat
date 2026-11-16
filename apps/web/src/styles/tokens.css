@@ -1,9 +1,9 @@
 /*
- * Design tokens (docs/PLAN.md 8.8). Colours only through these variables.
+ * Design tokens. Colours only through these variables.
  * Contrast of text >= 4.5:1 and of large text and icons >= 3:1 in both
- * themes (docs/PLAN.md 8.7). The system font stack: nothing is downloaded.
+ * themes. The system font stack: nothing is downloaded.
  *
- * M7, appearance (Settings, "Оформление"): attributes on <html> set before
+ * Appearance (Settings, "Оформление"): attributes on <html> set before
  * the first paint (public/early.js) and by src/lib/appearance.ts:
  *   data-theme    system (absent) | light | dark
  *   data-palette  green (absent) | blue | violet | rose | orange | graphite

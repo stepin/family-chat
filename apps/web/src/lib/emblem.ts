@@ -1,4 +1,4 @@
-// A family's emblem (M7): a coloured circle with a symbol, instead of the
+// A family's emblem: a coloured circle with a symbol, instead of the
 // family's name at the top of the screen (a name can be a sore point; the
 // main case is one family, where nothing is shown at all). Derived from the
 // account id, so it stays the same; families on one device get different

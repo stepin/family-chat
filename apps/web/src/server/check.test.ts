@@ -104,7 +104,7 @@ describe('server check', () => {
     expect(report).not.toContain('wait=2');
   });
 
-  it('M7: the report in English when the page speaks English', () => {
+  it('the report in English when the page speaks English', () => {
     setPageLang('en');
     try {
       const report = formatReport({
@@ -139,7 +139,7 @@ describe('server check', () => {
   });
 });
 
-describe('the one table of check answers (M8)', () => {
+describe('the one table of check answers', () => {
   const path = 'Настройки → Семья и сервер → Проверка сервера';
   const page = (f: Partial<CheckFailure> & { ms?: number }, longRequestSeconds?: number) =>
     describeCheckFailure({ status: 0, ms: 0, ...f }, { context: 'page', settingsPath: path, lang: 'ru', ...(longRequestSeconds ? { longRequestSeconds } : {}) });

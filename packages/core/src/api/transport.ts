@@ -135,13 +135,13 @@ export class Transport {
       time: num(o, 'time'),
       maxEventBytes: num(o, 'maxEventBytes'),
       adminCodeActive: bool(o, 'adminCodeActive'),
-      offerSetup: o.offerSetup === true,
-      maxPartBytes: optNum(o, 'maxPartBytes', 4194560),
-      maxBlobBytes: optNum(o, 'maxBlobBytes', num(o, 'maxFileMb') * 1048576 + 65536),
-      maxAvatarBytes: optNum(o, 'maxAvatarBytes', 262144),
-      maxStateBytes: optNum(o, 'maxStateBytes', 262144),
-      maxSealedKeyBytes: optNum(o, 'maxSealedKeyBytes', 8192),
-      maxGroupMembers: optNum(o, 'maxGroupMembers', 100),
+      offerSetup: bool(o, 'offerSetup'),
+      maxPartBytes: num(o, 'maxPartBytes'),
+      maxBlobBytes: num(o, 'maxBlobBytes'),
+      maxAvatarBytes: num(o, 'maxAvatarBytes'),
+      maxStateBytes: num(o, 'maxStateBytes'),
+      maxSealedKeyBytes: num(o, 'maxSealedKeyBytes'),
+      maxGroupMembers: num(o, 'maxGroupMembers'),
     };
   }
 
@@ -226,7 +226,7 @@ export class Transport {
         template: '/v1/chats/{chatId}/events',
         token,
         bytes: input.body,
-        // `X-FC-Push: none` (M5): an edit, a deletion or a reaction is not worth a notification.
+        // `X-FC-Push: none`: an edit, a deletion or a reaction is not worth a notification.
         headers: { 'Idempotency-Key': input.msgId, 'X-FC-Epoch': String(input.epoch), ...(input.silent ? { 'X-FC-Push': 'none' } : {}) },
         signal,
       }),
@@ -235,7 +235,7 @@ export class Transport {
     return { gseq: num(o, 'gseq'), time: num(o, 'time'), duplicate: bool(o, 'duplicate') };
   }
 
-  /** `DELETE /v1/chats/<id>/events/<gseq>` (M4): delete for everyone; repeating it succeeds too. */
+  /** `DELETE /v1/chats/<id>/events/<gseq>`: delete for everyone; repeating it succeeds too. */
   async deleteEvent(token: string, chatId: string, gseq: number, signal?: AbortSignal): Promise<void> {
     await this.#json({
       method: 'DELETE',
@@ -274,7 +274,7 @@ export class Transport {
     return page(data);
   }
 
-  // ---- invitations, avatars, revocation (M2) ----
+  // ---- invitations, avatars, revocation ----
 
   /** `POST /v1/invites/check`: who invites and into which family, before joining. No token. */
   async inviteCheck(code: string, signal?: AbortSignal): Promise<InviteCheck> {
@@ -288,7 +288,7 @@ export class Transport {
     return {
       status,
       familyName: str(o, 'familyName'),
-      // M7: servers before it send no gender.
+      // Servers before it send no gender.
       createdBy: { userId: str(by, 'userId'), name: nullableStr(by, 'name'), gender: by.gender === 'f' ? 'f' : 'm' },
       createdAt: num(o, 'createdAt'),
       expiresAt: num(o, 'expiresAt'),
@@ -326,7 +326,7 @@ export class Transport {
     });
   }
 
-  // ---- groups (M2) ----
+  // ---- groups ----
 
   async createGroup(token: string, req: CreateGroupRequest, signal?: AbortSignal): Promise<ChatEntry> {
     return chatEntry(
@@ -409,7 +409,7 @@ export class Transport {
     };
   }
 
-  // ---- attachments (M2) ----
+  // ---- attachments ----
 
   async putBlobPart(token: string, blobId: string, part: number, bytes: Uint8Array, signal?: AbortSignal): Promise<BlobPartResult> {
     const o = obj(
@@ -460,7 +460,7 @@ export class Transport {
     await this.#json({ method: 'DELETE', path: `/v1/blobs/${encodeURIComponent(blobId)}`, template: '/v1/blobs/{blobId}', token, signal });
   }
 
-  // ---- sticker packs (M5) ----
+  // ---- sticker packs ----
 
   /** `GET /v1/packs`: published packs of the family (manifests not verified here). */
   async packs(token: string, signal?: AbortSignal): Promise<PackEntry[]> {
@@ -602,13 +602,13 @@ export class Transport {
       users: num(o, 'users'),
       removedUsers: num(o, 'removedUsers'),
       chats: num(o, 'chats'),
-      groups: optNum(o, 'groups', 0),
+      groups: num(o, 'groups'),
       retentionDays: num(o, 'retentionDays'),
       push: bool(o, 'push'),
     };
   }
 
-  // ---- server checks (M8) ----
+  // ---- server checks ----
 
   /**
    * Long request: the server answers after `seconds`. The timeout is the
@@ -827,10 +827,6 @@ function num(o: Obj, k: string): number {
   return v;
 }
 
-function optNum(o: Obj, k: string, fallback: number): number {
-  return o[k] === undefined || o[k] === null ? fallback : num(o, k);
-}
-
 function nullableNum(o: Obj, k: string): number | null {
   return o[k] === null || o[k] === undefined ? null : num(o, k);
 }
@@ -976,8 +972,7 @@ function page(v: unknown): EventsPage {
   const notices: ServerNotice[] = [];
   for (const item of arr(o, 'events')) {
     const x = obj(item, 'event');
-    // M1 servers send no `kind`: those are always member events.
-    const kind = x.kind === undefined ? 'event' : x.kind;
+    const kind = x.kind;
     if (kind === 'event') events.push(serverEvent(x));
     else if (kind === 'notice') {
       const notice = noticeBody(x.notice);

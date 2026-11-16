@@ -1,4 +1,4 @@
-// The unread badge on the app icon (M5, docs/PLAN.md 7.5; Badging API).
+// The unread badge on the app icon.
 //
 // The rule:
 // - While the app is open, the badge is the total unread count over every

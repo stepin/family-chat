@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emojiMatcher, isSingleEmoji } from './single-emoji.ts';
 
-describe('isSingleEmoji (M8)', () => {
+describe('isSingleEmoji', () => {
   it('one fully-qualified emoji', () => {
     for (const s of ['😀', '👍🏽', '👨‍👩‍👧', '🇷🇺', '1️⃣', '❤️', ' 😀 ']) expect(isSingleEmoji(s), s).toBe(true);
   });

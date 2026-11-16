@@ -1,4 +1,4 @@
-// A compact emoji set for the built-in picker (docs/PLAN.md 7.5, 8.6): the
+// A compact emoji set for the built-in picker: the
 // common emoji by category, each with a name and search words in the
 // interface language (emoji-ru.ts, emoji-en.ts: each its own chunk, only the
 // active one is loaded with the picker). Shipped with the app: nothing is

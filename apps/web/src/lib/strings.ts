@@ -1,5 +1,5 @@
 // Every string the interface shows comes from the active catalogue `t`
-// (M7: Russian in i18n/ru.ts, English in i18n/en.ts, the same shape). Only
+// (Russian in i18n/ru.ts, English in i18n/en.ts, the same shape). Only
 // the active language is loaded: each catalogue is its own chunk, imported
 // before the app is mounted and again when the person changes the language
 // (the screens are then rendered anew, see App.svelte).

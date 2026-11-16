@@ -1,4 +1,4 @@
-//! The data folder (docs/PLAN-v2.md, section 6): layout, format version,
+//! The data folder: layout, format version,
 //! single-process lock, first-start initialisation.
 
 use std::fmt;
@@ -18,19 +18,13 @@ use crate::webpush::{VapidFile, VapidKey, random_bytes};
 
 /// Version of the data folder format. Bumped on incompatible changes; a
 /// server refuses to start on a folder with a newer version.
-///
-/// 2 (M2): groups in `chats/`, sealed keys, server notices in the log,
-/// attachments, avatars, revocations. A version 1 folder (M1) is read as is
-/// and its `server.json` is upgraded at start, so an M1 build no longer
-/// starts on it (it would not understand groups and notices).
 pub const FORMAT_VERSION: u32 = 2;
 
 pub const LOCK_FILE: &str = "fcd.lock";
 pub const SERVER_FILE: &str = "server.json";
 pub const VAPID_FILE: &str = "vapid.json";
 pub const CONFIG_FILE: &str = "config.toml";
-/// Directories of the layout in docs/PLAN-v2.md, section 6.
-/// `packs/` (M5, sticker packs) is an addition: older builds ignore it.
+/// Directories of the data folder layout.
 pub const DIRS: [&str; 7] = ["users", "invites", "chats", "log", "blobs", "packs", "tmp"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,7 +135,7 @@ impl DataDir {
             let p = path.join(d);
             create_private_dir(&p)
                 .map_err(|e| io_err(crate::lang::l("не удалось создать", "could not create"), &p, e))?;
-            // Folders made by the M0 build used the default umask.
+            // An existing folder may have looser permissions.
             restrict(&p, true);
         }
         clean_tmp(&path.join("tmp"));
@@ -187,19 +181,6 @@ impl DataDir {
         };
 
         let (server, new_admin_code) = match existing {
-            Some(mut s) if s.format_version < FORMAT_VERSION => {
-                tracing::info!(
-                    "{}",
-                    tr!(
-                        "папка данных обновлена: формат {} -> {FORMAT_VERSION}",
-                        "data folder updated: format {} -> {FORMAT_VERSION}",
-                        s.format_version
-                    )
-                );
-                s.format_version = FORMAT_VERSION;
-                write_server_file(&path, &s)?;
-                (s, None)
-            }
             Some(s) => (s, None),
             None => {
                 let code = generate_admin_code();

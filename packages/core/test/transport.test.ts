@@ -23,7 +23,7 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
 
 const ENV = { payload: 'cGF5', sig: 'c2ln' };
 const USER = { userId: 'u1', identity: ENV, profile: ENV, admin: true, removed: false };
-const EV = { gseq: 3, time: 10, chatId: 'c1', senderId: 'u1', devId: 'd1', epoch: 0, msgId: 'm1', body: 'AQID' };
+const EV = { kind: 'event', gseq: 3, time: 10, chatId: 'c1', senderId: 'u1', devId: 'd1', epoch: 0, msgId: 'm1', body: 'AQID' };
 const TOKEN = 'tok-secret-0123456789';
 
 function client(respond: (call: Call) => Response | Promise<Response>, extra: Partial<ConstructorParameters<typeof Transport>[0]> = {}) {
@@ -61,11 +61,6 @@ describe('Transport', () => {
       maxEventBytes: 262144,
       adminCodeActive: true,
       offerSetup: false,
-    };
-    const { t, calls } = client(() => json(hello));
-    // An M1 server sends no limits and no commit: the defaults of docs/API.md 1.7 fill in.
-    expect(await t.hello()).toEqual({
-      ...hello,
       commit: null,
       maxPartBytes: 4194560,
       maxBlobBytes: 200 * 1048576 + 65536,
@@ -73,13 +68,15 @@ describe('Transport', () => {
       maxStateBytes: 262144,
       maxSealedKeyBytes: 8192,
       maxGroupMembers: 100,
-    });
+    };
+    const { t, calls } = client(() => json(hello));
+    expect(await t.hello()).toEqual(hello);
     expect(calls[0]!.url).toBe('https://fc.test/v1/hello');
     expect(calls[0]!.init.credentials).toBe('omit');
     expect(calls[0]!.init.cache).toBe('no-store');
     expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBeUndefined();
 
-    // M6: the build commit, accepted only as hex.
+    // The build commit, accepted only as hex.
     const withCommit = client(() => json({ ...hello, commit: '0123456789ab' }));
     expect((await withCommit.t.hello()).commit).toBe('0123456789ab');
     const badCommit = client(() => json({ ...hello, commit: '<b>x</b>' }));
@@ -177,6 +174,7 @@ describe('Transport', () => {
         users: 1,
         removedUsers: 0,
         chats: 1,
+        groups: 0,
         retentionDays: 90,
         push: true,
       });

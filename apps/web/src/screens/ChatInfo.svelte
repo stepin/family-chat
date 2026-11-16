@@ -10,9 +10,9 @@
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // Group info (docs/PLAN.md screen 17): name and members for everyone; the
+  // Group info: name and members for everyone; the
   // owner renames, adds (with the honest confirmation and "Добавить без
-  // прежней переписки", docs/PLAN-v2.md 8), removes and transfers ownership;
+  // прежней переписки"), removes and transfers ownership;
   // everyone can leave (the owner names the new owner first).
   let { accountId, chatId }: { accountId: string; chatId: string } = $props();
 
@@ -44,7 +44,7 @@
   let newOwner = $state<string | null>(null);
   let dlgError = $state<string | null>(null);
 
-  // M5: a member linked on this device to a newer identity (docs/PLAN.md 8.6): the owner is offered to add it.
+  // A member linked on this device to a newer identity: the owner is offered to add it.
   let links = $state.raw<IdentityLinkView[]>([]);
   const suggested = $derived(
     canManage

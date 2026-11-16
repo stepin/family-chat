@@ -11,10 +11,10 @@
   // recently used ones kept on this device. Keyboard: arrows move in the
   // grid, Enter picks, Escape closes.
   //
-  // M5: from the composer it also has a "Стикеры" tab (the sticker panel is
+  // From the composer it also has a "Стикеры" tab (the sticker panel is
   // its own chunk, loaded when the tab is opened).
   //
-  // M7: a pick closes the dialog first and then hands the emoji over, so the
+  // A pick closes the dialog first and then hands the emoji over, so the
   // receiver (the composer) can put the focus back into its field: the focus
   // goes back to the opener only when nobody took it. On touch screens the
   // search field is not focused on opening: the on-screen keyboard would

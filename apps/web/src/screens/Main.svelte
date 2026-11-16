@@ -21,16 +21,16 @@
   const Storage = lazy(() => import('./Storage.svelte'));
   const Security = lazy(() => import('./Security.svelte'));
   const SearchScreen = lazy(() => import('./SearchScreen.svelte'));
-  // M5: families on this device, adding one, sticker packs, the share chooser.
+  // Families on this device, adding one, sticker packs, the share chooser.
   const Families = lazy(() => import('./Families.svelte'));
   const AddFamily = lazy(() => import('./AddFamily.svelte'));
   const StickerPacks = lazy(() => import('./StickerPacks.svelte'));
   const ForwardSheet = lazy(() => import('../components/ForwardSheet.svelte'));
-  // M7: appearance settings.
+  // Appearance settings.
   const Appearance = lazy(() => import('./Appearance.svelte'));
 
   // One column below 900 px (a stack of screens over the chat list), two
-  // columns from 900 px: the list and the open screen (docs/PLAN.md 8.2).
+  // columns from 900 px: the list and the open screen.
   const top = $derived(nav.top);
   const showList = $derived(app.wide || top.name === 'list');
 </script>

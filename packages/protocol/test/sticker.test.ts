@@ -1,4 +1,4 @@
-// Sticker packs (M5): the manifest envelope, file names, the sticker message and the vectors.
+// Sticker packs: the manifest envelope, file names, the sticker message and the vectors.
 
 import { describe, expect, it } from 'vitest';
 import { utf8 } from '../src/bytes.ts';
@@ -115,7 +115,7 @@ describe('sticker message', () => {
   });
 
   it('a client that ignores the field sees a plain emoji message', () => {
-    // The M4 decoder ignored unknown fields of a msg: an unknown one is still accepted.
+    // Unknown fields of a msg are ignored: an unknown one is still accepted.
     const p = parsePayload(utf8(JSON.stringify({ v: 1, t: 'msg', ...base, body: '🎉', future: { anything: 1 } })));
     expect(p.kind === 'msg' && p.msg.body).toBe('🎉');
   });

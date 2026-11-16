@@ -1,4 +1,4 @@
-// The invitation gateway's platform branches (docs/PLAN.md 8.1), by
+// The invitation gateway's platform branches, by
 // user-agent emulation. One real invitation is issued in beforeAll and never
 // spent: neither the gateway nor the invitation check uses it up. The
 // unknown code is well formed but was never issued.
@@ -69,7 +69,7 @@ test('iOS Safari: install first, copy the invitation, no identity created', asyn
   expect(identities).toBe(0);
 
   // Restore is also deferred until the app is installed. This server already
-  // has its administrator, so setup is not offered at all (M8).
+  // has its administrator, so setup is not offered at all.
   await page.goto(`${fcd.url}/`);
   await expect(page.locator('main.welcome')).toHaveAttribute('data-hello', 'done');
   await expect(page.getByRole('button', { name: 'Настроить для своей семьи' })).toHaveCount(0);

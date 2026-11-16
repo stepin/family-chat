@@ -9,10 +9,10 @@
   import PasteInvite from './PasteInvite.svelte';
 
   // The installed app on iOS starts empty (Safari storage is separate): its
-  // first screen is "paste the invitation" (docs/PLAN.md 8.1).
+  // first screen is "paste the invitation".
   const installedIos = $derived(app.platform.os === 'ios' && app.platform.standalone);
 
-  // M8: one family per server. "Set up for my family" only while the server
+  // One family per server. "Set up for my family" only while the server
   // has no administrator, with `fcd --offer-setup`, or when hello failed.
   let helloState = $state<HelloState>('pending');
   let showSetup = $state<boolean | undefined>(undefined);

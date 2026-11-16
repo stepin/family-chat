@@ -1,6 +1,6 @@
 /*
  * Site styles on top of the app's tokens (prepended by build.mjs). Reading
- * pages: one column of 65-75 characters (docs/PLAN.md 8.8), system fonts,
+ * pages: one column of 65-75 characters, system fonts,
  * light and dark follow the system. No animation.
  */
 
@@ -116,7 +116,7 @@ main,
 }
 
 /* Every menu item on one line: the general `li + li` spacing below would push
-   all items but the first down (M8). */
+   all items but the first down. */
 .site-header nav li + li {
   margin-top: 0;
 }

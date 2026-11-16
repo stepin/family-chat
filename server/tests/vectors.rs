@@ -111,7 +111,7 @@ fn direct_chat_ids_match() {
     }
 }
 
-/// M5: the server accepts the vector manifest and rejects every negative one
+/// The server accepts the vector manifest and rejects every negative one
 /// (it only distinguishes "malformed" from "bad signature"; another author is
 /// refused by the handler before the signature, another server is malformed).
 #[test]
@@ -147,7 +147,7 @@ fn sticker_pack_vectors() {
     }
 }
 
-/// M7: the optional `gender` field of a profile, the same rule as the protocol package.
+/// The optional `gender` field of a profile, the same rule as the protocol package.
 #[test]
 fn profile_gender_vectors() {
     let users = users();

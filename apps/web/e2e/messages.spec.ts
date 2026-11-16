@@ -1,4 +1,4 @@
-// M4 end to end against a real fcd: reply with a quote, edit, reactions seen
+// Message actions end to end against a real fcd: reply with a quote, edit, reactions seen
 // by both, delete for everyone seen by the other person, the emoji picker
 // with the keyboard, forwarding a picture to other chats, global search and
 // search inside a chat. Axe checks of the new UI in both themes.

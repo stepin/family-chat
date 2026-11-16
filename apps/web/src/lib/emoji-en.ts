@@ -1,4 +1,4 @@
-// English names and search words of the picker's emoji (M7). The same
+// English names and search words of the picker's emoji. The same
 // characters in the same categories and order as emoji-ru.ts (a unit test
 // checks it); loaded only when the interface speaks English.
 //

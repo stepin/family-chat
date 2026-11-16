@@ -13,7 +13,7 @@
 // attachment rows and (for sync) the cursor, so a crash never leaves a cursor
 // ahead of its messages. Duplicates are dropped by (sender, message id).
 //
-// Edits, deletions and reactions (M4) are stored as control rows and the
+// Edits, deletions and reactions are stored as control rows and the
 // target message is recomputed from all of them (`recompute`), so the result
 // does not depend on the order in which events arrive:
 // - delete: valid from the target's author or from an owner of the group in

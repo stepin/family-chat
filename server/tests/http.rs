@@ -27,7 +27,7 @@ async fn hello_reports_server_info() {
     let j = res.json();
     assert_eq!(j["protocol"], 1);
     assert_eq!(j["version"], env!("CARGO_PKG_VERSION"));
-    // The build commit (M6): what `fcd --version` shows, or null when unknown.
+    // The build commit: what `fcd --version` shows, or null when unknown.
     if fcd::GIT_COMMIT.is_empty() {
         assert!(j["commit"].is_null());
     } else {
@@ -45,7 +45,6 @@ async fn hello_reports_server_info() {
     assert_eq!(j["maxSealedKeyBytes"], 8192);
     assert_eq!(j["maxGroupMembers"], 100);
     assert_eq!(j["push"], true);
-    assert!(j.get("m0").is_none(), "m0 was removed in M8");
     assert_eq!(j["offerSetup"], false);
     let key = B64.decode(j["vapidPublicKey"].as_str().unwrap()).unwrap();
     assert_eq!(key.len(), 65);
@@ -134,7 +133,7 @@ async fn hello_reports_offer_setup() {
 async fn check_endpoints_need_admin_code() {
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(tmp.path(), Overrides::default()).await;
-    // Always on (M8): no value is 401, not 404.
+    // Always on: no value is 401, not 404.
     let res = get(&srv.url("/v1/check/wait?seconds=0")).await;
     assert_eq!(res.status, 401);
     assert_eq!(res.json()["error"], "unauthorized");
@@ -301,7 +300,7 @@ async fn check_push_cap_and_device_subscription() {
         let got = captured.0.lock().unwrap();
         assert_eq!(got.len(), 1);
         let payload: serde_json::Value = serde_json::from_slice(&decrypt(&ua, &auth, &got[0].1)).unwrap();
-        assert_eq!(payload["kind"], "m0-test");
+        assert_eq!(payload["kind"], "check-test");
         assert_eq!(payload["from"], "app");
     }
     let res = request("GET", &srv.url("/v1/check/push"), &h, None).await;
@@ -477,8 +476,8 @@ fn check_push_request(headers: &HeaderMap, body: &[u8], service: &str, vapid_pub
     assert_eq!(claims["aud"], service);
     assert_eq!(claims["sub"], fcd::config::DEFAULT_PUSH_SUBJECT);
     let payload: serde_json::Value = serde_json::from_slice(&decrypt(ua, auth, body)).unwrap();
-    assert_eq!(payload["kind"], "m0-test");
-    // M7: no human text in the payload; the service worker words it in the app's language.
+    assert_eq!(payload["kind"], "check-test");
+    // No human text in the payload; the service worker words it in the app's language.
     assert!(
         payload.get("body").is_none() && payload.get("title").is_none(),
         "{payload}"

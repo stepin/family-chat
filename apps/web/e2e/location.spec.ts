@@ -3,7 +3,7 @@
 // than 500 m), the card at the other person with the right map link, a
 // refused permission explained, and not a single request to a third party.
 
-import { pairInChat } from './support/m3.ts';
+import { pairInChat } from './support/media.ts';
 import { Fcd } from './support/fcd.ts';
 import { expect, expectAccessible, test } from './support/test.ts';
 

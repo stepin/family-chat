@@ -34,10 +34,10 @@
     onvoice?: ((rec: VoiceRecording) => Promise<boolean>) | undefined;
     /** "Место" in the attachment menu. */
     onlocation?: (() => void) | undefined;
-    /** Replying to a message: the quote bar above the field (M4). */
+    /** Replying to a message: the quote bar above the field. */
     reply?: { readonly name: string; readonly text: string } | null;
     oncancelreply?: (() => void) | undefined;
-    /** Editing my message (M4): the field holds its text; sending saves the change. */
+    /** Editing my message: the field holds its text; sending saves the change. */
     editing?: { readonly key: string; readonly body: string; readonly allowEmpty: boolean } | null;
     onedit?: ((text: string) => Promise<boolean>) | undefined;
     oncanceledit?: (() => void) | undefined;

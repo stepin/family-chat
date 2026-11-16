@@ -1,4 +1,4 @@
-// Stage M2 groups end to end against a real fcd, each person in an isolated
+// Groups end to end against a real fcd, each person in an isolated
 // browser context: a group of three, adding members with and without the
 // earlier history, removing a member (who sees "Вы больше не участник" while
 // the others go on), transferring ownership, leaving; "Избранное"; an avatar

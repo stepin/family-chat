@@ -1,4 +1,4 @@
-// The six quick reactions of the message menu (docs/PLAN.md 8.6), with names
+// The six quick reactions of the message menu, with names
 // for screen readers from the active catalogue (the menu does not load the
 // emoji picker's data).
 import { t } from './strings.ts';

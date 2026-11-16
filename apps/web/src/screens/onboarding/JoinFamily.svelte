@@ -9,7 +9,7 @@
   import { t, type Gender } from '../../lib/strings.ts';
 
   // "Вас пригласил(а) Мама в «Семья»" → name → the chat with the person who
-  // invited (docs/PLAN.md 8.1). The invitation is checked first (without
+  // invited. The invitation is checked first (without
   // using it): a used or expired one is reported at once, before the name.
   const invite = app.invite;
   let family = $state<string | null>(null);

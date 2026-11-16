@@ -1,4 +1,4 @@
-// `.tgs` stickers: gzip-compressed Lottie JSON (docs/PLAN.md 6.10, 7.6, 7.8).
+// `.tgs` stickers: gzip-compressed Lottie JSON.
 //
 // Hostile input: unpacked with a size cap, then sanitised before any
 // renderer sees it. Expressions (string `x` properties, which a full Lottie
@@ -13,7 +13,7 @@ import { MAX_STICKER_SIDE } from '@family-chat/protocol';
 import { StickerError } from './errors.ts';
 import { inflateCapped } from './zip.ts';
 
-/** Unpacked `.tgs` (docs/PLAN.md 6.10). */
+/** Unpacked `.tgs`. */
 export const MAX_TGS_JSON_BYTES = 1024 * 1024;
 export const MAX_TGS_SECONDS = 10;
 export const MAX_TGS_FPS = 120;

@@ -6,7 +6,7 @@
   import { pushAccountOf } from '../lib/push.ts';
   import { t } from '../lib/strings.ts';
 
-  // Families on this device (M5, docs/PLAN.md 7.4): which server each one is
+  // Families on this device: which server each one is
   // on, whether it shares the identity with another family, which family
   // sends the notifications, adding one, and removing one from this device
   // (with its local history) after a plain warning.

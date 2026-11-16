@@ -1,4 +1,4 @@
-//! Sticker packs (docs/PLAN.md 6.1 and 7.5, docs/API.md section 10):
+//! Sticker packs:
 //! `packs/<packId>/` holds `meta.json` (uploader, times), the files named
 //! `<hash32>.<webp|tgs>` (the name is the hash of the bytes) and, once the
 //! pack is published, `pack.json`: the manifest envelope signed by the

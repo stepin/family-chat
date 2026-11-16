@@ -9,7 +9,7 @@
   import { nav } from '../lib/nav.svelte.ts';
   import { t, type Gender } from '../lib/strings.ts';
 
-  // Adding a family on another server (M5, docs/PLAN.md 7.4 and 7.5), without
+  // Adding a family on another server, without
   // losing the families already here: by invitation link, as an existing
   // member (this device's identity, or the recovery phrase of another one),
   // or as the administrator of a new server. The identity is a choice: the

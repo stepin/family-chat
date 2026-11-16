@@ -1,4 +1,4 @@
-// The M1 goal end to end against a real fcd: the administrator sets up the
+// The basic flow end to end against a real fcd: the administrator sets up the
 // family and invites a relative; they exchange messages that arrive without
 // a reload; messages and drafts survive a reload; a used invitation is
 // refused; the phrase restores the administrator on a new device; a removed

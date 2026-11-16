@@ -9,7 +9,7 @@ export interface AdminResult {
 }
 
 /** The administrator route: admin code, name, recovery phrase with confirmation, first invitation. */
-/** `gender: 'f'` picks «Ж» next to the name (M7); the default is «М». */
+/** `gender: 'f'` picks «Ж» next to the name; the default is «М». */
 export async function setupAdmin(page: Page, fcd: Fcd, name = 'Мама', family = 'Ивановы', gender: 'm' | 'f' = 'm'): Promise<AdminResult> {
   await page.goto(`${fcd.url}/`);
   await page.getByRole('button', { name: 'Настроить для своей семьи' }).click();

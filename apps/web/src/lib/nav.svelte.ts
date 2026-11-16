@@ -32,11 +32,9 @@ export type Route =
   | { readonly name: 'server' }
   | { readonly name: 'invites' }
   | { readonly name: 'diagnostics' }
-  // M5
   | { readonly name: 'families' }
   | { readonly name: 'add-family' }
   | { readonly name: 'sticker-packs' }
-  // M7
   | { readonly name: 'appearance' };
 
 export type RouteName = Route['name'];

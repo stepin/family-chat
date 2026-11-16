@@ -209,7 +209,7 @@ describe('profile envelope', () => {
     expect(errorCode(() => createProfileEnvelope(alice, { name: 7 as unknown as string, rev: 0 }))).toBe('invalid-argument');
   });
 
-  it('avatar (M2): null or exactly {sha256, type}; replaces the M1 "any object" rule', () => {
+  it('avatar: null or exactly {sha256, type}', () => {
     const sha256 = base64urlEncode(new Uint8Array(32).fill(1));
     const p = verifyProfileEnvelope(forge('profile', { ...base(), avatar: { sha256, type: 'image/webp' } }), aliceId);
     expect(p.avatar).toEqual({ sha256, type: 'image/webp' });
@@ -281,7 +281,7 @@ describe('auth envelope', () => {
   });
 });
 
-describe('revocation envelope (M2)', () => {
+describe('revocation envelope', () => {
   it('creates and verifies with field order v, userId, revokedAt', () => {
     const env = createRevocationEnvelope(alice, 1794787200000);
     expect(new TextDecoder().decode(base64urlDecode(env.payload))).toBe(

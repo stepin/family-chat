@@ -10,7 +10,7 @@
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // The sticker pack manager (M5, docs/PLAN.md screen 15): the family's
+  // The sticker pack manager: the family's
   // packs, importing a new one (a .zip of .webp and .tgs, or the files
   // themselves), a still preview, publishing for the family, deleting one's
   // own pack for everyone. Everything is checked on this device first.

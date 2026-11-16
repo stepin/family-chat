@@ -18,7 +18,7 @@
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // Appearance (M7, Settings → "Оформление"), a subset of what Telegram
+  // Appearance (Settings → "Оформление"), a subset of what Telegram
   // offers that suits a family chat: theme (system, light, dark), a colour
   // palette, text size in chats, message corners and a chat background.
   // Every change applies at once and is kept on this device only (see

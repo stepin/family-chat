@@ -1,4 +1,4 @@
-// View types of the M2 facade and the queries that build them from the
+// View types of the facade and the queries that build them from the
 // local database (used inside Dexie live queries, so they only read).
 
 import { compareGroupMembers, fingerprint, type AvatarRef, type Location, type MsgRef, type StickerRef } from '@family-chat/protocol';
@@ -50,7 +50,7 @@ export interface AttachmentView {
   readonly error: string | null;
 }
 
-/** A reaction chip under a message (M4). */
+/** A reaction chip under a message. */
 export interface ReactionView {
   readonly emoji: string;
   readonly count: number;
@@ -60,7 +60,7 @@ export interface ReactionView {
   readonly users: readonly string[];
 }
 
-/** The quoted message above a reply (M4). */
+/** The quoted message above a reply. */
 export interface ReplyPreview {
   readonly author: string;
   readonly id: string;
@@ -106,7 +106,7 @@ export interface MessageView {
   readonly service?: ServiceEntry | null;
   /** Upload progress of an outgoing message with attachments (bytes), while it is on the device. */
   readonly upload?: { readonly done: number; readonly total: number } | null;
-  // ---- M4 ----
+  // ---- reply, edit, reactions, forward ----
   /** The text was edited by its author ("изменено"). */
   readonly edited?: boolean;
   /** Reaction chips, in a stable order. */
@@ -116,7 +116,7 @@ export interface MessageView {
   /** Device and seq of the original event (needed to delete it for everyone). */
   readonly devId?: string;
   readonly seq?: number | null;
-  // ---- M5 ----
+  // ---- stickers, identity links ----
   /** A sticker message (the body is its emoji, shown when the sticker cannot be). */
   readonly sticker?: StickerRef | null;
 }
@@ -266,7 +266,7 @@ function attachmentViews(list: MessageRow['attachments'], blobs: Map<string, Blo
 }
 
 /**
- * Direct chats with older identities linked to this chat's peer (M5, "the
+ * Direct chats with older identities linked to this chat's peer ("the
  * same person as…"): their messages are shown in this chat as one feed.
  */
 export async function linkedChatIds(db: CoreDb, accountId: string, chatId: string): Promise<string[]> {
@@ -495,7 +495,7 @@ export async function chatSummaries(db: CoreDb): Promise<ChatSummary[]> {
   return merged.map(({ sortKey: _sortKey, ...rest }) => rest);
 }
 
-/** Folds the direct chat with an older linked identity into the chat with the newer one (M5). */
+/** Folds the direct chat with an older linked identity into the chat with the newer one. */
 function mergeLinked<T extends ChatSummary & { sortKey: number }>(items: T[], links: readonly IdentityLinkRow[], users: readonly UserRow[]): T[] {
   if (links.length === 0) return items;
   const byAccount = new Map<string, Map<string, UserRow>>();

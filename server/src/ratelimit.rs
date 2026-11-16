@@ -1,5 +1,5 @@
 //! Rate limit for wrong codes and signatures: at most 10 failures per minute
-//! per client address (docs/PLAN-v2.md, section 7.3).
+//! per client address.
 
 use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;

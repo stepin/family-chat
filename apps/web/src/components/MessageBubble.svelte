@@ -14,7 +14,7 @@
   // One message. The text is plain text: rendered as text nodes, links only
   // for http, https, mailto and tel (lib/linkify.ts). Never {@html}. In
   // groups others' messages carry the author's name and avatar on the first
-  // message of a run. M4: the quoted original of a reply, "Переслано",
+  // message of a run. Also: the quoted original of a reply, "Переслано",
   // "изменено", the quiet line of a deleted message, reaction chips, and the
   // message menu (long press, right click, the "⋯" button).
   let {
@@ -57,7 +57,7 @@
     highlight?: boolean;
   } = $props();
 
-  // M5: stickers are drawn by their own chunk (WebP or the light Lottie player).
+  // Stickers are drawn by their own chunk (WebP or the light Lottie player).
   const loadSticker = lazy(() => import('./StickerView.svelte'));
 
   const LONG_PRESS_MS = 480;
@@ -71,7 +71,7 @@
   const sticker = $derived(!deleted && message.kind === 'msg' ? (message.sticker ?? null) : null);
   const reactions = $derived(message.reactions ?? []);
   const quote = $derived(message.replyTo ?? null);
-  // M8: a text that is one emoji is twice as large; without a quote or
+  // A text that is one emoji is twice as large; without a quote or
   // "forwarded" it also loses the bubble background, like a sticker.
   const emojiOnly = $derived(
     !deleted &&
@@ -511,7 +511,7 @@
     position: relative;
   }
 
-  /* The visible chip is 32 px tall; the touch target is 44 px (docs/PLAN.md 8.7). */
+  /* The visible chip is 32 px tall; the touch target is 44 px. */
   .chip::after {
     content: '';
     position: absolute;
@@ -554,7 +554,7 @@
     color: var(--on-accent-soft);
   }
 
-  /* A sticker is its own bubble without a background (docs/PLAN.md 8). */
+  /* A sticker is its own bubble without a background. */
   .bubble.sticker-bubble,
   .out .bubble.sticker-bubble {
     padding: 0;
@@ -572,7 +572,7 @@
     color: var(--muted);
   }
 
-  /* One emoji (M8): twice the message text size, following the text size setting. */
+  /* One emoji: twice the message text size, following the text size setting. */
   .text.emoji-text {
     font-size: calc(2 * var(--text-m));
     line-height: 1.2;

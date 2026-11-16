@@ -1,4 +1,4 @@
-// M7: the interface in English. The browser asks for en-US, so the app
+// The interface in English. The browser asks for en-US, so the app
 // follows the system's language: onboarding, a message, Settings, switching
 // to Russian and back (at once, without a reload), and axe on the main
 // screens in English in both themes.

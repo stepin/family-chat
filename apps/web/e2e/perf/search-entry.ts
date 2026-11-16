@@ -107,7 +107,7 @@ export async function run(n: number): Promise<Record<string, unknown>> {
   plain.close();
   await dropDb('perf-nowords');
 
-  // 2. An old (M3) database with these messages: the version 3 upgrade indexes them.
+  // 2. An old database with these messages: the version 3 upgrade indexes them.
   await dropDb('perf-upgrade');
   const old = new Dexie('perf-upgrade');
   old.version(1).stores({ messages: '[accountId+senderId+msgId], [accountId+chatId+gseq], accountId' });

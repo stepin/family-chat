@@ -42,7 +42,7 @@ test('export the archive and import it on a fresh device', async ({ newUser }) =
     const download = mama.page.waitForEvent('download');
     await mama.page.getByRole('button', { name: 'Сохранить файл' }).click();
     const d = await download;
-    // M7: with one family the file name does not carry the family's name.
+    // With one family the file name does not carry the family's name.
     expect(d.suggestedFilename()).toMatch(/^family-chat-\d{4}-\d{2}-\d{2}\.fcarchive$/);
     archivePath = await d.path();
     expect(readFileSync(archivePath).length).toBeGreaterThan(100);

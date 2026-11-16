@@ -1,4 +1,4 @@
-// The Lottie player for `.tgs` stickers (M5): the light build of lottie-web,
+// The Lottie player for `.tgs` stickers: the light build of lottie-web,
 // SVG renderer only and without expression support (expressions would run
 // arbitrary JavaScript; the core removes them from the data as well). Loaded
 // on first use in its own chunk, bundled with the app (no CDN). It needs no

@@ -1,6 +1,6 @@
 # @family-chat/core
 
-Клиентское ядро без интерфейса и без DOM (этапы M2-M5): клиент API сервера `fcd`, локальная база (IndexedDB через Dexie), вход и идентичность, синхронизация длинным запросом, очередь отправки, участники, группы с эпохами, чат с самим собой, вложения, аватары, отметка «проверен», отзыв идентичности, архив `.fcarchive`, администрирование, push и фасад для интерфейса. Работает в странице, воркере и service worker (нужны `fetch`, IndexedDB, WebCrypto и таймеры; для файлов по возможности OPFS).
+Клиентское ядро без интерфейса и без DOM: клиент API сервера `fcd`, локальная база (IndexedDB через Dexie), вход и идентичность, синхронизация длинным запросом, очередь отправки, участники, группы с эпохами, чат с самим собой, вложения, аватары, отметка «проверен», отзыв идентичности, архив `.fcarchive`, администрирование, push и фасад для интерфейса. Работает в странице, воркере и service worker (нужны `fetch`, IndexedDB, WebCrypto и таймеры; для файлов по возможности OPFS).
 
 Контракт с сервером: `docs/API.md`; криптография: `docs/PROTOCOL.md` и пакет `@family-chat/protocol`.
 
@@ -35,16 +35,15 @@ await core.sendMessage(acc.id, chatId, { text: 'Фото', attachments: [{ data:
 
 | Хранилище | Что в нём |
 |---|---|
-| `core.accounts` | `AccountView[]`: учётные записи без секретов. Новое в M2: `selfChatId`, `revoked`, `oldestTime`, `historyTrimmed` |
+| `core.accounts` | `AccountView[]`: учётные записи без секретов, среди полей `selfChatId`, `revoked`, `oldestTime`, `historyTrimmed` |
 | `core.connection` | состояние связи по `accountId` (см. ниже) |
 | `core.chatList` | `ChatSummary[]`: все чаты. `kind`: `self` (закреплён первым, `pinned: true`), `group`, `dm`. `title`: название группы или имя собеседника (`null` у «Избранного»: интерфейс пишет «Избранное»). `member: false` у группы, где я больше не участник |
-| `core.chats` | `ChatListItem[]`: прежний список M1, только личные чаты с другими людьми. Оставлен для совместимости; `apps/web` с M2 берёт `chatList` |
 | `core.chat(acc, chat).messages` | `MessageView[]`: сообщения чата, новые в конце, затем очередь отправки |
 | `core.group(acc, chat)` | `GroupView \| null`: название, владелец, участники, членство, расхождение с сервером |
-| `core.members(acc)` | `Member[]`: участники семьи. Новое: `revoked`, `verified`, `avatar`; M7: `gender` (`'m'` или `'f'`, `'m'`, если в профиле нет) |
+| `core.members(acc)` | `Member[]`: участники семьи, среди полей `revoked`, `verified`, `avatar`, `gender` (`'m'` или `'f'`, `'m'`, если в профиле нет) |
 | `core.avatar(acc, userId)` | `AvatarView \| null`: аватар как `Blob` (сам скачивается и кэшируется) |
 | `core.transfers` | `TransferView[]`: загрузки и скачивания в очереди, в работе и с ошибкой |
-| `core.outbox`, `core.drafts`, `core.diagnostics` | как в M1 |
+| `core.outbox`, `core.drafts`, `core.diagnostics` | очередь отправки, черновики, диагностика |
 
 `core.accountList()` читает учётные записи один раз (живое хранилище отдаёт первое значение асинхронно).
 
@@ -56,12 +55,12 @@ await core.sendMessage(acc.id, chatId, { text: 'Фото', attachments: [{ data:
 
 `MessageView`:
 
-- `status`: `on-device` (в очереди), `on-server` (сервер принял, есть `gseq` и время сервера), `failed` (`core.retry` или `core.cancel`). Набор значений тот же, что в M1.
-- `kind`: `msg`, `update-required` («обновите приложение»), `service` (служебная строка группы, см. `service`), `deleted` (M4: удалено у всех, тихая строка «Сообщение удалено» без текста и файлов).
+- `status`: `on-device` (в очереди), `on-server` (сервер принял, есть `gseq` и время сервера), `failed` (`core.retry` или `core.cancel`).
+- `kind`: `msg`, `update-required` («обновите приложение»), `service` (служебная строка группы, см. `service`), `deleted` (удалено у всех, тихая строка «Сообщение удалено» без текста и файлов).
 - `attachments`: `AttachmentView[]` (пустой список, если вложений нет).
 - `upload`: `{done, total}` в байтах, пока сообщение с вложениями ждёт загрузки частей («Загружается N%»); `null` у остальных.
-- `location` (M3): `{lat, lon, accuracy}` или `null`; `fwd: true` у пересланного (M4).
-- M4: `edited` («изменено»), `reactions` (`ReactionView[]`: `emoji`, `count`, `mine`, `users`), `replyTo` (`ReplyPreview`: `author`, `available`, `body`, `media`, `fileName`, `gseq`; `available: false`, если исходного сообщения нет на устройстве или оно удалено), `devId` и `seq` исходного события.
+- `location`: `{lat, lon, accuracy}` или `null`; `fwd: true` у пересланного.
+- `edited` («изменено»), `reactions` (`ReactionView[]`: `emoji`, `count`, `mine`, `users`), `replyTo` (`ReplyPreview`: `author`, `available`, `body`, `media`, `fileName`, `gseq`; `available: false`, если исходного сообщения нет на устройстве или оно удалено), `devId` и `seq` исходного события.
 - `error: 'storage_full'` у сообщения `on-device`: на диске сервера не хватает места (507); загрузка и отправка повторяются сами, текст и файлы остаются в очереди.
 - `service` (у `kind: 'service'`, `senderId` пустой):
 
@@ -114,7 +113,7 @@ core.group(acc.id, chatId).subscribe((g) => { /* GroupView */ });
 
 ## Чат с самим собой («Избранное»)
 
-Есть у каждой учётной записи: `AccountView.selfChatId`, `core.openChat(acc.id, acc.userId)` возвращает его же. В `chatList` он первый (`kind: 'self'`, `pinned: true`). Сообщения из него приходят на все мои устройства. В `core.chats` (список M1) его нет; `Member.chatId` у себя по-прежнему `null`.
+Есть у каждой учётной записи: `AccountView.selfChatId`, `core.openChat(acc.id, acc.userId)` возвращает его же. В `chatList` он первый (`kind: 'self'`, `pinned: true`). Сообщения из него приходят на все мои устройства. `Member.chatId` у себя `null`.
 
 ## Вложения
 
@@ -132,7 +131,7 @@ await core.sendMessage(acc.id, chatId, {
 
 - Картинку готовит интерфейс (уменьшение, удаление EXIF, миниатюра JPEG до 4096 байт: это API браузера): в ядро приходят готовые байты, размеры и миниатюра. Голосовые: `durationMs` и ровно 64 `peaks`. Для своих проверок интерфейс берёт из ядра `IMAGE_TYPES`, `MAX_ATTACHMENTS`, `MAX_THUMB_BYTES` (константы протокола).
 - Размер проверяется по `maxBlobBytes` из `/v1/hello` до начала (`CoreError` `too-large`), описатель по правилам протокола (`invalid-input`), не больше 10 вложений.
-- Файл один раз копируется в хранилище приложения (OPFS, где он есть с потоками записи, иначе IndexedDB; выбор при запуске, опция `fileStore: 'auto' | 'opfs' | 'idb'`), затем шифруется по частям на лету и загружается частями по 4 МиБ. В OPFS каждая часть лежит отдельным файлом (`<ключ>.parts/<n>`, с M3): запись одной части не переписывает остальные. Файлы M2 (один файл на вложение) читаются и удаляются как раньше. После перезапуска загрузка продолжается: ядро спрашивает сервер, какие части уже есть, и досылает недостающие. Сообщение уходит после загрузки всех частей. В памяти не больше одной части.
+- Файл один раз копируется в хранилище приложения (OPFS, где он есть с потоками записи, иначе IndexedDB; выбор при запуске, опция `fileStore: 'auto' | 'opfs' | 'idb'`), затем шифруется по частям на лету и загружается частями по 4 МиБ. В OPFS каждая часть лежит отдельным файлом (`<ключ>.parts/<n>`): запись одной части не переписывает остальные. После перезапуска загрузка продолжается: ядро спрашивает сервер, какие части уже есть, и досылает недостающие. Сообщение уходит после загрузки всех частей. В памяти не больше одной части.
 - Нехватка места на устройстве: `CoreError` `no-space` до отправки (копия не создаётся, сообщение не ставится в очередь); у скачивания статус `failed` с `error: 'no-space'`, повтор после освобождения места. Ответ сервера 507 (`storage_full`) считается временным: загрузка ждёт и повторяется, `AttachmentView.error` и `MessageView.error` равны `storage_full`.
 - Отмена в любой момент (в этой или другой вкладке) не даёт загрузке «ожить»: смена статуса передачи идёт как сравнение-и-запись в одной транзакции; часть, успевшая уйти на сервер после отмены, удаляется.
 - Прогресс: `MessageView.upload` и `core.transfers`. Отмена сообщения `core.cancel(acc, msgId)` отменяет и загрузки (части удаляются с сервера); `core.cancelTransfer(acc, blobId)` отменяет одну загрузку (сообщение станет `failed`). `core.retry` перезапускает упавшие загрузки.
@@ -141,11 +140,11 @@ await core.sendMessage(acc.id, chatId, {
 
 - `AttachmentView.status`: `not-downloaded`, `downloading` (с `progress` 0..1), `ready`, `failed`, `gone` (удалено с сервера отправителем или по сроку), у своих: `uploading`, `cancelled`.
 - Картинки и голосовые до 10 МБ скачиваются сами (настройка `SETTING_AUTO_DOWNLOAD`, по умолчанию включено), остальное по `core.downloadAttachment(acc, blobId)`. `core.cancelTransfer` возвращает в «не скачано».
-- Голосовые (M3): `AttachmentView.durationMs`, `peaks` (64 значения 0-255) и `heard` (прослушано на этом устройстве; у своих всегда `true`). `core.markHeard(acc, blobId)` снимает отметку «не прослушано» (локально, на сервер не уходит).
+- Голосовые: `AttachmentView.durationMs`, `peaks` (64 значения 0-255) и `heard` (прослушано на этом устройстве; у своих всегда `true`). `core.markHeard(acc, blobId)` снимает отметку «не прослушано» (локально, на сервер не уходит).
 - Скачивание продолжается после перезапуска с первой недостающей части.
 - Содержимое: `core.attachmentBlob(acc, blobId)` даёт `Blob` из хранилища (OPFS-файл или Blob из IndexedDB, без чтения целиком в память ядром); `core.attachmentUrl(acc, blobId)` даёт `blob:`-адрес, отзывать его `URL.revokeObjectURL` должен интерфейс.
 
-## Место (M3)
+## Место
 
 ```ts
 await core.sendMessage(acc.id, chatId, { location: { lat: 55.7558, lon: 37.6173, accuracy: 25 } });   // без текста можно
@@ -155,7 +154,7 @@ await core.sendMessage(acc.id, chatId, { location: { lat: 55.7558, lon: 37.6173,
 
 ## Профиль, аватары, контакты
 
-- `core.updateProfile(acc, name)`: имя (аватар сохраняется). M7: `core.updateProfile(acc, { name?, gender? })` меняет имя и/или пол, остальное сохраняется; `core.join({ …, gender })` пишет пол в первый профиль (по умолчанию `'m'`). `InviteCheck.createdBy.gender` для текста приглашения. База данных версии 5: `UserRow.gender`, при обновлении читается из уже сохранённых профилей.
+- `core.updateProfile(acc, name)`: имя (аватар сохраняется); `core.updateProfile(acc, { name?, gender? })` меняет имя и/или пол, остальное сохраняется; `core.join({ …, gender })` пишет пол в первый профиль (по умолчанию `'m'`). `InviteCheck.createdBy.gender` для текста приглашения.
 - `core.setAvatar(acc, imageBlobOrBytes)`: готовый JPEG или WebP до 256 КБ (уменьшение и EXIF на стороне интерфейса). Ядро загружает картинку, сверяет SHA-256 и подписывает профиль с её ссылкой. `core.removeAvatar(acc)`.
 - `core.avatar(acc, userId)`: живой `AvatarView` (`blob`, `type`, `sha256`) или `null`; чужие аватары скачиваются с токеном, проверяются по SHA-256 из подписанного профиля и кэшируются. `core.avatarBlob(acc, userId)` то же разово.
 - `core.setVerified(acc, userId, true | false)`: локальная отметка «проверен» по отпечатку (`Member.fingerprint`); если ключи участника сменятся, `Member.verified` станет `false`.
@@ -167,7 +166,7 @@ await core.sendMessage(acc.id, chatId, { location: { lat: 55.7558, lon: 37.6173,
 - `core.join` с приглашением возвращает `firstChatId`: личный чат с пригласившим.
 - `AccountView.oldestTime` и `historyTrimmed`: если `historyTrimmed`, вверху чата, история которого дошла до начала (`loadOlder()` вернул `false`), показывается «сообщения до <oldestTime> с сервера уже удалены» и предложение импорта архива. В `retentionGap` тоже есть `oldestTime`.
 
-## Ответ, правка, удаление, реакции, пересылка, поиск (M4)
+## Ответ, правка, удаление, реакции, пересылка, поиск
 
 ```ts
 await core.sendMessage(acc.id, chatId, { text: 'Хорошо', reply: { author, id } });      // ответ с цитатой
@@ -193,7 +192,7 @@ await core.chat(acc.id, chatId).reveal(gseq);                 // показат�
 
 Поиск локальный, на сервер ничего не уходит. У каждого сообщения есть поле `words` с multiEntry-индексом Dexie: слова после NFKC, нижнего регистра и замены `ё` на `е`, не короче 2 символов, каждое один раз; в индекс идут текст и имена файлов. Слово запроса ищется по префиксу, короче 3 символов только целым словом; несколько слов: все должны совпасть. Слова пересчитываются при каждой записи сообщения (синхронизация, правка, удаление, импорт архива), поэтому индекс всегда соответствует сообщениям. Схема базы выросла до версии 3: таблицы `controls`, `tombstones` и индекс `*words`; при обновлении старые сообщения индексируются.
 
-## Несколько семей, стикеры, бейдж, «Поделиться», связь личностей (M5)
+## Несколько семей, стикеры, бейдж, «Поделиться», связь личностей
 
 ```ts
 // Вторая семья на другом сервере. Та же личность (одни слова на все семьи; userId тот же,
@@ -239,7 +238,7 @@ for await (const chunk of core.exportArchive({ includeFiles: true })) await writ
 const { added, skipped, files } = await core.importArchive(fileOrStreamOrChunks);   // «Добавлено N, пропущено M»
 ```
 
-В архиве все учётные записи идентичности без токенов, контакты, чаты, подписанные состояния групп с секретами эпох, служебные записи, проверенные события как есть (правки и реакции тоже события), надгробия удалённых сообщений (M4: «у всех» и «у меня», с местом в ленте) и, по флажку, файлы вложений. Импорт заново проверяет события тем же путём, что синхронизация, и пропускает известные. Архив другой идентичности: `CoreError` `wrong-identity`; повреждённый или обрезанный: `bad-archive`. Учётная запись, которой на устройстве нет, создаётся без токена и при первом запросе входит подписью с новым `devId`.
+В архиве все учётные записи идентичности без токенов, контакты, чаты, подписанные состояния групп с секретами эпох, служебные записи, проверенные события как есть (правки и реакции тоже события), надгробия удалённых сообщений («у всех» и «у меня», с местом в ленте) и, по флажку, файлы вложений. Импорт заново проверяет события тем же путём, что синхронизация, и пропускает известные. Архив другой идентичности: `CoreError` `wrong-identity`; повреждённый или обрезанный: `bad-archive`. Учётная запись, которой на устройстве нет, создаётся без токена и при первом запросе входит подписью с новым `devId`.
 
 ## Push
 
@@ -247,20 +246,16 @@ Service worker на push вызывает `handlePushPayload(event.data.json())`
 
 ## Ошибки
 
-- `CoreError` с `code`: прежние (`no-account`, `no-identity`, `account-exists`, `login-invalid`, `removed`, `unknown-user`, `unknown-chat`, `invalid-input`, `unsupported-server`, `closed`) и новые: `too-large`, `not-member`, `not-owner`, `owner-cannot-leave`, `busy`, `need-key`, `peer-revoked`, `revoked`, `wrong-identity`, `bad-archive`, `gone`. `self-chat` больше не возникает. M3: `no-space` (на устройстве не хватает места). M4: `not-downloaded` (для пересылки файлы должны быть на устройстве; в `message` идентификаторы вложений через запятую), `not-allowed` (чужое сообщение нельзя изменить или удалить у всех).
+- `CoreError` с `code`: `no-account`, `no-identity`, `account-exists`, `login-invalid`, `removed`, `unknown-user`, `unknown-chat`, `invalid-input`, `unsupported-server`, `closed`, `too-large`, `not-member`, `not-owner`, `owner-cannot-leave`, `busy`, `need-key`, `peer-revoked`, `revoked`, `wrong-identity`, `bad-archive`, `gone`, `no-space` (на устройстве не хватает места), `not-downloaded` (для пересылки файлы должны быть на устройстве; в `message` идентификаторы вложений через запятую), `not-allowed` (чужое сообщение нельзя изменить или удалить у всех).
 - `ApiError` (`code` как в `docs/API.md`, `details.epoch|limit|rev|version`) и `NetworkError` из транспорта; `isTransient(e)` говорит, поможет ли повтор.
 - В текстах ошибок и в диагностике нет токенов, ключей, фраз и текста сообщений.
-
-## Совместимость с клиентом M1
-
-Фасад M1 не менялся по сигнатурам: `chats`, `send`, `chat()`, `members()`, `join()` (результат расширен), `MessageStatus` и `ConnectionState` (у `removed` добавлено необязательное поле). Схема базы выросла до версии 3 только добавлением таблиц, полей и индексов; база, созданная M1 или M2/M3, открывается и обновляется автоматически.
 
 ## Тесты
 
 ```bash
 pnpm --filter @family-chat/core test        # модульные (Vitest, fake-indexeddb, поддельный сервер в памяти, поддельный OPFS)
 pnpm test:integration                       # из корня: против настоящего fcd
-FC_PERF=1 pnpm --filter @family-chat/core test m4   # замер поиска на 50 000 сообщений (fake-indexeddb, медленно)
+FC_PERF=1 pnpm --filter @family-chat/core test message-actions # замер поиска на 50 000 сообщений (fake-indexeddb, медленно)
 pnpm --filter @family-chat/web run test:e2e:perf    # тот же замер в Chromium
 ```
 

@@ -1,4 +1,4 @@
-// Sticker files for the M5 tests, made here (nothing binary is committed):
+// Sticker files for the sticker tests, made here (nothing binary is committed):
 // a ZIP (stored entries), a `.tgs` (gzip of a small Lottie animation) and a
 // real WebP made by the browser itself.
 

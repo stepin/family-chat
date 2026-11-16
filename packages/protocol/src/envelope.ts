@@ -55,9 +55,8 @@ export const AVATAR_TYPES: readonly AvatarType[] = ['image/jpeg', 'image/webp'];
 export type Avatar = null | AvatarRef;
 
 /**
- * Grammatical gender for the wording of messages about the person (M7):
- * `m` or `f`. Optional in the payload; a profile without it (every profile
- * made before M7) means `m`.
+ * Grammatical gender for the wording of messages about the person:
+ * `m` or `f`. Optional in the payload; a profile without it means `m`.
  */
 export type Gender = 'm' | 'f';
 export const GENDERS: readonly Gender[] = ['m', 'f'];
@@ -237,7 +236,7 @@ export interface ProfileInput {
   readonly updated?: number;
   /** Avatar reference; null or absent means no avatar. */
   readonly avatar?: AvatarRef | null;
-  /** Gender (M7). Absent: no `gender` field (a reader takes `m`); the app always gives it. */
+  /** Gender. Absent: no `gender` field (a reader takes `m`); the app always gives it. */
   readonly gender?: Gender;
 }
 
@@ -271,7 +270,7 @@ export function createProfileEnvelope(keys: IdentityKeys, input: ProfileInput): 
   const ap = avatarProblem(avatarIn);
   if (ap) throw new ProtocolError('invalid-argument', ap);
   const avatar = avatarIn === null ? null : { sha256: avatarIn.sha256, type: avatarIn.type };
-  // Written only when given: without it the bytes are those of a profile before M7.
+  // Written only when given: without it the bytes are those of a profile without gender.
   const gender = input.gender;
   if (gender !== undefined && !GENDERS.includes(gender)) throw new ProtocolError('invalid-argument', 'gender must be "m" or "f"');
   return seal(

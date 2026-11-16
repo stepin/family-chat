@@ -8,7 +8,7 @@ import { commitEvents, decodeEvents, type AccountRuntimeLike } from './apply.ts'
 import type { CoreContext } from './context.ts';
 import { describeError } from './db/diagnostics.ts';
 
-/** Setting key: show message text in notifications (default false, docs/PLAN-v2.md 7.7). */
+/** Setting key: show message text in notifications (default false). */
 export const SETTING_PUSH_SHOW_TEXT = 'push.showText';
 
 export async function registerPush(rt: AccountRuntimeLike, sub: PushSubscriptionInput): Promise<void> {

@@ -3,7 +3,7 @@
   import { t } from '../lib/strings.ts';
 
   // Small dialogs of the message menu (loaded on first use): "Удалить у
-  // меня / у всех" with the honest wording of docs/PLAN.md 8.5, and the list
+  // меня / у всех" with honest wording, and the list
   // of who placed a reaction.
   type Props =
     | { kind: 'delete'; forAll: boolean; onconfirm: (forAll: boolean) => void; onclose: () => void; emoji?: never; names?: never }

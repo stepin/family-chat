@@ -54,7 +54,7 @@ export interface MessageExtras {
   readonly attachments?: readonly Attachment[];
   readonly location?: Location;
   readonly fwd?: boolean;
-  /** A sticker (M5); the text is then its emoji. */
+  /** A sticker; the text is then its emoji. */
   readonly sticker?: StickerRef;
   /** Use this message id (attachments were prepared under it). */
   readonly msgId?: string;

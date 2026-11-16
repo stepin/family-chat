@@ -1,4 +1,4 @@
-/* Appearance and language before the first paint (M7).
+/* Appearance and language before the first paint.
  *
  * A classic script loaded from <head> of index.html, before the stylesheet:
  * the Content-Security-Policy forbids inline scripts, but a same-origin file

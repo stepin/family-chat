@@ -57,7 +57,7 @@
     const chatParam = params.get('chat');
     const accountParam = params.get('account');
     const shareParam = params.get('share');
-    // M8: a tap on the app's test notification opens Family and server.
+    // A tap on the app's test notification opens Family and server.
     const openServerCheck = params.get('open') === 'server-check';
     if (chatParam !== null || shareParam !== null || openServerCheck) history.replaceState(history.state, '', location.pathname);
 
@@ -80,7 +80,7 @@
       if (account) {
         nav.reset({ name: 'list' });
         if (invite) {
-          // An invitation into another family: "add a family?" (docs/PLAN.md 6.10).
+          // An invitation into another family: "add a family?".
           if (app.accounts.some((a) => sameServer(a.serverUrl, invite.serverUrl))) app.notify(t.join.already);
           else {
             app.invite = invite;
@@ -105,7 +105,7 @@
   });
 </script>
 
-<!-- M7: a new interface language renders every screen again (the state lives in app and nav). -->
+<!-- A new interface language renders every screen again (the state lives in app and nav). -->
 {#key app.lang}
 {#if app.phase === 'loading'}
   <div class="splash" role="status">{t.boot.loading}</div>

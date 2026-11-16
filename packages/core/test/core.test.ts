@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FamilyChatCore } from '../src/core.ts';
+import type { ChatSummary } from '../src/views.ts';
 import { isCoreError } from '../src/errors.ts';
 import { SETTING_PUSH_SHOW_TEXT } from '../src/push.ts';
 import { until } from '../src/util/readable.ts';
@@ -41,10 +42,11 @@ describe('facade', () => {
     expect(back[1]!.outgoing).toBe(false);
 
     // Chat list with last message and unread counter.
-    const list = await until(b.chats, (l) => l.length === 1 && l[0]!.lastMessage?.body === 'И тебе');
-    expect(list[0]).toMatchObject({ unread: 1, peerName: 'Мама', peerId: accA.userId, pending: 0 });
+    const dmOf = (l: readonly ChatSummary[]) => l.filter((c) => c.kind === 'dm');
+    const list = dmOf(await until(b.chatList, (l) => dmOf(l).length === 1 && dmOf(l)[0]!.lastMessage?.body === 'И тебе'));
+    expect(list[0]).toMatchObject({ unread: 1, title: 'Мама', peerId: accA.userId, pending: 0 });
     await viewB.markRead();
-    await until(b.chats, (l) => l[0]!.unread === 0);
+    await until(b.chatList, (l) => dmOf(l)[0]!.unread === 0);
 
     // Connection state.
     expect(a.connection.get()[accA.id]?.kind).toBe('connected');
@@ -58,7 +60,7 @@ describe('facade', () => {
     await a.setDraft(accA.id, chat, 'черновик');
     expect(await a.getDraft(accA.id, chat)).toBe('черновик');
     await until(a.drafts, (d) => d.length === 1 && d[0]!.text === 'черновик');
-    await until(a.chats, (l) => l.some((c) => c.draft === 'черновик'));
+    await until(a.chatList, (l) => l.some((c) => c.draft === 'черновик'));
 
     server.offline = true;
     const view = a.chat(accA.id, chat);
@@ -127,7 +129,7 @@ describe('facade', () => {
     unsub();
   });
 
-  it('server check for administrators (M8)', async () => {
+  it('server check for administrators', async () => {
     const { a, b, accA, accB } = await setup();
     const check = a.serverCheck(accA.id);
     const w = await check.wait(0);
@@ -216,7 +218,7 @@ describe('facade', () => {
     await expect(a.send(accA.id, chat, '   ')).rejects.toSatisfy((e) => isCoreError(e, 'invalid-input'));
     await expect(a.send(accA.id, chat, 'я'.repeat(9000))).rejects.toSatisfy((e) => isCoreError(e, 'invalid-input'));
     await expect(a.send(accA.id, 'aaaaaaaaaaaaaaaaaaaaaaaaaa', 'x')).rejects.toSatisfy((e) => isCoreError(e, 'unknown-chat'));
-    // Since M2 the chat with oneself exists ("Избранное").
+    // The chat with oneself exists ("Избранное").
     expect(await a.openChat(accA.id, accA.userId)).toBe(accA.selfChatId);
     await expect(a.openChat(accA.id, 'aaaaaaaaaaaaaaaaaaaaaaaaaa')).rejects.toSatisfy((e) => isCoreError(e, 'unknown-user'));
     await expect(a.relogin('nope')).rejects.toSatisfy((e) => isCoreError(e, 'no-account'));

@@ -14,7 +14,7 @@ test('the whole site builds and every internal link, image and anchor resolves',
   try {
     const r = build({ outDir: out });
     assert.equal(r.pages, PAGES.length);
-    // No app on the site (M8), and the project's real addresses.
+    // No app on the site, and the project's real addresses.
     assert.deepEqual(readdirSync(out).filter((n) => n === 'app'), []);
     const home = readFileSync(join(out, 'index.html'), 'utf8');
     assert.match(home, /href="https:\/\/github\.com\/stepin\/family-chat\/releases"/);

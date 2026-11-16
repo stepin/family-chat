@@ -8,7 +8,7 @@
   import { saveBlob } from '../lib/storage.ts';
   import { t } from '../lib/strings.ts';
 
-  // One attachment in a message (docs/PLAN.md 8.4, 8.6). Images: the inline
+  // One attachment in a message. Images: the inline
   // thumbnail first (with the final dimensions, so the feed does not jump),
   // then the downloaded picture through <img> and a blob: URL. Everything
   // else: a card with name, size and a download button; files are never

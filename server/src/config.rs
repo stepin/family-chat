@@ -32,9 +32,9 @@ pub struct Overrides {
     pub push_subject: Option<String>,
     pub min_free_mb: Option<u64>,
     pub trust_forwarded_for: Option<bool>,
-    /// M8: offer family setup on the first screen even when a family exists.
+    /// Offer family setup on the first screen even when a family exists.
     pub offer_setup: Option<bool>,
-    /// M7: language of the console output, `ru` or `en` (only in the file; the flag is `--lang`).
+    /// Language of the console output, `ru` or `en` (only in the file; the flag is `--lang`).
     pub lang: Option<String>,
 }
 

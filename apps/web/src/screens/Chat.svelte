@@ -24,7 +24,7 @@
   import { activeLang, t } from '../lib/strings.ts';
   import { loadEmoji } from '../lib/emoji-data.ts';
 
-  // A chat (docs/PLAN.md screen 9): direct, group or "Избранное". Messages
+  // A chat: direct, group or "Избранное". Messages
   // grouped by day, own messages on the right, in groups the author's name
   // and avatar on others' messages; service lines of groups; send statuses
   // with retry and cancel; attachments with preview, upload progress and the
@@ -71,7 +71,7 @@
   const loadPreview = () => import('../components/AttachPreview.svelte');
   const loadViewer = () => import('../components/ImageViewer.svelte');
   const loadLocation = () => import('../components/LocationSheet.svelte');
-  // M4: the emoji picker (with its data), forwarding and the delete and "who reacted" dialogs.
+  // The emoji picker (with its data), forwarding and the delete and "who reacted" dialogs.
   // The picker and the emoji names in the interface language, both on first use.
   const loadPicker = () => Promise.all([import('../components/EmojiPicker.svelte'), loadEmoji(activeLang())]);
   const loadForward = () => import('../components/ForwardSheet.svelte');
@@ -89,7 +89,7 @@
   let dialogFor = $state.raw<{ kind: 'delete'; key: string } | { kind: 'who'; key: string; emoji: string } | null>(null);
   let highlightKey = $state<string | null>(null);
   let highlightTimer: ReturnType<typeof setTimeout> | undefined;
-  // Text shared into the app (M5), put into the composer once it exists.
+  // Text shared into the app, put into the composer once it exists.
   let sharedText = $state<string | null>(null);
   // Search inside this chat.
   let searchOpen = $state(false);
@@ -357,7 +357,7 @@
   }
 
   function onPopState(e: PopStateEvent): void {
-    // "Back" closes the viewer first (docs/PLAN.md 8.2).
+    // "Back" closes the viewer first.
     if (viewerIndex !== null && !(e.state as { fcViewer?: boolean } | null)?.fcViewer) viewerIndex = null;
   }
 
@@ -384,7 +384,7 @@
       io.observe(sentinel);
     }
     if (!app.hello) void app.refreshHello();
-    // Content shared into the app (Web Share Target, M5) for this chat: files go to the preview, text to the field.
+    // Content shared into the app (Web Share Target) for this chat: files go to the preview, text to the field.
     const share = app.pendingShare;
     if (share && share.accountId === accountId && share.chatId === chatId) {
       app.pendingShare = null;

@@ -12,7 +12,7 @@
   import { archiveReminder, type Reminder } from '../lib/storage.ts';
   import { t } from '../lib/strings.ts';
 
-  // Chat list (docs/PLAN.md 8.3): status line, "Избранное" pinned first,
+  // Chat list: status line, "Избранное" pinned first,
   // then groups and direct chats by time; avatars, member counts, marks for
   // drafts, failed sends and failed uploads.
   const account = $derived(app.account!);
@@ -67,7 +67,7 @@
     app.flagsLoaded && !app.flags.phraseConfirmed && !removed && (account.admin || app.flags.phraseOffered),
   );
 
-  // The archive reminder (docs/PLAN-v2.md 8): once every 30 days, loudly when storage is not persistent.
+  // The archive reminder: once every 30 days, loudly when storage is not persistent.
   let reminder = $state<Reminder>('none');
   async function checkReminder(): Promise<void> {
     let firstSeen = await app.getValue<number>('firstSeen');
@@ -150,7 +150,7 @@
     return out;
   }
 
-  /** Arrow keys move between chats (docs/PLAN.md 8.7). */
+  /** Arrow keys move between chats. */
   function onListKey(e: KeyboardEvent): void {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     const list = e.currentTarget as HTMLElement;
@@ -165,7 +165,7 @@
 </script>
 
 <section class="screen" aria-labelledby="list-title">
-  <!-- M7: no family name at the top. My avatar opens Settings; the switcher appears only with several families. -->
+  <!-- No family name at the top. My avatar opens Settings; the switcher appears only with several families. -->
   <header class="screen-header">
     <button class="icon-btn me" type="button" aria-label={t.list.openSettings} onclick={() => nav.push({ name: 'settings' })} data-testid="open-settings">
       <Avatar accountId={account.id} userId={account.userId} name={me?.name ?? null} hasAvatar={!!me?.avatar} size={34} />

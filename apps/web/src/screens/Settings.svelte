@@ -9,9 +9,9 @@
   import { LANG_PREFS, systemLanguages, detectLang, type LangPref } from '../lib/locale.ts';
   import { t } from '../lib/strings.ts';
 
-  // Settings (docs/PLAN.md screen 20): profile, notifications, recovery
+  // Settings: profile, notifications, recovery
   // phrase, storage and archive, security, family and server, diagnostics.
-  // M7: the interface language (applies at once) and the appearance screen.
+  // The interface language (applies at once) and the appearance screen.
   const account = $derived(app.account!);
   const me = $derived(app.members.find((m) => m.isMe));
   let server = $state<{ version: string; commit: string | null } | null>(null);

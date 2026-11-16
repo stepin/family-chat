@@ -5,7 +5,7 @@
   import { app } from '../lib/app.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // The sticker tab of the picker (M5, docs/PLAN.md screen 14): the family's
+  // The sticker tab of the picker: the family's
   // packs as tabs, recently used stickers first, a tap sends. Thumbnails stay
   // still (first frame); the message itself animates.
   let { accountId, onpick, onmanage }: { accountId: string; onpick: (packId: string, file: string) => void; onmanage: () => void } = $props();

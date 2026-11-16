@@ -1,5 +1,5 @@
 // The app icon badge (Badging API) and the unread count in the page title
-// (M5). The counting rule is in packages/core/src/badge.ts; the service
+//. The counting rule is in packages/core/src/badge.ts; the service
 // worker (public/push-sw.js) counts pushes while the app is closed.
 
 import { titleWithUnread } from '@family-chat/core';
@@ -10,7 +10,7 @@ export interface BadgeNavigator {
 }
 
 /**
- * The app icon badge (Badging API) and the page title (M5). Feature-detected:
+ * The app icon badge (Badging API) and the page title. Feature-detected:
  * browsers without the API do nothing, errors are ignored.
  */
 export function showUnread(total: number, nav: BadgeNavigator = navigator as BadgeNavigator, doc: Pick<Document, 'title'> = document): void {

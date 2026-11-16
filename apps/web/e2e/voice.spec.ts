@@ -3,7 +3,7 @@
 // person with the "не прослушано" mark clearing; speed; one player at a
 // time; a recording cancelled; a refused microphone explained.
 
-import { MIC_DENIED, MIC_SHIM, pairInChat } from './support/m3.ts';
+import { MIC_DENIED, MIC_SHIM, pairInChat } from './support/media.ts';
 import { Fcd } from './support/fcd.ts';
 import { expect, expectAccessible, test } from './support/test.ts';
 

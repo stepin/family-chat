@@ -3,8 +3,7 @@
 // marked "crit": true decode to "update the app"; other unknown kinds decode to "ignore".
 //
 // decodePayload (used by decodeEvent) and parsePayload give the same typed form of every
-// implemented kind (since M4 the client acts on edit/delete/react; until M3 decodePayload
-// reported them as "ignore").
+// implemented kind, edit/delete/react included.
 
 import { utf8, type Bytes } from './bytes.ts';
 import { checkAttachmentInput, validateAttachment, type Attachment } from './attachment.ts';
@@ -59,7 +58,7 @@ export interface MsgPayload extends Common {
   readonly attachments?: readonly Attachment[];
   readonly location?: Location;
   /**
-   * A sticker (M5). `body` is then the sticker's emoji (what a client without stickers shows);
+   * A sticker. `body` is then the sticker's emoji (what a client without stickers shows);
    * no attachments and no location.
    */
   readonly sticker?: StickerRef;

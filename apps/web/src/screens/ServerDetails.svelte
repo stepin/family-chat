@@ -9,9 +9,9 @@
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // Family and server (docs/PLAN-v2.md 8, screen 21). Everyone: address,
+  // Family and server. Everyone: address,
   // family name, retention, members. Administrator: invitations, removing a
-  // member, disk statistics, server check (M8).
+  // member, disk statistics, server check.
   const account = $derived(app.account!);
   const members = $derived(
     [...app.members].sort((a, b) => Number(b.isMe) - Number(a.isMe) || (a.name ?? '').localeCompare(b.name ?? '', 'ru')),
@@ -50,7 +50,7 @@
 
   function onClose(): void {
     toRemove = null;
-    // Focus returns to the button that opened the dialog (docs/PLAN.md 8.7).
+    // Focus returns to the button that opened the dialog.
     opener?.focus();
   }
 

@@ -1,15 +1,15 @@
 /* global self, clients, indexedDB */
 // Web Push handlers, imported into the generated service worker (workbox
-// `importScripts` in vite.config.ts). M5 adds the icon badge and the Web
+// `importScripts` in vite.config.ts), plus the icon badge and the Web
 // Share Target (both below).
 //
 // Every push shows a notification, whatever happens: iOS revokes the
 // subscription of a web app that receives pushes silently. The payload is
 // `{chatId, gseq}` (docs/API.md 6); names come from the local database
 // (read-only, plain IndexedDB, nothing is created or changed). Text is not
-// decrypted here. Group chats show the group name (docs/PLAN-v2.md 7.7).
+// decrypted here. Group chats show the group name.
 //
-// M7: the title is the chat (the person, the group, "Избранное"), not the
+// The title is the chat (the person, the group, "Избранное"), not the
 // family; the family's name is added only when several families share the
 // device, to tell them apart. The language is the app's (settings key
 // `ui.lang`, written by the app), else the first of ru/en in the system's
@@ -206,19 +206,18 @@ self.addEventListener('push', (event) => {
   if (!data || typeof data !== 'object') data = {};
   const scope = self.registration.scope;
   const icon = new URL('icon-192.png', scope).href;
-  // Monochrome silhouette: Android draws the badge from its alpha channel (M8).
+  // Monochrome silhouette: Android draws the badge from its alpha channel.
   const badge = new URL('badge-96.png', scope).href;
 
-  // Test notifications of the server check (M8): the /server/ page or the
-  // app's "Server check" section. `m0-test` is the internal name on the wire,
-  // kept so that service workers installed before M8 still recognise it.
-  if (data.kind === 'm0-test') {
+  // Test notifications of the server check: the /server/ page or the
+  // app's "Server check" section.
+  if (data.kind === 'check-test') {
     const sentAt = typeof data.sentAt === 'number' ? data.sentAt : 0;
     const receivedAt = Date.now();
     const fromApp = data.from === 'app';
     event.waitUntil(
       (async () => {
-        // The text is chosen here, in the app's language (M7); older servers sent their own.
+        // The text is chosen here, in the app's language; older servers sent their own.
         const t = TEXT[pickLang(await readLangPref())];
         const delay = typeof data.delay === 'number' && data.delay > 0 ? data.delay : 0;
         await self.registration.showNotification(data.title || 'Family Chat', {
@@ -297,7 +296,7 @@ self.addEventListener('notificationclick', (event) => {
       for (const w of windows) {
         if (!w.url.startsWith(self.registration.scope) || !('focus' in w)) continue;
         if (data.check) {
-          // The window of the screen that asked for the test (M8).
+          // The window of the screen that asked for the test.
           const path = new URL(w.url).pathname;
           if (data.from === 'app' ? path !== scopePath : !path.endsWith('/server/')) continue;
           await w.focus();
@@ -319,7 +318,7 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-// ---- Web Share Target (M5, docs/PLAN.md 7.5) ----
+// ---- Web Share Target ----
 //
 // The installed app is a share target (manifest `share_target`: POST,
 // multipart, `title`, `text`, `url`, `files`). The shared content is kept in

@@ -1,13 +1,12 @@
 // Local database: IndexedDB through Dexie. Works in a page, a dedicated worker
 // and a service worker. The schema only grows: a new Dexie version may add
-// tables and indexes, never drop or reinterpret them (docs/PLAN.md 7.1). A
+// tables and indexes, never drop or reinterpret them. A
 // client that meets a newer database gets DbVersionError and writes nothing.
 //
 // Several accounts (servers) can live side by side: every per-server table is
 // keyed by `accountId` first.
 
 import { Dexie, type Table } from 'dexie';
-import { base64urlDecode } from '@family-chat/protocol';
 import type {
   Attachment,
   AttachmentKind,
@@ -22,7 +21,6 @@ import type {
   StickerRef,
 } from '@family-chat/protocol';
 import type { NoticeBody, ServerEvent } from '../api/types.ts';
-import { messageWords } from '../search.ts';
 
 export const DEFAULT_DB_NAME = 'family-chat';
 export const DB_VERSION = 5;
@@ -39,7 +37,7 @@ export interface RetentionGap {
   readonly firstTime: number | null;
   /** True when the gap was met on the first sync of this device (expected). */
   readonly firstSync: boolean;
-  /** Server time of the oldest record still on the server (M2 `oldestTime`); null when unknown. */
+  /** Server time of the oldest record still on the server (`oldestTime`); null when unknown. */
   readonly oldestTime?: number | null;
   /** Local time of detection. */
   readonly detectedAt: number;
@@ -69,14 +67,13 @@ export interface AccountRow {
   pushRegistered: boolean;
   createdAt: number;
   lastSyncAt: number | null;
-  // ---- added in version 2 (absent in rows written by M1 until the upgrade runs) ----
   /** Cursor of `GET /v1/keys`. */
   keysCursor?: number;
   /** Oldest record still on the server, from the last events page. */
   oldest?: { gseq: number; time: number | null } | null;
   /** The identity was revoked (status is then 'removed'). */
   revoked?: boolean;
-  /** Server limits from `/v1/hello` (M2). */
+  /** Server limits from `/v1/hello`. */
   limits?: ServerLimits | null;
 }
 
@@ -114,15 +111,13 @@ export interface UserRow {
    * keys stay in force until the person accepts the change.
    */
   keyChange: { identity: SignedEnvelope; detectedAt: number } | null;
-  // ---- version 2 ----
   /** Avatar reference from the verified profile. */
   avatar?: AvatarRef | null;
   /** Verified revocation: remembered forever, even if the server drops it later. */
   revoked?: { revokedAt: number; envelope: SignedEnvelope; detectedAt: number } | null;
   /** Fingerprint the person confirmed as verified (local mark); compared with the current keys. */
   verifiedFingerprint?: string | null;
-  // ---- version 5 ----
-  /** Gender from the verified profile (M7); absent means `m`. */
+  /** Gender from the verified profile; absent means `m`. */
   gender?: Gender;
 }
 
@@ -133,7 +128,7 @@ export interface LastMessage {
   body: string;
   gseq: number;
   time: number;
-  /** What the message carries besides text (M3, for the chat list preview): first attachment kind or a place. */
+  /** What the message carries besides text (for the chat list preview): first attachment kind or a place. */
   media?: LastMedia;
 }
 
@@ -172,11 +167,11 @@ export interface EventRow {
 
 /**
  * 'service': an entry derived from group states or server notices (no sender, no text).
- * 'deleted' (M4): deleted for everyone; shown as a quiet "message deleted" line (no text, no files).
+ * 'deleted': deleted for everyone; shown as a quiet "message deleted" line (no text, no files).
  */
 export type MessageKind = 'msg' | 'update-required' | 'service' | 'deleted';
 
-/** Reactions on a message (M4): every emoji with the users who placed it, in a deterministic order. */
+/** Reactions on a message: every emoji with the users who placed it, in a deterministic order. */
 export interface ReactionAgg {
   readonly emoji: string;
   /** Sorted userIds. */
@@ -209,25 +204,22 @@ export interface MessageRow {
   /** Markdown text; empty for `update-required` and for a msg without body. */
   body: string;
   reply: MsgRef | null;
-  // ---- version 2 ----
   /** Validated attachment descriptors (contain the file keys: secrets). */
   attachments?: Attachment[];
   location?: Location;
   fwd?: true;
   service?: ServiceEntry;
-  // ---- version 3 (M4) ----
   /** Normalized search words (search.ts); multiEntry index. Empty for anything but a msg. */
   words?: string[];
   /** The edit in force (the newest valid one by gseq). */
   edited?: { gseq: number; time: number };
   /** Aggregated reactions (absent: none). */
   reactions?: ReactionAgg[];
-  // ---- version 4 (M5) ----
   /** A sticker message: the reference (the body holds its emoji). */
   sticker?: StickerRef;
 }
 
-/** Payload of a queued control event (M4): edit, delete for everyone or reaction. */
+/** Payload of a queued control event: edit, delete for everyone or reaction. */
 export type OutboxControl =
   | { readonly kind: 'edit'; readonly target: MsgRef; readonly body: string }
   | {
@@ -244,7 +236,7 @@ export type OutboxControl =
     }
   | { readonly kind: 'react'; readonly target: MsgRef; readonly emoji: string; readonly on: boolean };
 
-/** A verified control event (M4): kept so the derived message can be recomputed in any arrival order. */
+/** A verified control event: kept so the derived message can be recomputed in any arrival order. */
 export interface ControlRow {
   accountId: string;
   /** Author of the control event and its id. */
@@ -263,7 +255,7 @@ export interface ControlRow {
 }
 
 /**
- * A deleted message (M4): `everyone` by a valid signed delete, `local` ("delete for me"),
+ * A deleted message: `everyone` by a valid signed delete, `local` ("delete for me"),
  * `server` (only the server's zeroed record is known: a placeholder that never hides a
  * readable original).
  */
@@ -301,15 +293,12 @@ export interface OutboxRow {
   createdAt: number;
   /** Error code of the last failure (ApiError code or a core code), no text. */
   error: string | null;
-  // ---- version 2 ----
   /** Attachment descriptors; the message is sent once all their uploads are done. */
   attachments?: Attachment[];
   location?: Location;
   fwd?: true;
-  // ---- version 3 (M4) ----
   /** A control event instead of a message (not shown as a message of its own). */
   control?: OutboxControl;
-  // ---- version 4 (M5) ----
   sticker?: StickerRef;
 }
 
@@ -354,7 +343,7 @@ export interface SettingRow {
   value: unknown;
 }
 
-// ---- version 2: groups ----
+// ---- groups ----
 
 export interface GroupRow {
   accountId: string;
@@ -446,7 +435,7 @@ export interface PendingEventRow {
   attempts: number;
 }
 
-// ---- version 2: attachments and avatars ----
+// ---- attachments and avatars ----
 
 /** 'none': not downloaded; 'queued'/'active': transfer pending or running; 'done': the file is on this device. */
 export type BlobStatus = 'none' | 'queued' | 'active' | 'done' | 'failed' | 'cancelled' | 'gone';
@@ -476,7 +465,7 @@ export interface BlobRow {
   /** Where the plaintext copy lives. */
   storage: 'opfs' | 'idb' | null;
   createdAt: number;
-  /** Received voice message: played at least once on this device (M3; absent: not yet). */
+  /** Received voice message: played at least once on this device (absent: not yet). */
   heard?: boolean;
 }
 
@@ -497,7 +486,7 @@ export interface AvatarRow {
   fetchedAt: number;
 }
 
-// ---- version 4 (M5): sticker packs and identity links ----
+// ---- sticker packs and identity links ----
 
 /** A published sticker pack of a server, its manifest verified against the uploader's identity. */
 export interface StickerPackRow {
@@ -526,7 +515,7 @@ export interface StickerFileRow {
 }
 
 /**
- * "This is the same person as…" (docs/PLAN.md 8.6): `userId` (an older
+ * "This is the same person as…": `userId` (an older
  * identity of a relative) is shown together with `to` (the current one) on
  * this device. Local only, never sent to a server.
  */
@@ -587,15 +576,17 @@ export class CoreDb extends Dexie {
 
   constructor(name: string = DEFAULT_DB_NAME, deps: DbDeps = {}) {
     super(name, deps.indexedDB ? { indexedDB: deps.indexedDB, IDBKeyRange: deps.IDBKeyRange } : undefined);
-    // Version 1. Later versions: add `this.version(2).stores({...new tables or indexes})`
-    // below; never change or remove what is here.
-    this.version(1).stores({
+    // The first published schema is version 5 (lower numbers were used before the
+    // first release and are not supported). Later versions: add
+    // `this.version(6).stores({...new tables or indexes})` below; never change or
+    // remove what is here.
+    this.version(DB_VERSION).stores({
       accounts: 'id, serverId',
       identities: 'userId',
       users: '[accountId+userId], accountId',
       chats: '[accountId+chatId], accountId, chatId',
       events: '[accountId+senderId+msgId], [accountId+gseq], [accountId+chatId+gseq]',
-      messages: '[accountId+senderId+msgId], [accountId+chatId+gseq], accountId',
+      messages: '[accountId+senderId+msgId], [accountId+chatId+gseq], accountId, *words',
       outbox: '[accountId+msgId], accountId, [accountId+chatId], createdAt',
       counters: '[accountId+chatId]',
       seqTrack: '[accountId+chatId+senderId+devId]',
@@ -603,82 +594,22 @@ export class CoreDb extends Dexie {
       diagnostics: '++id, time',
       settings: 'key',
       leases: 'name',
-    });
-    // Version 2 (M2): groups, notices, attachments, avatars. Only additions.
-    this.version(2)
-      .stores({
-        groups: '[accountId+chatId], accountId',
-        groupStates: '[accountId+chatId+version], [accountId+chatId]',
-        epochKeys: '[accountId+chatId+epoch], [accountId+chatId]',
-        sealedKeys: '[accountId+n], [accountId+chatId]',
-        groupPending: '[accountId+chatId], accountId',
-        notices: '[accountId+gseq], [accountId+chatId]',
-        pendingEvents: '[accountId+gseq], [accountId+chatId], accountId',
-        blobs: '[accountId+blobId], accountId, [accountId+msgId], status',
-        fileChunks: '[key+index], key',
-        avatars: '[accountId+userId], accountId',
-      })
-      .upgrade(async (tx) => {
-        await tx
-          .table('accounts')
-          .toCollection()
-          .modify((a: AccountRow) => {
-            a.keysCursor ??= 0;
-            a.oldest ??= null;
-            a.revoked ??= false;
-            a.limits ??= null;
-          });
-      });
-    // Version 3 (M4): edits, deletions, reactions and the search index. Only additions:
-    // the messages store gains the multiEntry index `*words`, filled here for old rows.
-    this.version(3)
-      .stores({
-        messages: '[accountId+senderId+msgId], [accountId+chatId+gseq], accountId, *words',
-        controls: '[accountId+senderId+msgId], [accountId+target], [accountId+chatId]',
-        tombstones: '[accountId+senderId+msgId], [accountId+chatId]',
-      })
-      .upgrade(async (tx) => {
-        await tx
-          .table('messages')
-          .toCollection()
-          .modify((m: MessageRow) => {
-            m.words = messageWords(m);
-          });
-      });
-    // Version 4 (M5): sticker packs, their files and identity links. Only additions, no upgrade
-    // of existing rows is needed (the new optional fields are simply absent in old rows).
-    this.version(4).stores({
+      groups: '[accountId+chatId], accountId',
+      groupStates: '[accountId+chatId+version], [accountId+chatId]',
+      epochKeys: '[accountId+chatId+epoch], [accountId+chatId]',
+      sealedKeys: '[accountId+n], [accountId+chatId]',
+      groupPending: '[accountId+chatId], accountId',
+      notices: '[accountId+gseq], [accountId+chatId]',
+      pendingEvents: '[accountId+gseq], [accountId+chatId], accountId',
+      blobs: '[accountId+blobId], accountId, [accountId+msgId], status',
+      fileChunks: '[key+index], key',
+      avatars: '[accountId+userId], accountId',
+      controls: '[accountId+senderId+msgId], [accountId+target], [accountId+chatId]',
+      tombstones: '[accountId+senderId+msgId], [accountId+chatId]',
       stickerPacks: '[accountId+packId], accountId',
       stickerFiles: '[accountId+file], [accountId+packId]',
       links: '[accountId+userId], accountId, [accountId+to]',
     });
-    // Version 5 (M7): the profile's gender. No new tables or indexes; users gain the
-    // optional field `gender`, read here from the verified profiles already stored (a
-    // newer client may have written "f" into a profile this device took in before M7).
-    this.version(5)
-      .stores({})
-      .upgrade(async (tx) => {
-        await tx
-          .table('users')
-          .toCollection()
-          .modify((u: UserRow) => {
-            u.gender = genderOfProfile(u.profile);
-          });
-      });
-  }
-}
-
-/**
- * Gender written in a stored, already verified profile envelope: `f` only
- * when the payload says so, `m` otherwise (no field, unreadable, no profile).
- */
-export function genderOfProfile(profile: SignedEnvelope | null | undefined): Gender {
-  if (!profile) return 'm';
-  try {
-    const json: unknown = JSON.parse(new TextDecoder().decode(base64urlDecode(profile.payload)));
-    return (json as { gender?: unknown } | null)?.gender === 'f' ? 'f' : 'm';
-  } catch {
-    return 'm';
   }
 }
 

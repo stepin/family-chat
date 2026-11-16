@@ -1,4 +1,4 @@
-//! Groups (docs/PLAN-v2.md, 7.4): creation, state changes with a version
+//! Groups: creation, state changes with a version
 //! precondition, leaving, sealed keys. The state document and the sealed
 //! keys are opaque bytes; the server keeps only the routing data (members,
 //! owner, version, epoch) in `chats/<id>/meta.json`.

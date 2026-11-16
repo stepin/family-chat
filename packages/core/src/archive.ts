@@ -1,5 +1,5 @@
 // Export and import of the local history in the protocol's `.fcarchive`
-// container (docs/PROTOCOL.md 17, docs/PLAN.md 7.1).
+// container (docs/PROTOCOL.md 17).
 //
 // The archive belongs to one identity (encrypted with a key derived from its
 // selfKey) and holds every account of that identity on this device: servers
@@ -11,7 +11,7 @@
 // Import replays the events through the same decode-and-apply path as sync
 // (signatures and keys are checked again) and skips what is already known.
 // Edits and reactions are events too, so they replay into the same state.
-// Deleted messages (M4) travel as tombstones (`everyone` and `local`), written
+// Deleted messages travel as tombstones (`everyone` and `local`), written
 // before the events: their own events are no longer on this device, and the
 // tombstone keeps a copy from another source from coming back.
 // Records are processed as they are read: neither side holds the whole

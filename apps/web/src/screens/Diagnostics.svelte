@@ -7,11 +7,11 @@
   import { t } from '../lib/strings.ts';
   import { nav } from '../lib/nav.svelte.ts';
 
-  // Diagnostics (docs/PLAN.md 8, screen 23): the log, the outbox size, the
+  // Diagnostics: the log, the outbox size, the
   // report to copy, and the device and server check pages.
   let entries = $state.raw<DiagnosticEntry[]>([]);
   let status = $state<string | null>(null);
-  // M8: server checks run in the app for administrators ("Server check" in
+  // Server checks run in the app for administrators ("Server check" in
   // Family and server); the /server/ page is for a server not yet set up.
   const adminAccounts = $derived(app.accounts.filter((a) => a.admin && a.status === 'active'));
   let pageCodeActive = $state(false);

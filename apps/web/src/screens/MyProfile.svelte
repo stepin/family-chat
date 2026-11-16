@@ -9,8 +9,8 @@
   import { nav } from '../lib/nav.svelte.ts';
   import { t, type Gender } from '../lib/strings.ts';
 
-  // My profile (docs/PLAN.md screen 19): avatar (pick, square crop, 256 px),
-  // name, gender (M7: for the wording of messages about me), and my
+  // My profile: avatar (pick, square crop, 256 px),
+  // name, gender (for the wording of messages about me), and my
   // fingerprint for relatives to compare.
   const account = $derived(app.account!);
   const me = $derived(app.members.find((m) => m.isMe));

@@ -1,4 +1,4 @@
-// The language of the check pages /device/ and /server/ (M7): the same
+// The language of the check pages /device/ and /server/: the same
 // choice as the app (Settings, else the system's languages, else Russian).
 // These pages are small and rarely opened, so both languages are in their
 // code: Russian is written in the HTML, and every element with `data-en`

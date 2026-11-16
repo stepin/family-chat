@@ -8,7 +8,7 @@ import { defineConfig, devices } from '@playwright/test';
  * Voice messages: Chromium's fake microphone, permission prompts answered
  * "allow". On macOS the fake audio device hangs audio capture and stalls
  * every AudioContext in this Chromium build, so it is left out there and
- * e2e/support/m3.ts (MIC_SHIM) feeds a generated tone instead.
+ * e2e/support/media.ts (MIC_SHIM) feeds a generated tone instead.
  */
 export const MEDIA_ARGS =
   process.platform === 'darwin'
@@ -28,7 +28,7 @@ export default defineConfig({
   reporter: process.env['CI'] ? [['list'], ['html', { open: 'never' }]] : 'list',
   globalSetup: './e2e/support/global-setup.ts',
   use: {
-    // M7: the app picks its language from the browser; the tests find controls by their Russian names.
+    // The app picks its language from the browser; the tests find controls by their Russian names.
     // English is covered by e2e/english.spec.ts, which asks for en-US itself.
     locale: 'ru-RU',
     trace: 'retain-on-failure',

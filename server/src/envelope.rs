@@ -240,15 +240,11 @@ pub enum AvatarRef {
     /// `{"sha256":"<base64url>","type":"image/jpeg"|"image/webp"}`, exactly
     /// these two keys (docs/PROTOCOL.md 4.3).
     Image { sha256: [u8; 32], kind: ImageKind },
-    /// Anything else the M1 server accepted (a short string). Kept when
-    /// loading old data; new profiles must use `null` or an image.
-    Legacy,
 }
 
 fn parse_avatar(v: Option<&Value>) -> Result<AvatarRef, EnvError> {
     match v {
         Some(Value::Null) => Ok(AvatarRef::None),
-        Some(Value::String(s)) if s.len() <= 128 => Ok(AvatarRef::Legacy),
         Some(Value::Object(o)) => {
             if o.len() != 2 {
                 return Err(malformed("avatar must have exactly the keys sha256 and type"));
@@ -270,7 +266,7 @@ fn parse_avatar(v: Option<&Value>) -> Result<AvatarRef, EnvError> {
     }
 }
 
-/// Grammatical gender of a profile (M7, docs/PROTOCOL.md 4.3): the optional
+/// Grammatical gender of a profile (docs/PROTOCOL.md 4.3): the optional
 /// `gender` field, `"m"` or `"f"`; absent means male.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Gender {
@@ -308,7 +304,7 @@ pub struct Profile {
 }
 
 /// profile payload: `{"v":1,"userId","name","avatar","gender"?,"rev","updated"}`,
-/// signed by the user's identity key. `gender` is optional (M7).
+/// signed by the user's identity key. `gender` is optional.
 pub fn verify_profile(env: &Envelope, user: &UserId, key: &VerifyingKey) -> Result<Profile, EnvError> {
     let (bytes, m) = env.decode()?;
     check_version(&m)?;
@@ -705,7 +701,7 @@ mod tests {
         };
         assert_eq!(with("\"f\"").unwrap(), Gender::Female);
         assert_eq!(with("\"m\"").unwrap(), Gender::Male);
-        // Profiles from before M7 have no field: male.
+        // Profiles without the field: male.
         assert_eq!(
             verify_profile(&profile(&k, &uid, "x", 1), &uid, &id.key)
                 .unwrap()
@@ -733,9 +729,8 @@ mod tests {
                 kind: ImageKind::Webp
             }
         );
-        // M1 accepted short strings; they still load.
-        assert_eq!(check(serde_json::json!("x")).unwrap(), AvatarRef::Legacy);
         for bad in [
+            serde_json::json!("x"),
             serde_json::json!({"sha256": sha, "type": "image/png"}),
             serde_json::json!({"sha256": sha, "type": "image/jpeg", "extra": 1}),
             serde_json::json!({"sha256": b64_encode(&[3u8; 31]), "type": "image/jpeg"}),

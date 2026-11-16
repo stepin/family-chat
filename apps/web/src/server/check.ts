@@ -1,5 +1,5 @@
 /**
- * Server check (docs/PLAN-v2.md, section 9; always on since M8): `/v1/hello`,
+ * Server check: `/v1/hello`,
  * a long request through whatever provides HTTPS, and a test Web Push. No DOM
  * here, so it is unit-tested; the page wiring lives in main.ts.
  *
@@ -10,7 +10,7 @@
  * The administrator code is passed to requests only and never appears in the
  * report or in the stored log.
  *
- * M7: the texts follow the page language (lib/page-lang.ts).
+ * The texts follow the page language (lib/page-lang.ts).
  */
 
 import { pageLang, tr } from '../lib/page-lang.ts';
@@ -258,7 +258,7 @@ export function waitSecondsFromQuery(search: string): number {
   return Number.isInteger(v) && v >= 1 && v <= 60 ? v : 25;
 }
 
-// ---- the one table of check answers (M8) ----
+// ---- the one table of check answers ----
 
 /** Project documentation (the project's GitHub repository). */
 export const DOCS_BASE = 'https://github.com/stepin/family-chat/blob/main/docs';

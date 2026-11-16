@@ -1,4 +1,4 @@
-// Places (docs/PLAN.md 7.5, 8.6): the pure part. Coordinates and accuracy as
+// Places: the pure part. Coordinates and accuracy as
 // text, the low-accuracy warning, and the "Открыть в картах" link for the
 // platform. No map tiles are loaded: nothing about a place leaves the device
 // except inside the encrypted message, and the link opens only when tapped.

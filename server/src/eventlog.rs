@@ -1,4 +1,4 @@
-//! Log segments `log/<YYYY-MM-DD>.seg` (docs/PLAN-v2.md, section 6).
+//! Log segments `log/<YYYY-MM-DD>.seg`.
 //!
 //! Record layout, all integers big-endian:
 //!

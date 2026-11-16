@@ -16,7 +16,7 @@
     type RecorderState,
   } from '../lib/voice.ts';
 
-  // Voice recording (docs/PLAN.md 8.6, screen 12). Phones: hold the button and
+  // Voice recording. Phones: hold the button and
   // speak, release to send; slide left to cancel, slide up to keep recording
   // without holding. A tap (and on a desktop a click, and Enter or Space)
   // starts a recording that goes on by itself until "Отправить" or

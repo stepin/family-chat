@@ -1,4 +1,4 @@
-// Importing a sticker pack (docs/PLAN.md 7.5, 7.6): `.webp` and `.tgs` files,
+// Importing a sticker pack: `.webp` and `.tgs` files,
 // or a `.zip` of them. Everything is checked here, before a preview is shown
 // or anything is uploaded: archive limits (zip.ts), WebP headers (webp.ts),
 // `.tgs` unpacking and sanitising (tgs.ts), sides, sizes, duplicates, counts.
@@ -18,7 +18,7 @@ import { readTgs } from './tgs.ts';
 import { webpInfo } from './webp.ts';
 import { readZip, type ZipLimits } from './zip.ts';
 
-/** The archive limits of docs/PLAN.md 7.6 (200 files, 50 MB unpacked) plus a ratio and a record cap. */
+/** The archive limits (200 files, 50 MB unpacked) plus a ratio and a record cap. */
 export const STICKER_ZIP_LIMITS: ZipLimits = {
   maxEntries: 1000,
   maxFileBytes: MAX_WEBP_STICKER_BYTES,

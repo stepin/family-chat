@@ -10,7 +10,7 @@
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // Contact profile (docs/PLAN.md screen 18): avatar, name, fingerprint, the
+  // Contact profile: avatar, name, fingerprint, the
   // "сверено" mark, "написать"; a changed key with a warning and an accept
   // action; revoked and removed contacts marked.
   let { accountId, userId }: { accountId: string; userId: string } = $props();
@@ -20,7 +20,7 @@
   const name = $derived(member ? (names.get(member.userId) ?? t.common.unknownName) : t.common.unknownName);
   const canWrite = $derived(!!member && !member.isMe && !member.removed && !member.revoked);
   let busy = $state(false);
-  // M5: "this is the same person as…" (docs/PLAN.md 8.6), local to this device.
+  // "this is the same person as…", local to this device.
   let links = $state.raw<IdentityLinkView[]>([]);
   let picking = $state(false);
   let pick = $state('');

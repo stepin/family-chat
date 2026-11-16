@@ -1,4 +1,4 @@
-// Appearance settings of this device (M7, Settings → "Оформление"): theme,
+// Appearance settings of this device (Settings → "Оформление"): theme,
 // colour palette, text size in chats, message corners, chat background.
 //
 // Stored in localStorage (per device, read synchronously) and applied as
@@ -42,7 +42,7 @@ export const APPEARANCE_STORAGE_KEY = 'fc.appearance';
 
 /**
  * Colour of the browser's bar (`theme-color`) per palette: the light value
- * is the accent (green: the icon's background, M8), the dark one the surface
+ * is the accent (green: the icon's background), the dark one the surface
  * of the dark theme.
  */
 export const THEME_COLORS: Record<Palette, { readonly light: string; readonly dark: string }> = {

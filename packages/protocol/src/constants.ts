@@ -35,7 +35,7 @@ export const EVENT_PADDING_BLOCK = 256;
 /** Epoch of every direct chat. */
 export const DM_EPOCH = 0;
 
-// ---- M2: groups ----
+// ---- groups ----
 
 /** Random nonce mixed into a group id, in bytes. */
 export const GROUP_NONCE_BYTES = 16;
@@ -55,7 +55,7 @@ export const MAX_STATE_PAYLOAD_BYTES = 65536;
 /** Encrypted group state as stored by the server. */
 export const MAX_STATE_BLOB_BYTES = 131072;
 
-// ---- M2: attachments ----
+// ---- attachments ----
 
 /** Part size of every attachment (the only allowed value of `partSize`). */
 export const BLOB_PART_SIZE = 4 * 1024 * 1024;
@@ -73,14 +73,14 @@ export const VOICE_PEAKS = 64;
 export const MAX_FILE_NAME_CHARS = 128;
 export const MAX_FILE_NAME_BYTES = 255;
 
-// ---- M2: archive ----
+// ---- archive ----
 
 /** Archive plaintext is encrypted in blocks of this size. */
 export const ARCHIVE_BLOCK_SIZE = 1024 * 1024;
 /** Largest single archive record (split bigger data into several records). */
 export const MAX_ARCHIVE_RECORD_BYTES = 16 * 1024 * 1024;
 
-// ---- M5: sticker packs (the other limits are in sticker.ts) ----
+// ---- sticker packs (the other limits are in sticker.ts) ----
 
 /** Largest `sticker-pack` envelope payload (exact signed JSON bytes). */
 export const MAX_PACK_PAYLOAD_BYTES = 65536;

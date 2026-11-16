@@ -9,7 +9,7 @@
   import { t } from '../lib/strings.ts';
   import { barsFromPeaks, canPlayVoice, durationWords, formatDuration, nextSpeed, seekTo, speedLabel } from '../lib/voice.ts';
 
-  // A voice message (docs/PLAN.md 8.6): play and pause, the waveform as a
+  // A voice message: play and pause, the waveform as a
   // seek slider (pointer, arrows, Home and End), the time, speed 1x / 1.5x /
   // 2x, and the "не прослушано" mark on others' messages until played here.
   // A format this browser cannot play shows that plainly, with a download.

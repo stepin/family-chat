@@ -11,7 +11,7 @@
   // on this device: if some are not, the sheet says so and downloads them
   // first, with progress.
   //
-  // M5: the same chooser for content shared into the app (Web Share Target):
+  // The same chooser for content shared into the app (Web Share Target):
   // one chat, of any family on this device (the family is chosen first).
   let {
     accountId,

@@ -8,7 +8,7 @@
   import { gatewayBranch } from '../../lib/platform.ts';
   import { t } from '../../lib/strings.ts';
 
-  // The gateway (docs/PLAN.md 8.1): what to do on this platform before the
+  // The gateway: what to do on this platform before the
   // invitation can be used. Without an invitation (setup or restore started
   // on iOS Safari) it only leads to the installation.
   const invite = app.invite;

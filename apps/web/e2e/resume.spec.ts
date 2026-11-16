@@ -7,7 +7,7 @@
 import type { Page, Request } from '@playwright/test';
 import { makeBytes } from './support/files.ts';
 import { message } from './support/flows.ts';
-import { pairInChat } from './support/m3.ts';
+import { pairInChat } from './support/media.ts';
 import { Fcd } from './support/fcd.ts';
 import { expect, test } from './support/test.ts';
 

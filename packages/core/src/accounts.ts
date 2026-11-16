@@ -45,7 +45,7 @@ export class AccountRuntime implements AccountRuntimeLike {
   readonly sync: SyncEngine;
   readonly outbox: OutboxSender;
   readonly transfers: Transfers;
-  /** Sticker packs of this server (M5). */
+  /** Sticker packs of this server. */
   readonly stickers: StickerPacks;
   #started = false;
   #connectedOnce = false;
@@ -181,7 +181,7 @@ export interface JoinInput {
   readonly code: JoinCode;
   /** Display name for the profile. */
   readonly name: string;
-  /** Gender for the profile (M7); `m` when not given. */
+  /** Gender for the profile; `m` when not given. */
   readonly gender?: Gender;
   /** Existing identity on this device. */
   readonly userId?: string;
@@ -286,7 +286,7 @@ export interface ProfileChange {
   readonly name?: string;
   /** New avatar reference (after PUT /v1/me/avatar), or null to remove it. */
   readonly avatar?: AvatarRef | null;
-  /** M7: grammatical gender. */
+  /** Grammatical gender. */
   readonly gender?: Gender;
 }
 
@@ -393,7 +393,7 @@ function accountTables(ctx: CoreContext): Table<unknown, unknown[]>[] {
 }
 
 /**
- * Removes an account from this device (M5): its history, files, keys of its
+ * Removes an account from this device: its history, files, keys of its
  * groups and its token. Nothing is sent to other servers. The server keeps
  * the device registered (there is no endpoint to drop a device token); the
  * push subscription is removed there when possible. The identity seed is

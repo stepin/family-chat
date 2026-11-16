@@ -1,4 +1,4 @@
-// Local search over decrypted messages on this device (docs/PLAN.md 7.2).
+// Local search over decrypted messages on this device.
 // Nothing is sent to the server.
 //
 // Every message row carries `words`: its normalized words (NFKC, lower case,

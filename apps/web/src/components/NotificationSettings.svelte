@@ -3,8 +3,8 @@
   import { disableNotifications, enableNotifications, notifyEnv, notifyState, pushAccountOf } from '../lib/push.ts';
   import { t } from '../lib/strings.ts';
 
-  // The real notification state on this device (docs/PLAN-v2.md 8, screen 20).
-  // Several families (M5): the browser holds one push subscription, so one
+  // The real notification state on this device.
+  // Several families: the browser holds one push subscription, so one
   // family sends notifications; the screen says which and can move them here.
   const account = $derived(app.account!);
   let env = $state(notifyEnv());

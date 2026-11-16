@@ -405,7 +405,7 @@ pub async fn invite_check(
         };
         let profile = m.users.get(&inv.created_by).and_then(|u| u.profile.as_ref());
         let name = profile.map(|p| p.name.clone());
-        // M7: the inviter's gender, for "пригласил" or "пригласила" (male without a profile).
+        // The inviter's gender, for "пригласил" or "пригласила" (male without a profile).
         let gender = profile.map(|p| p.gender).unwrap_or_default().as_str();
         Ok(json!({
             "status": status,

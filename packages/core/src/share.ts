@@ -1,5 +1,5 @@
-// Content shared into the installed app from the system share sheet (M5,
-// Web Share Target, docs/PLAN.md 7.5). The service worker
+// Content shared into the installed app from the system share sheet
+// (Web Share Target). The service worker
 // (apps/web/public/push-sw.js) receives the POST, keeps the text and files
 // in the settings table under `share.pending` and opens the app, which
 // takes it from there (also when the app was closed).

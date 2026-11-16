@@ -1,6 +1,6 @@
 // How people are named in the interface: fingerprints for comparing aloud,
 // and names made unique with a short fingerprint when two relatives share one
-// (docs/PLAN.md 8.6).
+//.
 
 import { formatLang, formatList } from './format.ts';
 import { intlLocale } from './locale.ts';

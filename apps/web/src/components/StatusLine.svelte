@@ -4,7 +4,7 @@
   import { statusLine } from '../lib/status.ts';
   import { t } from '../lib/strings.ts';
 
-  // The connection status line (docs/PLAN-v2.md 8): the main trust signal.
+  // The connection status line: the main trust signal.
   let { account }: { account: AccountView } = $props();
 
   let busy = $state(false);

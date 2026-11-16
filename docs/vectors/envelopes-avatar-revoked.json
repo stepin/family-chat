@@ -1,0 +1,21 @@
+{
+  "note": "Test vectors for docs/PROTOCOL.md. Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only. Users alice, bob and carol are the ones of identity.json.",
+  "rule": "as in envelopes.json: sig = Ed25519(signSecret, utf8(\"fc/v1/\" + kind + \"\\n\") || payloadBytes)",
+  "envelopes": [
+    {
+      "kind": "profile",
+      "signer": "alice",
+      "payloadText": "{\"v\":1,\"userId\":\"bv2upztgktzihpyf7mtd6wkqam\",\"name\":\"Алиса\",\"avatar\":{\"sha256\":\"Vn2GOoBJmdiltgG2hVOqDvKHQfmzY2I9s5V1m1Tpz9w\",\"type\":\"image/webp\"},\"rev\":2,\"updated\":1794787202000}",
+      "signingInputHex": "66632f76312f70726f66696c650a7b2276223a312c22757365724964223a2262763275707a74676b747a6968707966376d746436776b71616d222c226e616d65223a22d090d0bbd0b8d181d0b0222c22617661746172223a7b22736861323536223a22566e32474f6f424a6d64696c7467473268564f7144764b4851666d7a59324939733556316d3154707a3977222c2274797065223a22696d6167652f77656270227d2c22726576223a322c2275706461746564223a313739343738373230323030307d",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsIm5hbWUiOiLQkNC70LjRgdCwIiwiYXZhdGFyIjp7InNoYTI1NiI6IlZuMkdPb0JKbWRpbHRnRzJoVk9xRHZLSFFmbXpZMkk5czVWMW0xVHB6OXciLCJ0eXBlIjoiaW1hZ2Uvd2VicCJ9LCJyZXYiOjIsInVwZGF0ZWQiOjE3OTQ3ODcyMDIwMDB9\",\"sig\":\"c8IB4T9iz4ITZGtaCJGVdq5QDd8-V1sO5dyumkEjuAfLwXnsxu-zs3kHXksurKbTPTbt0ZtBrorm8-MMYJUHAw\"}"
+    },
+    {
+      "kind": "revoked",
+      "signer": "alice",
+      "payloadText": "{\"v\":1,\"userId\":\"bv2upztgktzihpyf7mtd6wkqam\",\"revokedAt\":1794873600000}",
+      "signingInputHex": "66632f76312f7265766f6b65640a7b2276223a312c22757365724964223a2262763275707a74676b747a6968707966376d746436776b71616d222c227265766f6b65644174223a313739343837333630303030307d",
+      "envelope": "{\"payload\":\"eyJ2IjoxLCJ1c2VySWQiOiJidjJ1cHp0Z2t0emlocHlmN210ZDZ3a3FhbSIsInJldm9rZWRBdCI6MTc5NDg3MzYwMDAwMH0\",\"sig\":\"vla9O4tA08BYgh6tginIF-THzQIdcJONE7WOJVRTdCrW8nm9vZPmDJEI5AcwsgkVey860Xyuy7X4z2g31-pICw\"}"
+    }
+  ],
+  "avatarRule": "avatar is null or exactly {\"sha256\": base64url(32 bytes), \"type\": \"image/jpeg\" | \"image/webp\"}"
+}

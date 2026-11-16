@@ -5,7 +5,7 @@
   import { formatAccuracy, formatCoords, geoProblem, isLowAccuracy, placeFromCoords, type GeoProblem, type Place } from '../lib/location.ts';
   import { t } from '../lib/strings.ts';
 
-  // Sending the current place (docs/PLAN.md screen 13): the position is
+  // Sending the current place: the position is
   // taken once with getCurrentPosition, its accuracy is shown before sending,
   // and worse than 500 m is pointed out. A refused permission is explained
   // with the way to allow it. No map is loaded.

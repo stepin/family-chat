@@ -1,7 +1,7 @@
 // Notifications: the real state on this device, enabling (permission first,
 // then the push subscription handed to the server through core.push).
 //
-// Several families (M5): a browser keeps one push subscription per app, tied
+// Several families: a browser keeps one push subscription per app, tied
 // to one server's VAPID key, and every family server has its own key. So
 // notifications come from one family on this device: the one the person
 // enabled them for (by default the family whose server the app was opened

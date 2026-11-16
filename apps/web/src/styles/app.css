@@ -361,7 +361,7 @@ dialog::backdrop {
 }
 
 /*
- * M7, appearance: text size in chats and the chat background (the chat
+ * Appearance: text size in chats and the chat background (the chat
  * screen and the preview in Settings use these classes). The scale is a
  * factor of rem, so the browser's and the system's text size still apply.
  */

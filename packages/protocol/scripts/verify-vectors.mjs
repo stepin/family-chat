@@ -334,7 +334,7 @@ for (const c of neg.phrases) {
 eq(decodeEvent(unhex(ev.bodyHex), { ...ev.inputs }, ['alice', 'bob']), 'ok', 'positive event decodes');
 
 // =====================================================================================
-// M2: HPKE, groups, sealed keys, attachments, archive, revocation, avatar, payloads.
+// HPKE, groups, sealed keys, attachments, archive, revocation, avatar, payloads.
 // Everything below again uses node:crypto only. What node:crypto cannot do is noted inline:
 // - Ed25519 strictness: OpenSSL verification is not checked here for the small-order and
 //   non-canonical rejections the package adds (covered by the package's own tests).
@@ -608,15 +608,15 @@ function openKey(envText, me, serverId) {
   }
 }
 
-// ---- envelopes-m2.json ----
+// ---- envelopes-avatar-revoked.json ----
 {
-  const ev = load('envelopes-m2.json');
+  const ev = load('envelopes-avatar-revoked.json');
   for (const e of ev.envelopes) {
     const r = openEnvelope(e.envelope, e.kind, users[e.signer].signPub);
-    check(!r.error, `${e.kind} (M2) envelope verifies (${r.error ?? 'ok'})`);
+    check(!r.error, `${e.kind} envelope verifies (${r.error ?? 'ok'})`);
     if (r.error) continue;
-    eq(r.payload.toString('utf8'), e.payloadText, `${e.kind} (M2) payload text`);
-    eq(hex(r.input), e.signingInputHex, `${e.kind} (M2) signing input`);
+    eq(r.payload.toString('utf8'), e.payloadText, `${e.kind} payload text`);
+    eq(hex(r.input), e.signingInputHex, `${e.kind} signing input`);
     if (e.kind === 'profile') {
       const a = r.json.avatar;
       check(
@@ -759,9 +759,9 @@ const archives = {};
   archives.twoBlocks = big;
 }
 
-// ---- negative-m2.json ----
+// ---- negative-groups.json ----
 {
-  const neg = load('negative-m2.json');
+  const neg = load('negative-groups.json');
   const serverId = gv.serverId;
   const chatId = gv.groupId.chatId;
   const states = {};
@@ -808,7 +808,7 @@ const archives = {};
   }
 }
 
-// ---- stickers.json (M5) ----
+// ---- stickers.json ----
 {
   const sv = load('stickers.json');
   const alice = users[sv.signer];
@@ -878,24 +878,24 @@ const archives = {};
   for (const c of sv.negativeMessages) eq(msgError(c.text), c.expectedError, c.name);
 }
 
-// ---- profile-gender.json (M7) ----
+// ---- profile-gender.json ----
 {
   const pg = load('profile-gender.json');
   /** The gender rule of docs/PROTOCOL.md 4.3, written again here: absent means "m". */
   const genderOf = (json) => (json.gender === undefined ? 'm' : json.gender === 'm' || json.gender === 'f' ? json.gender : null);
   for (const p of pg.profiles) {
     const r = openEnvelope(p.envelope, 'profile', users[p.signer].signPub);
-    check(!r.error, `profile (M7) ${p.name} verifies (${r.error ?? 'ok'})`);
+    check(!r.error, `profile ${p.name} verifies (${r.error ?? 'ok'})`);
     if (r.error) continue;
-    eq(r.payload.toString('utf8'), p.payloadText, `profile (M7) ${p.name} payload text`);
-    eq(hex(r.input), p.signingInputHex, `profile (M7) ${p.name} signing input`);
-    eq(genderOf(r.json), p.gender, `profile (M7) ${p.name} gender`);
+    eq(r.payload.toString('utf8'), p.payloadText, `profile ${p.name} payload text`);
+    eq(hex(r.input), p.signingInputHex, `profile ${p.name} signing input`);
+    eq(genderOf(r.json), p.gender, `profile ${p.name} gender`);
     const order = r.json.gender === undefined ? 'v,userId,name,avatar,rev,updated' : 'v,userId,name,avatar,gender,rev,updated';
-    eq(Object.keys(r.json).join(','), order, `profile (M7) ${p.name} field order`);
+    eq(Object.keys(r.json).join(','), order, `profile ${p.name} field order`);
   }
   for (const c of pg.negative) {
     const r = openEnvelope(c.envelope, 'profile', users.alice.signPub);
-    eq(r.error ?? (genderOf(r.json) === null ? 'malformed' : 'ok'), c.expectedError, `profile (M7) ${c.name}`);
+    eq(r.error ?? (genderOf(r.json) === null ? 'malformed' : 'ok'), c.expectedError, `profile ${c.name}`);
   }
 }
 

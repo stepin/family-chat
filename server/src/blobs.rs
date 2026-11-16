@@ -1,4 +1,4 @@
-//! Attachments (docs/PLAN-v2.md, sections 6 and 7.5): opaque encrypted
+//! Attachments: opaque encrypted
 //! parts in `blobs/<YYYY-MM-DD>/<blobId>/<NNNN>`, the day being the day of
 //! the first uploaded part. `meta.json` next to the parts names the uploader.
 //!

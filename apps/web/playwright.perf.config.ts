@@ -10,7 +10,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: 'list',
-  // M7: Russian interface (the tests use Russian names).
+  // Russian interface (the tests use Russian names).
   use: { trace: 'off', locale: 'ru-RU' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });

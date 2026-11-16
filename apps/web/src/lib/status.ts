@@ -1,5 +1,5 @@
 // Mapping of core states to what the interface shows: the connection status
-// line (docs/PLAN-v2.md 8) and send statuses (docs/PLAN.md 8.5).
+// line and send statuses.
 
 import type { ConnectionState, MessageStatus } from '@family-chat/core';
 import { t } from './strings.ts';

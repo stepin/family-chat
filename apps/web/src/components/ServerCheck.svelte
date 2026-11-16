@@ -8,8 +8,7 @@
   import { t } from '../lib/strings.ts';
   import { describeCheckFailure, docsLink, failureFromError, type CheckMessage } from '../server/check.ts';
 
-  // Server check for administrators (M8, formerly `fcd --m0` and the /server/
-  // page): a long request through the proxy and a test notification to this
+  // Server check for administrators (as on the /server/ page): a long request through the proxy and a test notification to this
   // device. Failures are worded by the table shared with /server/ (check.ts).
   let { accountId }: { accountId: string } = $props();
 

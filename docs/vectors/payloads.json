@@ -1,5 +1,5 @@
 {
-  "note": "Test vectors for docs/PROTOCOL.md (M2). Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only. Users alice, bob and carol are the ones of identity.json.",
+  "note": "Test vectors for docs/PROTOCOL.md. Binary values are lowercase hex unless the field name says otherwise. Secret keys here are test keys only. Users alice, bob and carol are the ones of identity.json.",
   "payloads": [
     {
       "name": "msg with attachments, location and fwd, no body",

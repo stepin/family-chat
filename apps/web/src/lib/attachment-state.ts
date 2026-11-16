@@ -1,6 +1,6 @@
 // What an attachment shows: its state in words ("не скачано", "скачивается
 // N%", "не удалось", "удалено с сервера", "доступно ещё N дней") and the one
-// action it offers (docs/PLAN.md 8.4, 8.6).
+// action it offers.
 
 import type { AttachmentView } from '@family-chat/core';
 import { t } from './strings.ts';

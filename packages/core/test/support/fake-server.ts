@@ -1,4 +1,4 @@
-// An in-memory imitation of fcd's M1 API (docs/API.md) exposed as a `fetch`
+// An in-memory imitation of fcd's API (docs/API.md) exposed as a `fetch`
 // function, for unit tests. Envelopes are verified with the protocol package,
 // the long poll is real (with a scaled clock), and failures can be injected.
 
@@ -53,7 +53,7 @@ interface Ev {
   /** Server notice (kind "notice") instead of a member event, with its recipients. */
   notice?: Record<string, unknown>;
   to?: string[];
-  /** Deleted for everyone (M4): served with an empty body and `deleted: true`. */
+  /** Deleted for everyone: served with an empty body and `deleted: true`. */
   deleted?: boolean;
 }
 
@@ -101,14 +101,14 @@ export class FakeServer {
   readonly blobs = new Map<string, { owner: string; createdAt: number; parts: Map<number, Uint8Array> }>();
   readonly maxBlobBytes: number;
   readonly log: Ev[] = [];
-  /** DELETE /v1/chats/<id>/events/<gseq> requests that passed the checks (M4). */
+  /** DELETE /v1/chats/<id>/events/<gseq> requests that passed the checks. */
   readonly deleteRequests: { chatId: string; gseq: number; by: string }[] = [];
   readonly nonces = new Set<string>();
   readonly idem = new Map<string, Ev>();
   oldestGseq = 1;
   nextGseq = 1;
   now = 1_800_000_000_000;
-  /** `/v1/hello` offerSetup (M8 `fcd --offer-setup`). */
+  /** `/v1/hello` offerSetup (`fcd --offer-setup`). */
   offerSetup = false;
   /** Test notifications sent by `/v1/check/push`: device and delay. */
   readonly checkPushes: { dev: string; delaySeconds: number }[] = [];
@@ -336,7 +336,12 @@ export class FakeServer {
           vapidPublicKey: this.push ? 'BOrfake' : null,
           time: this.now,
           maxEventBytes: 262144,
+          maxPartBytes: 4194560,
           maxBlobBytes: this.maxBlobBytes,
+          maxAvatarBytes: 262144,
+          maxStateBytes: 262144,
+          maxSealedKeyBytes: 8192,
+          maxGroupMembers: 100,
           adminCodeActive: this.adminCodeActive,
           offerSetup: this.offerSetup,
         },
@@ -650,7 +655,7 @@ export class FakeServer {
       if (m === 'GET' && p === '/v1/admin/stats') {
         return {
           status: 200,
-          body: { version: '0.1.0', dataBytes: 1, freeBytes: null, totalBytes: null, events: this.log.length, oldestGseq: this.oldestGseq, lastGseq: this.nextGseq - 1, users: this.users.size, removedUsers: 0, chats: this.chats.size, retentionDays: 90, push: this.push },
+          body: { version: '0.1.0', dataBytes: 1, freeBytes: null, totalBytes: null, events: this.log.length, oldestGseq: this.oldestGseq, lastGseq: this.nextGseq - 1, users: this.users.size, removedUsers: 0, chats: this.chats.size, groups: [...this.chats.values()].filter((c) => c.kind === 'group').length, retentionDays: 90, push: this.push },
         };
       }
     }

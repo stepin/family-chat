@@ -1,4 +1,4 @@
-// Makes every app icon from docs/design/icon.png (M8). Run by hand when the
+// Makes every app icon from docs/design/icon.png. Run by hand when the
 // source changes: node apps/web/scripts/make-icons.mjs. The outputs in
 // apps/web/public/ are committed, so neither the build nor CI needs ImageMagick.
 //

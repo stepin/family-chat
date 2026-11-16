@@ -7,7 +7,7 @@
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // Which family am I in now (M5, docs/PLAN.md 7.4). M7: shown only with
+  // Which family am I in now. Shown only with
   // several families, and without the family's name: a compact button with
   // the family's emblem (a coloured circle with a symbol) and a dot with the
   // unread count of the other families. Its name for screen readers is

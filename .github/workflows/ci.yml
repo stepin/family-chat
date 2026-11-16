@@ -28,7 +28,7 @@ jobs:
         run: |
           set +e
           git grep -nE 'code\.example\.org|registry\.example\.org|TO BE FILLED' -- . \
-            ':!apps/site/check.mjs' ':!apps/site/test/' ':!docs/PLAN.md' ':!docs/M0v2.md' ':!.github/workflows/ci.yml'
+            ':!apps/site/check.mjs' ':!apps/site/test/' ':!.github/workflows/ci.yml'
           rc=$?
           set -e
           [ "$rc" -eq 1 ]

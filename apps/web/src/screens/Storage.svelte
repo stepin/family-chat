@@ -8,7 +8,7 @@
   import { archiveFileName, canShareFile, readWithProgress, saveBlob, shareFile, usedSpace } from '../lib/storage.ts';
   import { t } from '../lib/strings.ts';
 
-  // Storage and archive (docs/PLAN.md screen 20, 8.4, 8.6): space used on this
+  // Storage and archive: space used on this
   // device, whether the browser may clear it, export of the archive (with or
   // without files, progress and cancel, then a file or the share sheet),
   // import (progress, "добавлено N, пропущено M", the archive of another

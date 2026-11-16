@@ -1,5 +1,4 @@
-// Storage on this device and the archive (docs/PLAN.md 8.6, docs/PLAN-v2.md
-// 8): the server keeps at most N days, so the archive file is the only copy
+// Storage on this device and the archive: the server keeps at most N days, so the archive file is the only copy
 // of older history. A reminder once every 30 days, and a prominent warning
 // when the browser may clear the storage (not persistent).
 

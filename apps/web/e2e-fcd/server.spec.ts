@@ -10,7 +10,7 @@ test('server check page is served by fcd, shows hello and passes a long request'
   await expect(page.locator('#server')).toHaveValue(new URL(page.url()).origin);
   await expect(page.locator('#hello-status')).toContainText('Сервер отвечает');
   await expect(page.locator('#hello')).toContainText('E2E');
-  // M8: the checks are always on; before setup the admin code is active.
+  // The checks are always on; before setup the admin code is active.
   await expect(page.locator('#hello')).toContainText('действует');
 
   await page.locator('#code').fill(code!);
@@ -39,7 +39,7 @@ test('a wrong admin code is reported, not crashed on', async ({ page }) => {
   await page.goto('/server/?wait=1');
   await page.locator('#code').fill('0000-0000-0000-0000');
   await page.getByRole('button', { name: 'Проверить длинный запрос (1 с)' }).click();
-  // The shared table words it and points to the in-app check (M8).
+  // The shared table words it and points to the in-app check.
   await expect(page.locator('#check-status')).toContainText('Код не подходит');
   await expect(page.locator('#check-status')).toContainText('Настройки → Семья и сервер → Проверка сервера');
 });

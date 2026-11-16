@@ -1,7 +1,7 @@
 // Checks a built site: every internal link and image points to an existing
 // file (and anchor), no page loads anything from another site, no page has
 // a script, every page carries the strict Content-Security-Policy, no
-// placeholder address is left, and there is no app on the site (M8: the app
+// placeholder address is left, and there is no app on the site (the app
 // opens only from the family's own server).
 //
 //   node check.mjs [DIR]      (default: dist)

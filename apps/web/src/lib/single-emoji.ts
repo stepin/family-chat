@@ -1,5 +1,5 @@
 // A text message that is exactly one emoji is shown twice as large, like a
-// sticker (M8). "One emoji" is one fully-qualified RGI emoji (flags, keycaps,
+// sticker. "One emoji" is one fully-qualified RGI emoji (flags, keycaps,
 // ZWJ sequences, skin tones); bare ©, ❤ without VS16 and digits are not.
 //
 // `\p{RGI_Emoji}` needs the `v` flag (ES2024) while the build targets ES2022,

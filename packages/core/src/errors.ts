@@ -14,8 +14,6 @@ export type CoreErrorCode =
   | 'removed'
   /** The user is not known (not in `GET /v1/users`). */
   | 'unknown-user'
-  /** Chat with oneself: not thrown since M2 (kept for compatibility). */
-  | 'self-chat'
   /** No such chat on this device. */
   | 'unknown-chat'
   /** Bad argument from the caller (empty text, too long, wrong state). */
@@ -48,9 +46,9 @@ export type CoreErrorCode =
   | 'gone'
   /** Not enough storage space on this device (copying or downloading a file). */
   | 'no-space'
-  /** M4: forwarding needs the attachment files on this device (download them first). */
+  /** Forwarding needs the attachment files on this device (download them first). */
   | 'not-downloaded'
-  /** M4: the message cannot be changed this way (not mine, deleted, not a message). */
+  /** The message cannot be changed this way (not mine, deleted, not a message). */
   | 'not-allowed';
 
 export class CoreError extends Error {

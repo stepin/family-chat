@@ -6,7 +6,7 @@
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // Security (docs/PLAN.md screen 20): the recovery phrase and revoking my
+  // Security: the recovery phrase and revoking my
   // identity, with a confirmation that says plainly what it means.
   const account = $derived(app.account!);
   const removed = $derived(account.status === 'removed');
@@ -15,7 +15,7 @@
   let understood = $state(false);
   let busy = $state(false);
   let error = $state<string | null>(null);
-  // M5: the same identity in several families (the same phrase gives the same keys and userId).
+  // The same identity in several families (the same phrase gives the same keys and userId).
   const sameIdentity = $derived(app.accounts.filter((a) => a.userId === account.userId));
   const otherIdentities = $derived(new Set(app.accounts.filter((a) => a.userId !== account.userId).map((a) => a.userId)).size);
 

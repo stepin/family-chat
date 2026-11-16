@@ -1,4 +1,4 @@
-//! Language of everything a person reads from `fcd` (M7): console output,
+//! Language of everything a person reads from `fcd`: console output,
 //! log messages for the administrator, `--help`, error messages. Russian or
 //! English; Russian by default.
 //!
@@ -137,7 +137,7 @@ pub fn from_config(data: &Path) -> Option<Lang> {
 /// folder's configuration and the environment, and makes it current.
 pub fn init_from<I: IntoIterator<Item = String>>(args: I, get_env: impl Fn(&str) -> Option<String>) -> Lang {
     let early = scan_args(args);
-    // The flag, then FCD_LANG (an environment variable counts like the flag, M7 item 7).
+    // The flag, then FCD_LANG (an environment variable counts like the flag).
     let flag = early
         .lang
         .or_else(|| non_empty(&get_env, "FCD_LANG"))

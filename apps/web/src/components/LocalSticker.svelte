@@ -5,7 +5,7 @@
   import { loadLottie, type LottieAnimation } from '../lib/lottie.ts';
   import { t } from '../lib/strings.ts';
 
-  // A still preview of an imported, not yet published sticker (M5): the first
+  // A still preview of an imported, not yet published sticker: the first
   // frame of the WebP drawn into a canvas, or the first frame of the
   // sanitised `.tgs` animation. The bytes were checked by the core already.
   let { sticker, size = 72 }: { sticker: ImportedSticker; size?: number } = $props();

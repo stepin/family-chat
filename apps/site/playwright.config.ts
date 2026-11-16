@@ -19,7 +19,7 @@ export default defineConfig({
     reuseExistingServer: false,
   },
   use: {
-    // M7: the app picks its language from the browser; the tests find controls by their Russian names.
+    // The app picks its language from the browser; the tests find controls by their Russian names.
     // English is covered by e2e/english.spec.ts, which asks for en-US itself.
     locale: 'ru-RU',
     baseURL: `http://127.0.0.1:${SITE_PORT}`,

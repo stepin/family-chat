@@ -1,6 +1,6 @@
 // Wording of the service lines of a group (created, renamed, added, left,
 // removed, ownership transferred) from the core's ServiceEntry. The verb
-// agrees with the gender of the person who acted (M7: profile field, male
+// agrees with the gender of the person who acted (profile field, male
 // when unknown); "Вы" lines do not change.
 
 import type { ServiceEntry } from '@family-chat/core';

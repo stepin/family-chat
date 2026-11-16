@@ -1,4 +1,4 @@
-// English (M7). The same shape as ru.ts: the type below makes the compiler
+// English. The same shape as ru.ts: the type below makes the compiler
 // report a missing or an extra key. Written for people, not word for word:
 // short, plain and friendly. Pronouns follow the person's gender from the
 // profile where English needs one (he, she).
@@ -871,7 +871,7 @@ const en: Strings = {
     about: 'About',
     version: (v: string, commit = '') => `App version ${v}${commit ? ` (${commit})` : ''}`,
     serverVersion: (v: string, commit: string | null = null) => `Server version ${v}${commit ? ` (${commit})` : ''}`,
-    aboutText: 'A family chat with end-to-end encryption. The cryptography hasn’t had an independent audit.',
+    aboutText: 'A family chat with end-to-end encryption.',
   },
 
   notify: {

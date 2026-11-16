@@ -140,10 +140,6 @@ function fileName(key: string): string {
   return key.replace(/[^A-Za-z0-9_-]/g, '_');
 }
 
-function isNotFound(e: unknown): boolean {
-  return (e as { name?: unknown } | null)?.name === 'NotFoundError' || (e as { name?: unknown } | null)?.name === 'TypeMismatchError';
-}
-
 /**
  * Every chunk is its own file in a folder per stored file (`<key>.parts/<n>`).
  * Writing one chunk therefore never touches the others: a writable stream
@@ -151,9 +147,6 @@ function isNotFound(e: unknown): boolean {
  * into a swap file first, which for a 200 MB attachment written in 50 chunks
  * means about 5 GB of disk traffic. The whole file is a Blob concatenated from
  * the chunk files (still backed by the disk, never read into memory).
- *
- * Files written by M2 (one file per attachment, chunks at offsets) are still
- * read and removed.
  */
 export class OpfsFileStore implements FileStore {
   readonly kind = 'opfs' as const;
@@ -183,47 +176,24 @@ export class OpfsFileStore implements FileStore {
 
   async read(key: string, index: number, length: number): Promise<Uint8Array> {
     if (length === 0) return new Uint8Array(0);
-    let parts: OpfsDirectory | undefined;
-    try {
-      parts = await this.#parts(key, false);
-    } catch (e) {
-      if (!isNotFound(e)) throw e;
-    }
-    if (parts) {
-      const f = await (await parts.getFileHandle(String(index))).getFile();
-      if (f.size < length) throw new Error('file chunk is short');
-      return new Uint8Array(await f.slice(0, length).arrayBuffer());
-    }
-    // M2 layout: one file, chunk at its offset.
-    const f = await (await this.dir.getFileHandle(fileName(key))).getFile();
-    const start = index * FILE_CHUNK;
-    if (f.size < start + length) throw new Error('file is short');
-    return new Uint8Array(await f.slice(start, start + length).arrayBuffer());
+    const parts = await this.#parts(key, false);
+    const f = await (await parts.getFileHandle(String(index))).getFile();
+    if (f.size < length) throw new Error('file chunk is short');
+    return new Uint8Array(await f.slice(0, length).arrayBuffer());
   }
 
   async blob(key: string, size: number, type: string): Promise<Blob> {
-    let parts: OpfsDirectory | undefined;
-    try {
-      parts = await this.#parts(key, false);
-    } catch (e) {
-      if (!isNotFound(e)) throw e;
-    }
-    if (parts) {
-      const count = Math.ceil(size / FILE_CHUNK);
-      const files: Blob[] = [];
-      for (let i = 0; i < count; i++) files.push(await (await parts.getFileHandle(String(i))).getFile());
-      const b = new Blob(files, { type });
-      if (b.size < size) throw new Error('file is incomplete');
-      return b.size === size ? b : b.slice(0, size, type);
-    }
-    const f = await (await this.dir.getFileHandle(fileName(key))).getFile();
-    if (f.size < size) throw new Error('file is incomplete');
-    return f.slice(0, size, type);
+    const parts = await this.#parts(key, false);
+    const count = Math.ceil(size / FILE_CHUNK);
+    const files: Blob[] = [];
+    for (let i = 0; i < count; i++) files.push(await (await parts.getFileHandle(String(i))).getFile());
+    const b = new Blob(files, { type });
+    if (b.size < size) throw new Error('file is incomplete');
+    return b.size === size ? b : b.slice(0, size, type);
   }
 
   async delete(key: string): Promise<void> {
     await this.dir.removeEntry(`${fileName(key)}.parts`, { recursive: true }).catch(() => undefined);
-    await this.dir.removeEntry(fileName(key)).catch(() => undefined);
   }
 }
 

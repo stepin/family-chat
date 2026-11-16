@@ -27,15 +27,15 @@ function gitCommit(): string {
 }
 
 /**
- * Content-Security-Policy (docs/PLAN.md 7.6), delivered in a <meta> tag (and
+ * Content-Security-Policy, delivered in a <meta> tag (and
  * by fcd as a header, which adds `frame-ancestors`). Only for the build: the
  * dev server injects inline styles. `connect-src https:` because the server
  * address can be typed by the administrator; 'self' covers plain-HTTP use on
  * the same origin. `frame-ancestors` cannot be set in <meta>. `media-src blob:`:
- * voice messages play from blob: URLs of app storage (M3). Keep in sync with
+ * voice messages play from blob: URLs of app storage. Keep in sync with
  * server/src/headers.rs (a test there compares the two).
  *
- * M5, several family servers: the app opened from one server talks to the
+ * Several family servers: the app opened from one server talks to the
  * others directly (CORS `*`, bearer tokens). `https:` already covers every
  * other family server on the internet; a list of the family's servers cannot
  * be put into a static policy (the person adds them later, and a <meta> tag or
@@ -97,7 +97,7 @@ function subpageManifestLink(): Plugin {
   };
 }
 
-// Path-independent build (docs/PLAN.md 6.11): relative base, relative
+// Path-independent build: relative base, relative
 // start_url and scope, manifest fetched with credentials.
 export default defineConfig({
   base: './',
@@ -118,7 +118,7 @@ export default defineConfig({
       manifest: {
         name: 'Family Chat',
         short_name: 'Family Chat',
-        // Language neutral (M7): the app speaks Russian or English, the manifest is one for both.
+        // Language neutral: the app speaks Russian or English, the manifest is one for both.
         description: 'Family Chat',
         // "und" (undetermined, BCP 47): otherwise vite-plugin-pwa writes "en".
         lang: 'und',
@@ -133,7 +133,7 @@ export default defineConfig({
           // The bubble scaled into the safe zone (scripts/make-icons.mjs).
           { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
-        // Web Share Target (M5): "Поделиться" from other apps into a chat. The
+        // Web Share Target: "Поделиться" from other apps into a chat. The
         // service worker (public/push-sw.js) answers this POST, keeps the
         // content on the device and opens the app.
         share_target: {
@@ -177,7 +177,7 @@ export default defineConfig({
             { name: 'crypto', test: /node_modules[\\/].*@(noble|scure)[\\/]/, priority: 3 },
             // Only what the first screen needs; other libraries (the QR code) stay with their screen.
             { name: 'vendor', test: /node_modules[\\/].*(svelte|dexie|esm-env|clsx)[\\/]/, priority: 2 },
-            // M5: the sticker import pipeline and the .tgs reader stay out of it (loaded on first use).
+            // The sticker import pipeline and the .tgs reader stay out of it (loaded on first use).
             { name: 'core', test: /packages[\\/](core|protocol)[\\/](?!src[\\/]stickers[\\/](import|tgs|zip)\.ts$)/, priority: 1 },
           ],
         },

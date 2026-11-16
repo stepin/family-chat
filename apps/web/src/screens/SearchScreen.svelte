@@ -9,7 +9,7 @@
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // Global search (docs/PLAN.md 7.2, 8.4): messages stored on this device,
+  // Global search: messages stored on this device,
   // grouped by chat with a snippet and a date, plus chats and relatives by
   // name. Nothing is sent to the server; the screen says so.
   const account = $derived(app.account!);

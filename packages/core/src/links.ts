@@ -1,4 +1,4 @@
-// Identity linking (M5, docs/PLAN.md 8.6): "this is the same person as…".
+// Identity linking: "this is the same person as…".
 //
 // When a relative started over without the phrase (a new phone), the family
 // sees two identities of one person on the same server. After comparing

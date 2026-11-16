@@ -8,8 +8,8 @@
   import { t } from '../lib/strings.ts';
 
   // Create an invitation (QR and link), list issued ones, revoke
-  // (docs/PLAN-v2.md 8, screen 5). The code is shown once and never logged.
-  // M7: the flow says plainly that an invitation lets in one person, that
+  //. The code is shown once and never logged.
+  // The flow says plainly that an invitation lets in one person, that
   // the visible link is the newest one, and that the button makes another
   // one for the next relative ("Создать ещё одно приглашение"); the older
   // invitation keeps working.

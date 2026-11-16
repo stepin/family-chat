@@ -2,7 +2,7 @@
   import type { Gender } from '../lib/strings.ts';
   import { t } from '../lib/strings.ts';
 
-  // M7: the profile's gender, two options (М / Ж, M / F), male by default.
+  // The profile's gender, two options (М / Ж, M / F), male by default.
   // Used next to the name when joining and in "Мой профиль". The visible
   // letters carry the full word for screen readers.
   let {

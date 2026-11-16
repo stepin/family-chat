@@ -9,7 +9,7 @@
   import { countWords, normalizePhrase } from '../../lib/phrase.ts';
   import { t, type Gender } from '../../lib/strings.ts';
 
-  // Restore route (docs/PLAN.md 8.1): invitation link or server address →
+  // Restore route: invitation link or server address →
   // the 24 words in one field → "Доступ восстановлен".
   let step = $state<'where' | 'phrase' | 'name' | 'done'>('where');
   let where = $state(app.invite ? `${app.invite.serverUrl}/#invite=${app.invite.code}` : pageServerUrl(location));

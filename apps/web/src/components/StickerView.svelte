@@ -5,7 +5,7 @@
   import { loadLottie, reducedMotion, type LottieAnimation } from '../lib/lottie.ts';
   import { t } from '../lib/strings.ts';
 
-  // One sticker (M5): a WebP image (static or animated) or a `.tgs` Lottie
+  // One sticker: a WebP image (static or animated) or a `.tgs` Lottie
   // animation. The file comes from the core already checked against its hash
   // and, for `.tgs`, unpacked and sanitised (no expressions, no external
   // addresses); it is drawn with the light lottie-web build. SVG and HTML are

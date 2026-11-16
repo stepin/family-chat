@@ -1,4 +1,4 @@
-// Preparing photos and files for sending (docs/PLAN.md 6.6, 8.6).
+// Preparing photos and files for sending.
 //
 // Photos are downscaled to at most 2048 px on the long side and re-encoded on
 // the device, which also drops EXIF (with the shooting location). Decoding

@@ -1,4 +1,4 @@
-// Voice messages (docs/PLAN.md 6.6, 7.5, 8.6): the pure part. Which format to
+// Voice messages: the pure part. Which format to
 // record, the 64 waveform peaks, durations as text, playback speeds, and the
 // recorder's state machine (press and hold with slide to cancel and slide up
 // to lock; a tap or a click starts a locked recording, which is the required

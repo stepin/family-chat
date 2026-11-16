@@ -9,7 +9,7 @@
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
-  // New chat (docs/PLAN.md screen 8): pick a relative, or "Новая группа".
+  // New chat: pick a relative, or "Новая группа".
   const account = $derived(app.account!);
   const names = $derived(displayNames(app.members.filter((m) => !m.isMe), t.common.unknownName));
   const others = $derived(

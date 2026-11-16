@@ -1,6 +1,6 @@
 // Dates and times for the UI. Everything shown is in the device's time zone;
-// message times come from the server (docs/PLAN-v2.md 7.6). Words and number
-// formats follow the interface language (M7), through Intl.
+// message times come from the server. Words and number
+// formats follow the interface language, through Intl.
 
 import { intlLocale, type Lang } from './locale.ts';
 

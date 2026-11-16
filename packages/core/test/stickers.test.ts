@@ -1,4 +1,4 @@
-// M5: the sticker import pipeline with hostile input generated here: ZIP
+// The sticker import pipeline with hostile input generated here: ZIP
 // limits (bombs, traversal, nested archives, encryption, lies about sizes and
 // CRCs, overlapping entries), WebP headers and `.tgs` sanitising.
 

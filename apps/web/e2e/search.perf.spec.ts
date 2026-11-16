@@ -1,4 +1,4 @@
-// The local search on 50 000 messages in Chromium (docs/PLAN.md 7.2): how
+// The local search on 50 000 messages in Chromium: how
 // long the index takes to build (fresh sync and the upgrade of an old
 // database), how long queries take, whether the page keeps drawing frames
 // meanwhile, and how much storage the index costs. Not in the default run:

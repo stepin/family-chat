@@ -12,11 +12,11 @@
   import { pageHello, setupField, type HelloState, type SetupField } from '../../lib/page-hello.ts';
   import { t, type Gender } from '../../lib/strings.ts';
 
-  // Administrator route (docs/PLAN.md 8.1 with docs/PLAN-v2.md 8): server
+  // Administrator route: server
   // address and admin code → name → recovery phrase → invite the family.
   let step = $state<'server' | 'profile' | 'phrase' | 'invite'>('server');
   const pageUrl = pageServerUrl(location);
-  // M8: the field is decided by the hello of the page's server, however the
+  // The field is decided by the hello of the page's server, however the
   // person got here: its address; empty with a hint when this server is taken
   // and runs with `--offer-setup` (setup goes to another server); "an
   // administrator already exists" when it is taken without the flag. While

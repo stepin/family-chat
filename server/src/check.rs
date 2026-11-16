@@ -1,4 +1,4 @@
-//! Server checks (M8, formerly the `--m0` endpoints): a long request and a
+//! Server checks: a long request and a
 //! test notification. Always on. Before setup the `/server/` page calls them
 //! with the administrator code; after setup an administrator's device calls
 //! them with its device token (app: Settings → Family and server → Server check).
@@ -159,12 +159,11 @@ struct PushRequest {
     from: Option<String>,
 }
 
-/// The test notification carries no human text (M7): the service worker
-/// words it in the language of the app (public/push-sw.js). `kind` stays
-/// `m0-test` on the wire (its internal name) so service workers installed
-/// before M8 still recognise it; `from` says which screen asked for it.
+/// The test notification carries no human text: the service worker
+/// words it in the language of the app (public/push-sw.js). `kind` is
+/// `check-test`; `from` says which screen asked for it.
 fn test_payload(delay: u64, from: &str) -> Vec<u8> {
-    json!({ "kind": "m0-test", "delay": delay, "sentAt": now_ms(), "from": from })
+    json!({ "kind": "check-test", "delay": delay, "sentAt": now_ms(), "from": from })
         .to_string()
         .into_bytes()
 }

@@ -8,7 +8,7 @@
 //   apps/site/screenshots/    screenshots of the app (scripts in screenshots/)
 //   apps/web/src/styles/tokens.css, apps/web/public/icon.svg   the app's look
 //
-// The site does not carry the app (M8): the app always opens from the
+// The site does not carry the app: the app always opens from the
 // family's own server, and the site and the server are not connected.
 //
 //   node build.mjs [--out DIR]

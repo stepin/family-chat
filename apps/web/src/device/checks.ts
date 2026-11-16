@@ -1,5 +1,5 @@
 /**
- * Device checks for M0 (docs/PLAN.md 7.8 and section 9): OPFS vs IndexedDB on
+ * Device checks: OPFS vs IndexedDB on
  * iOS, image encoding (WebP or JPEG), resize via createImageBitmap, and the
  * browser features the client relies on. Results go to a copyable report.
  */

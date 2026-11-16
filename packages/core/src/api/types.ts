@@ -7,7 +7,7 @@ export interface Hello {
   readonly protocol: number;
   readonly server: string;
   readonly version: string;
-  /** Git commit of the server build (M6); null when unknown or from an older server. */
+  /** Git commit of the server build; null when unknown. */
   readonly commit: string | null;
   readonly serverId: string;
   readonly familyName: string;
@@ -20,11 +20,11 @@ export interface Hello {
   readonly maxEventBytes: number;
   readonly adminCodeActive: boolean;
   /**
-   * M8 (`fcd --offer-setup`): the first screen offers family setup even when this
-   * server has its family (to set one up on another server). Absent: false.
+   * `fcd --offer-setup`: the first screen offers family setup even when this
+   * server has its family (to set one up on another server).
    */
   readonly offerSetup: boolean;
-  /** Limits (M2). Older servers do not send them; defaults from docs/API.md 1.7 are used. */
+  /** Limits (docs/API.md 1.7). */
   readonly maxPartBytes: number;
   readonly maxBlobBytes: number;
   readonly maxAvatarBytes: number;
@@ -61,7 +61,7 @@ export interface UserEntry {
   readonly profile: SignedEnvelope | null;
   readonly admin: boolean;
   readonly removed: boolean;
-  /** Revocation envelope (M2), exactly as its owner sent it; null or absent when not revoked. */
+  /** Revocation envelope, exactly as its owner sent it; null or absent when not revoked. */
   readonly revoked?: SignedEnvelope | null;
 }
 
@@ -90,11 +90,11 @@ export interface PostEventInput {
   readonly msgId: string;
   readonly epoch: number;
   readonly body: Uint8Array;
-  /** M5: the event is not worth a notification (`X-FC-Push: none`): edits, deletions, reactions. */
+  /** The event is not worth a notification (`X-FC-Push: none`): edits, deletions, reactions. */
   readonly silent?: boolean;
 }
 
-/** An element of `GET /v1/packs` (M5). The manifest is verified by the caller. */
+/** An element of `GET /v1/packs`. The manifest is verified by the caller. */
 export interface PackEntry {
   readonly packId: string;
   readonly owner: string;
@@ -118,7 +118,7 @@ export interface ServerEvent {
   readonly epoch: number;
   readonly msgId: string;
   readonly body: Uint8Array;
-  /** Deleted for everyone on the server (M4): the body is empty, only the header is left. */
+  /** Deleted for everyone on the server: the body is empty, only the header is left. */
   readonly deleted?: true;
 }
 
@@ -158,7 +158,7 @@ export type NoticeBody =
       readonly epoch: number;
     }
   | { readonly type: 'member_removed' | 'member_revoked'; readonly userId: string }
-  /** An event was deleted for everyone on the server (M4). A hint only: local copies go away by the signed `delete` payload. */
+  /** An event was deleted for everyone on the server. A hint only: local copies go away by the signed `delete` payload. */
   | { readonly type: 'event_deleted'; readonly gseq: number; readonly senderId: string; readonly msgId: string; readonly by: string };
 
 export interface EventsPage {
@@ -227,7 +227,7 @@ export interface AdminUser {
   readonly devices: readonly AdminDevice[];
 }
 
-/** `GET /v1/check/wait` (M8 server check). */
+/** `GET /v1/check/wait` (server check). */
 export interface CheckWaitResult {
   readonly seconds: number;
   readonly startedAt: number;
@@ -265,7 +265,7 @@ export interface ServerStats {
   readonly push: boolean;
 }
 
-// ---- M2 ----
+// ---- groups, keys, blobs, avatars ----
 
 export interface SealedKeyEntry {
   readonly userId: string;

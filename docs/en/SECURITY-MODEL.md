@@ -22,7 +22,7 @@ Most important: Family Chat uses its own cryptographic protocol, and it **has no
 The server (and anyone with a copy of its data folder) sees:
 
 - the family members: public keys, **profile names, photos and gender** (signed, but not encrypted; the gender, M or
-  F, came with M7 and is used for wording such as "created the group" in Russian);
+  F, used for wording such as "created the group" in Russian);
 - who is in which direct chat and group (the list is needed for delivery), who invited whom;
 - when each message was sent, from which device, its approximate size (sizes are padded to 256 bytes);
 - the size of files and when they were uploaded;

@@ -101,7 +101,7 @@ test('a missing page answers 404 with the site layout', async ({ page }) => {
   await expect(page.locator('link[rel="stylesheet"]')).toHaveAttribute('href', `${base}site.css`);
 });
 
-test('the menu: every item on one line, the current one marked but not moved (M8)', async ({ page }) => {
+test('the menu: every item on one line, the current one marked but not moved', async ({ page }) => {
   for (const path of ['/', '/install/', '/en/', '/en/faq/']) {
     for (const width of [360, 1280]) {
       await page.setViewportSize({ width, height: 800 });
@@ -127,7 +127,7 @@ test('the menu: every item on one line, the current one marked but not moved (M8
   }
 });
 
-test('no app on the site: no app/ and no links to it (M8)', async ({ page }) => {
+test('no app on the site: no app/ and no links to it', async ({ page }) => {
   for (const path of ['/', '/en/', '/install/']) {
     await page.goto(path);
     await expect(page.locator('a[href*="app/"]')).toHaveCount(0);

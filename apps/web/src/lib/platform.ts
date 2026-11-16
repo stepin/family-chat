@@ -1,4 +1,4 @@
-// Platform detection for the invitation gateway (docs/PLAN.md 8.1).
+// Platform detection for the invitation gateway.
 //
 // iOS keeps the storage of Safari and of the installed app apart, so on iOS
 // nothing (no identity) may be created before the app is installed. Messenger

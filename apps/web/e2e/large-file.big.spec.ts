@@ -17,7 +17,7 @@ import { createReadStream, createWriteStream, mkdirSync, mkdtempSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CDPSession, Page } from '@playwright/test';
-import { pairInChat } from './support/m3.ts';
+import { pairInChat } from './support/media.ts';
 import { Fcd } from './support/fcd.ts';
 import { expect, makePersistentUser, test, type User } from './support/test.ts';
 

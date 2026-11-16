@@ -1,4 +1,4 @@
-// A small, strict ZIP reader for sticker archives (docs/PLAN.md 7.6, 7.8).
+// A small, strict ZIP reader for sticker archives.
 //
 // Every archive is hostile input. Read from the central directory only:
 // no encryption, no ZIP64, no multi-disk archives, methods "stored" and

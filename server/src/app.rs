@@ -167,7 +167,7 @@ async fn method_not_allowed() -> Response {
     .into_response()
 }
 
-/// CORS for every API response (docs/PLAN-v2.md, section 5): any origin,
+/// CORS for every API response: any origin,
 /// no cookies; authorisation goes in the `Authorization` header.
 async fn cors(req: Request, next: Next) -> Response {
     let is_api = headers::is_api_path(req.uri().path());
@@ -206,7 +206,7 @@ async fn fallback(
     if uri.path().starts_with("/v1/") || uri.path() == "/v1" {
         return ApiError::new(StatusCode::NOT_FOUND, "not_found", "no such API endpoint").into_response();
     }
-    // Web Share Target (M5): the installed app's service worker answers this
+    // Web Share Target: the installed app's service worker answers this
     // POST itself. When it reaches the server (no service worker yet), the
     // shared content is dropped and the app opens with an explanation.
     if method == Method::POST && uri.path().ends_with("/share-target") {

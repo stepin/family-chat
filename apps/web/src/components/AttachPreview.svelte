@@ -7,7 +7,7 @@
   import { safeMime, shouldReencode } from '../lib/media.ts';
   import { t } from '../lib/strings.ts';
 
-  // Preview before sending (docs/PLAN.md screen 10, 8.6): the picked files,
+  // Preview before sending: the picked files,
   // a caption, and "Отправить оригинал" for photos. Files over the family's
   // limit are refused here, before anything is uploaded, with the limit named.
   let {

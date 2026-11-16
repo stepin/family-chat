@@ -57,8 +57,7 @@ tar xzf fcd-<версия>-x86_64-unknown-linux-musl.tar.gz
 | Выпуск | [docs/RELEASING.md](docs/RELEASING.md), [CHANGELOG.md](CHANGELOG.md) |
 | Уязвимости | [SECURITY.md](SECURITY.md) |
 
-План проекта: [`docs/PLAN-v2.md`](docs/PLAN-v2.md) поверх [`docs/PLAN.md`](docs/PLAN.md), отложенное:
-[`TODOS.md`](TODOS.md).
+Отложенное: [`TODOS.md`](TODOS.md).
 
 ## Разработка
 

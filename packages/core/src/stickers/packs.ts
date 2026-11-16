@@ -1,4 +1,4 @@
-// Sticker packs of one account (docs/PLAN.md 7.5, docs/API.md 10): the list
+// Sticker packs of one account: the list
 // from the server with every manifest verified against its uploader's
 // identity, publishing (files first, then the signed manifest), deleting
 // one's own pack, and files fetched on demand and checked against their name

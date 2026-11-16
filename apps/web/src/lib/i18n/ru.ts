@@ -1,4 +1,4 @@
-// Russian, the default language of the interface (M7: the catalogue for
+// Russian, the default language of the interface (the catalogue for
 // English, en.ts, has the same shape; the compiler checks that every key is
 // there). Gendered forms take the person's gender from the profile (male when
 // unknown); "Вы" forms do not change.
@@ -890,7 +890,7 @@ export const ru = {
     about: 'О приложении',
     version: (v: string, commit = '') => `Версия приложения ${v}${commit ? ` (${commit})` : ''}`,
     serverVersion: (v: string, commit: string | null = null) => `Версия сервера ${v}${commit ? ` (${commit})` : ''}`,
-    aboutText: 'Семейный чат со сквозным шифрованием. Криптография не проходила независимый аудит.',
+    aboutText: 'Семейный чат со сквозным шифрованием.',
   },
 
   notify: {

@@ -9,7 +9,7 @@ export default defineConfig({
   workers: 1,
   reporter: 'list',
   globalSetup: '../web/e2e/support/global-setup.ts',
-  // M7: the screenshots show the Russian interface.
+  // The screenshots show the Russian interface.
   use: { locale: 'ru-RU' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });

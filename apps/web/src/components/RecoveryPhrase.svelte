@@ -4,8 +4,7 @@
   import { pickPositions } from '../lib/phrase.ts';
   import { t } from '../lib/strings.ts';
 
-  // Shows the 24 words, then asks for three random ones (docs/PLAN.md 8,
-  // screen 4). The phrase lives only in this component's memory.
+  // Shows the 24 words, then asks for three random ones. The phrase lives only in this component's memory.
   let {
     userId,
     ondone,

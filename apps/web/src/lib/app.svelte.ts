@@ -43,10 +43,10 @@ const NO_FLAGS: Flags = { phraseConfirmed: false, phraseOffered: false, notifyDi
 
 export type BootPhase = 'loading' | 'ready' | 'db-newer' | 'failed' | 'old-browser';
 
-/** Setting: the family shown on this device (M5, several servers). */
+/** Setting: the family shown on this device (several servers). */
 const CURRENT_ACCOUNT = 'ui.currentAccount';
 
-/** Shared content waiting for its chat (Web Share Target, M5). */
+/** Shared content waiting for its chat (Web Share Target). */
 export interface PendingShare {
   readonly accountId: string;
   readonly chatId: string;
@@ -55,9 +55,9 @@ export interface PendingShare {
 
 class AppState {
   phase: BootPhase = $state('loading');
-  /** Accounts on this device (families on several servers, M5). */
+  /** Accounts on this device (families on several servers). */
   accounts: AccountView[] = $state.raw([]);
-  /** The family shown now (M5); falls back to the first account. */
+  /** The family shown now; falls back to the first account. */
   currentId: string | null = $state(null);
   /** Total unread over all families (the icon badge and the title). */
   unreadTotal = $state(0);
@@ -94,7 +94,7 @@ class AppState {
   membersLoaded = $state(false);
   /** Per-identity interface flags stored in the core's settings table. */
   flags: Flags = $state({ ...NO_FLAGS });
-  /** Interface language (M7) and the person's choice; the screens are keyed by `lang`. */
+  /** Interface language and the person's choice; the screens are keyed by `lang`. */
   lang: Lang = $state(activeLang());
   langPref: LangPref = $state(readLangPref());
   flagsLoaded = $state(false);
@@ -108,12 +108,12 @@ class AppState {
     return this.#core;
   }
 
-  /** The family shown now (M5: one of several servers). */
+  /** The family shown now (one of several servers). */
   get account(): AccountView | null {
     return this.accounts.find((a) => a.id === this.currentId) ?? this.accounts[0] ?? null;
   }
 
-  /** Gender of a member of the shown family from the profile (M7); male when unknown. */
+  /** Gender of a member of the shown family from the profile; male when unknown. */
   genderOf(userId: string | null | undefined): Gender {
     return (userId ? this.members.find((m) => m.userId === userId)?.gender : undefined) ?? 'm';
   }

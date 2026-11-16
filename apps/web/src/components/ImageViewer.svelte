@@ -16,7 +16,7 @@
   import { canShareFile, saveBlob, shareFile } from '../lib/storage.ts';
   import { t } from '../lib/strings.ts';
 
-  // Image viewer (docs/PLAN.md screen 11, 8.6): zoom (buttons, double tap,
+  // Image viewer: zoom (buttons, double tap,
   // wheel, pinch), swipe or arrows between the chat's images, save and share,
   // closing by swiping down, Escape or the close button. Pictures are shown
   // only through <img> with blob: URLs.

@@ -91,7 +91,7 @@ pub async fn open(data: &Path, flags: Overrides) -> TestServer {
     }
 }
 
-// ---- a client of the M1 API ----
+// ---- a client of the base API ----
 
 pub struct Member {
     pub key: SigningKey,

@@ -38,7 +38,7 @@ export type ServerErrorCode =
   | 'rate_limited'
   | 'internal'
   | 'storage_full'
-  // M5: sticker packs
+  // Sticker packs
   | 'pack_not_found'
   | 'file_not_found'
   | 'hash_mismatch'
@@ -49,7 +49,7 @@ export type ServerErrorCode =
   | 'not_author'
   | 'bad_manifest'
   | 'too_many_packs'
-  // M8: server checks
+  // Server checks
   | 'admin_code_inactive'
   | 'push_failed'
   | 'no_subscription'
