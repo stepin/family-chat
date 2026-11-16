@@ -7,7 +7,7 @@
  */
 export function registerServiceWorker(onUpdate?: (apply: () => void) => void): void {
   if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
-  const root = new URL('../', import.meta.url);
+  const root = new URL(/* @vite-ignore */ '../', import.meta.url);
   const start = async () => {
     const reg = await navigator.serviceWorker.register(new URL('sw.js', root), { scope: root.pathname });
     if (!onUpdate) return;

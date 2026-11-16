@@ -270,7 +270,7 @@ pub async fn push(
     if st
         .checks
         .pending
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+        .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
             (n < MAX_PENDING_PUSHES).then_some(n + 1)
         })
         .is_err()
