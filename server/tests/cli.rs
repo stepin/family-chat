@@ -272,3 +272,95 @@ fn settings_from_the_environment() {
     );
     assert_eq!(wrong.status.code(), Some(1), "{}", text(&wrong));
 }
+
+#[test]
+fn telegram_token_never_reaches_the_log_or_the_config() {
+    const TOKEN: &str = "987654:AAsecretTokenValueForTheLogTest_xyz";
+    // A Bot API that always fails: getMe at start goes wrong, logged at debug level.
+    let fake = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let api = format!("http://{}", fake.local_addr().unwrap());
+    std::thread::spawn(move || {
+        use std::io::{Read, Write};
+        for mut s in fake.incoming().flatten() {
+            let mut buf = [0u8; 4096];
+            let _ = s.read(&mut buf);
+            let body = r#"{"ok":false,"error_code":500,"description":"Internal Server Error"}"#;
+            let _ = write!(
+                s,
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path().to_str().unwrap();
+    let mut srv = Server::start(
+        &[
+            "--data",
+            data,
+            "--listen",
+            "127.0.0.1",
+            "--port",
+            "0",
+            "--push",
+            "false",
+        ],
+        &[
+            ("FCD_TELEGRAM_BOT_TOKEN", TOKEN),
+            ("FCD_TELEGRAM_API_URL", &api),
+            ("RUST_LOG", "debug"),
+        ],
+    );
+    srv.wait_line("Загрузка стикеров из Telegram: Telegram недоступен");
+    while let Ok(l) = srv.lines.recv_timeout(Duration::from_millis(300)) {
+        srv.seen.push(l);
+    }
+    let all = srv.seen.join("\n");
+    drop(srv);
+    assert!(!all.contains(TOKEN) && !all.contains("AAsecret"), "{all}");
+    assert!(all.contains("bot***/getMe"), "{all}");
+    let config = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
+    assert!(!config.contains(TOKEN), "{config}");
+    assert!(config.contains("# telegram_bot_token = \"\""), "{config}");
+
+    // A token file works the same and is not copied into config.toml either.
+    let file = tmp.path().join("token.txt");
+    std::fs::write(&file, format!("{TOKEN}\n")).unwrap();
+    let tmp2 = tempfile::tempdir().unwrap();
+    let mut srv = Server::start(
+        &[
+            "--data",
+            tmp2.path().to_str().unwrap(),
+            "--listen",
+            "127.0.0.1",
+            "--port",
+            "0",
+            "--push",
+            "false",
+        ],
+        &[
+            ("FCD_TELEGRAM_BOT_TOKEN_FILE", file.to_str().unwrap()),
+            ("FCD_TELEGRAM_API_URL", &api),
+        ],
+    );
+    srv.wait_line("Загрузка стикеров из Telegram: Telegram недоступен");
+    assert!(srv.seen.iter().all(|l| !l.contains(TOKEN)));
+    drop(srv);
+    let config = std::fs::read_to_string(tmp2.path().join("config.toml")).unwrap();
+    assert!(!config.contains(TOKEN), "{config}");
+
+    // A malformed token, or a broken config.toml line holding it: the error names the source, not the value.
+    let bad = run(
+        &["--data", tmp2.path().to_str().unwrap()],
+        &[("FCD_TELEGRAM_BOT_TOKEN", "not a token secret-value")],
+    );
+    assert_eq!(bad.status.code(), Some(1), "{}", text(&bad));
+    assert!(text(&bad).contains("FCD_TELEGRAM_BOT_TOKEN"), "{}", text(&bad));
+    assert!(!text(&bad).contains("secret-value"), "{}", text(&bad));
+    let config_path = tmp2.path().join("config.toml");
+    std::fs::write(&config_path, format!("{config}\ntelegram_bot_token = \"{TOKEN}\n")).unwrap();
+    let broken = run(&["--data", tmp2.path().to_str().unwrap()], &[]);
+    assert_eq!(broken.status.code(), Some(1), "{}", text(&broken));
+    assert!(text(&broken).contains("config.toml"), "{}", text(&broken));
+    assert!(!text(&broken).contains(TOKEN), "{}", text(&broken));
+}

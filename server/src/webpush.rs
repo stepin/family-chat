@@ -237,22 +237,27 @@ pub struct PushClient {
     timeout: Duration,
 }
 
+/// HTTPS (or plain HTTP) connector with rustls and the bundled Mozilla roots.
+/// Shared by Web Push and the Telegram client.
+pub fn https_connector() -> hyper_rustls::HttpsConnector<HttpConnector> {
+    let tls = rustls::ClientConfig::builder_with_provider(rustls::crypto::ring::default_provider().into())
+        .with_safe_default_protocol_versions()
+        .expect("rustls protocol versions")
+        .with_root_certificates(rustls::RootCertStore::from_iter(
+            webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
+        ))
+        .with_no_client_auth();
+    hyper_rustls::HttpsConnectorBuilder::new()
+        .with_tls_config(tls)
+        .https_or_http()
+        .enable_http1()
+        .build()
+}
+
 impl PushClient {
     pub fn new(subject: String) -> Self {
-        let tls = rustls::ClientConfig::builder_with_provider(rustls::crypto::ring::default_provider().into())
-            .with_safe_default_protocol_versions()
-            .expect("rustls protocol versions")
-            .with_root_certificates(rustls::RootCertStore::from_iter(
-                webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
-            ))
-            .with_no_client_auth();
-        let https = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(tls)
-            .https_or_http()
-            .enable_http1()
-            .build();
         Self {
-            client: Client::builder(TokioExecutor::new()).build(https),
+            client: Client::builder(TokioExecutor::new()).build(https_connector()),
             subject,
             timeout: Duration::from_secs(20),
         }

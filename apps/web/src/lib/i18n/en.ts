@@ -730,9 +730,66 @@ const en: Strings = {
           'unsupported-browser': 'this browser can’t unpack archives',
           unsupported: 'not a sticker',
           duplicate: 'duplicate',
+          video: 'video sticker',
+          'download-failed': 'did not load',
         } as Record<string, string>
       )[code] ?? 'the file didn’t fit',
     failed: (why: string) => `That didn’t work: ${why}.`,
+    sourceTelegram: 'Telegram link',
+    sourceFiles: 'Files',
+    linkLabel: 'Sticker set link',
+    linkHint: 'For example, https://t.me/addstickers/set_name. Video stickers are not supported yet.',
+    load: 'Load',
+    cancelLoad: 'Cancel',
+    tgOff: 'Loading by link is off on the server. Ask the server owner to turn it on.',
+    tgHowTo: 'How to turn it on (docs/ADMIN.md)',
+    replaceTitle: 'Replace the current draft?',
+    replaceText: 'The pack you have not published yet will be gone from this screen.',
+    replace: 'Replace',
+    tgOpening: 'Opening the set…',
+    tgWaiting: (n: number) => `Telegram asks to wait, continuing in ${n} s`,
+    tgLoaded: (n: number, m: number) => `Loaded ${n} of ${m}`,
+    tgProgress: 'Loading the set from Telegram',
+    tgCancelled: 'Loading cancelled',
+    tgSummary: (ready: number, video: number, failed: number) =>
+      [
+        `Ready ${ready}`,
+        ...(video > 0 ? [`video not supported ${video}`] : []),
+        ...(failed > 0 ? [`failed to load ${failed}`] : []),
+      ].join(' · '),
+    tgRetry: 'Retry the failed ones',
+    publishN: (n: number) => `Publish ${n} ${pluralEn(n, 'sticker', 'stickers')}`,
+    tgError: (code: string, reason: string | undefined, seconds: number | undefined, admin: boolean): string => {
+      switch (code) {
+        case 'telegram_disabled':
+          return admin
+            ? 'Loading by link is off on the server. Set a Telegram bot token (see docs/ADMIN.md).'
+            : 'Loading by link is off on the server. Ask the server owner to turn it on.';
+        case 'not_found':
+          return 'Set not found. Check the link.';
+        case 'telegram_unavailable':
+          return admin && reason === 'token_rejected'
+            ? 'Telegram rejected the bot token, see docs/ADMIN.md#telegram.'
+            : 'Telegram is not answering right now, try again later.';
+        case 'telegram_busy':
+        case 'rate_limited':
+          return `Too many downloads, try again in ${seconds ?? 60} s.`;
+        case 'telegram_emoji_set':
+        case 'emoji_link':
+          return 'This is an emoji set, not stickers.';
+        case 'bad_link':
+        case 'bad_request':
+          return 'Needs a link like t.me/addstickers/…';
+        case 'video_only':
+          return 'This set has only video stickers, which the app cannot show yet.';
+        case 'no_stickers':
+          return 'Not a single sticker loaded. Try again later.';
+        case 'offline':
+          return 'No connection to the family server. Check the internet.';
+        default:
+          return 'Could not load the set.';
+      }
+    },
   },
 
   share: {
@@ -924,6 +981,14 @@ const en: Strings = {
     events: (n: number) => `Messages on the server: ${n}`,
     serverVersion: (v: string) => `Server version ${v}`,
     push: (on: boolean) => (on ? 'Notifications are on for the server' : 'Notifications are off for the server'),
+    telegram: (on: boolean, bot: string | null, status: string): string =>
+      !on
+        ? 'Telegram stickers by link: off (no bot token)'
+        : status === 'token_rejected'
+          ? 'Telegram stickers by link: Telegram rejected the bot token, see docs/ADMIN.md#telegram'
+          : status === 'unavailable'
+            ? 'Telegram stickers by link: Telegram is not answering'
+            : `Telegram stickers by link: on${bot ? ` (bot @${bot})` : ''}`,
     loadFailed: 'Couldn’t load the details from the server.',
     check: 'Server check',
     checkLead: 'Whether long requests get through your proxy and notifications reach this device.',

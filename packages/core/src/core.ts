@@ -79,6 +79,7 @@ import { parseShared, SETTING_SHARE_PENDING, type SharedContent } from './share.
 import { linkIdentities, linkValid, unlinkIdentity } from './links.ts';
 // The sticker import pipeline and the `.tgs` reader load on first use (their own chunk in the web build).
 import type { ImportInput, StickerImport } from './stickers/import.ts';
+import type { TelegramImportOptions } from './stickers/telegram.ts';
 import type { SanitizedLottie } from './stickers/tgs.ts';
 import type { IdentityLinkRow } from './db/schema.ts';
 import type { BackoffOptions } from './util/backoff.ts';
@@ -1261,6 +1262,30 @@ export class FamilyChatCore {
   async importStickers(inputs: readonly ImportInput[]): Promise<StickerImport> {
     const { importStickers } = await import('./stickers/import.ts');
     return importStickers(inputs);
+  }
+
+  /**
+   * Imports a Telegram sticker set by its link through the family server
+   * (which holds the bot token): the list, then the files three at a time,
+   * every file checked like an import from files. `retry` loads only the
+   * failed stickers of a previous result. Throws TelegramImportError, or a
+   * DOMException `AbortError` when `signal` cancels it.
+   */
+  async importTelegramStickers(
+    accountId: string,
+    link: string,
+    opts: Pick<TelegramImportOptions, 'signal' | 'onProgress' | 'retry'> = {},
+  ): Promise<StickerImport> {
+    const { session } = await this.#runtime(accountId);
+    const { importTelegramStickers } = await import('./stickers/telegram.ts');
+    return importTelegramStickers(
+      {
+        set: (name, signal) => session.call((t) => session.transport.telegramSet(t, name, signal)),
+        file: (name, id, signal) => session.call((t) => session.transport.telegramFile(t, name, id, signal)),
+      },
+      link,
+      opts,
+    );
   }
 
   /** Unpacks and sanitises `.tgs` bytes (for previews of an imported pack). */

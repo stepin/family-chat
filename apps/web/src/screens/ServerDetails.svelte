@@ -121,6 +121,7 @@
           {#if stats.freeBytes !== null}<li>{t.server.diskFree(formatBytes(stats.freeBytes))}</li>{/if}
           <li>{t.server.events(stats.events)}</li>
           <li>{t.server.push(stats.push)}</li>
+          <li data-testid="server-telegram">{t.server.telegram(stats.telegram !== null, stats.telegram?.bot ?? null, stats.telegram?.status ?? 'unknown')}</li>
           <li>{t.server.serverVersion(stats.version)}</li>
         </ul>
       {:else if statsError}

@@ -54,7 +54,12 @@ export type ServerErrorCode =
   | 'push_failed'
   | 'no_subscription'
   | 'too_many_pending'
-  | 'shutting_down';
+  | 'shutting_down'
+  // Telegram sticker sets
+  | 'telegram_disabled'
+  | 'telegram_unavailable'
+  | 'telegram_busy'
+  | 'telegram_emoji_set';
 
 const SERVER_CODES: ReadonlySet<string> = new Set<ServerErrorCode>([
   'bad_request',
@@ -107,6 +112,10 @@ const SERVER_CODES: ReadonlySet<string> = new Set<ServerErrorCode>([
   'no_subscription',
   'too_many_pending',
   'shutting_down',
+  'telegram_disabled',
+  'telegram_unavailable',
+  'telegram_busy',
+  'telegram_emoji_set',
 ]);
 
 /**

@@ -49,12 +49,34 @@ export interface ImportedSticker {
   readonly w: number;
   readonly h: number;
   readonly animated: boolean;
+  /** `file_unique_id` of a sticker from a Telegram set (to retry only the failed ones, in order). */
+  readonly telegramId?: string;
+}
+
+export type SkipReason = StickerErrorCode | 'unsupported' | 'duplicate' | 'video' | 'download-failed';
+
+/** A pack imported by a Telegram link: the set and what did not load. */
+export interface TelegramSource {
+  /** The set name from the link. */
+  readonly name: string;
+  readonly title: string;
+  /** Ids of the set's stickers in its order (video left out). */
+  readonly order: readonly string[];
+  /** Ids that did not load or did not pass the checks ("Повторить незагрузившиеся"). */
+  readonly failed: readonly string[];
+  /** Emoji of each id, as Telegram gave it. */
+  readonly emoji: Readonly<Record<string, string | null>>;
+  readonly types: Readonly<Record<string, StickerType>>;
+  readonly video: number;
+  readonly other: number;
 }
 
 export interface StickerImport {
   readonly stickers: ImportedSticker[];
   /** Files left out, with the reason. */
-  readonly skipped: { readonly name: string; readonly reason: StickerErrorCode | 'unsupported' | 'duplicate' }[];
+  readonly skipped: { readonly name: string; readonly reason: SkipReason }[];
+  /** Set for an import by a Telegram link. */
+  readonly telegram?: TelegramSource;
 }
 
 async function bytesOf(d: Blob | Uint8Array): Promise<Uint8Array> {
@@ -99,32 +121,58 @@ function typeOf(name: string): StickerType | null {
 }
 
 /**
+ * Collects checked stickers into a pack: every file through
+ * `checkStickerFile`, duplicates skipped, the count and the total size
+ * capped. Shared by the file import and the Telegram import, so a preview
+ * never holds a pack that cannot be published.
+ */
+export class PackAccumulator {
+  readonly stickers: ImportedSticker[] = [];
+  readonly skipped: { name: string; reason: SkipReason }[] = [];
+  readonly #seen = new Set<string>();
+  #total = 0;
+
+  /**
+   * Checks and adds one file. A bad file is skipped with its reason (and
+   * `false` returned); too many stickers or too large a total throw.
+   */
+  async add(
+    name: string,
+    type: StickerType,
+    read: () => Promise<Uint8Array>,
+    extra: { emoji?: string | null; telegramId?: string } = {},
+  ): Promise<boolean> {
+    try {
+      let s = await checkStickerFile(name, await read(), type);
+      if (this.#seen.has(s.file)) {
+        this.skipped.push({ name, reason: 'duplicate' });
+        return false;
+      }
+      if (this.stickers.length >= MAX_PACK_STICKERS) throw new StickerError('too-many-stickers');
+      if (this.#total + s.size > MAX_PACK_BYTES) throw new StickerError('too-large-total');
+      if (extra.emoji && !stickerEmojiProblem(extra.emoji)) s = { ...s, emoji: extra.emoji };
+      if (extra.telegramId) s = { ...s, telegramId: extra.telegramId };
+      this.#total += s.size;
+      this.#seen.add(s.file);
+      this.stickers.push(s);
+      return true;
+    } catch (e) {
+      if (!(e instanceof StickerError) || e.code === 'too-many-stickers' || e.code === 'too-large-total' || e.code === 'unsupported-browser') throw e;
+      this.skipped.push({ name, reason: e.code });
+      return false;
+    }
+  }
+}
+
+/**
  * Reads the chosen files: `.webp`, `.tgs` and `.zip` (one level, no nested
  * archives). Bad sticker files are skipped with a reason; an unsafe archive,
  * too many stickers or nothing usable throw StickerError.
  */
 export async function importStickers(inputs: readonly ImportInput[]): Promise<StickerImport> {
-  const stickers: ImportedSticker[] = [];
-  const skipped: StickerImport['skipped'] = [];
-  const seen = new Set<string>();
-  let total = 0;
-  const add = async (name: string, type: StickerType, read: () => Promise<Uint8Array>): Promise<void> => {
-    try {
-      const s = await checkStickerFile(name, await read(), type);
-      if (seen.has(s.file)) {
-        skipped.push({ name, reason: 'duplicate' });
-        return;
-      }
-      if (stickers.length >= MAX_PACK_STICKERS) throw new StickerError('too-many-stickers');
-      total += s.size;
-      if (total > MAX_PACK_BYTES) throw new StickerError('too-large-total');
-      seen.add(s.file);
-      stickers.push(s);
-    } catch (e) {
-      if (!(e instanceof StickerError) || e.code === 'too-many-stickers' || e.code === 'too-large-total' || e.code === 'unsupported-browser') throw e;
-      skipped.push({ name, reason: e.code });
-    }
-  };
+  const acc = new PackAccumulator();
+  const { stickers, skipped } = acc;
+  const add = (name: string, type: StickerType, read: () => Promise<Uint8Array>) => acc.add(name, type, read);
 
   for (const input of inputs) {
     const lower = input.name.toLowerCase();

@@ -172,6 +172,8 @@ function renderHello(): void {
     [tr('Хранение', 'Kept for'), tr(`${h.retentionDays} дн.`, `${h.retentionDays} days`)],
     [tr('Предел файла', 'File limit'), `${h.maxFileMb} ${tr('МБ', 'MB')}`],
     ['Push', h.push ? tr('включён', 'on') : tr('выключен', 'off')],
+    // On or off only; the bot's name and state are for the administrator in the app.
+    ['Telegram', h.telegramStickers ? tr('стикеры по ссылке: включено', 'stickers by link: on') : tr('стикеры по ссылке: выключено', 'stickers by link: off')],
     [
       tr('Код администратора', 'Admin code'),
       h.adminCodeActive === false

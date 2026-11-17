@@ -61,6 +61,7 @@ describe('Transport', () => {
       maxEventBytes: 262144,
       adminCodeActive: true,
       offerSetup: false,
+      telegramStickers: true,
       commit: null,
       maxPartBytes: 4194560,
       maxBlobBytes: 200 * 1048576 + 65536,
@@ -72,6 +73,10 @@ describe('Transport', () => {
     const { t, calls } = client(() => json(hello));
     expect(await t.hello()).toEqual(hello);
     expect(calls[0]!.url).toBe('https://fc.test/v1/hello');
+    // An older server says nothing about Telegram: off.
+    const { telegramStickers: _, ...old } = hello;
+    const { t: t2 } = client(() => json(old));
+    expect((await t2.hello()).telegramStickers).toBe(false);
     expect(calls[0]!.init.credentials).toBe('omit');
     expect(calls[0]!.init.cache).toBe('no-store');
     expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBeUndefined();

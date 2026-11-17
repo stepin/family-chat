@@ -28,6 +28,8 @@ export interface Hello {
   time: number;
   adminCodeActive?: boolean;
   offerSetup?: boolean;
+  /** A Telegram bot token is set (sticker sets by link). */
+  telegramStickers?: boolean;
 }
 
 /** Why a check failed, in a shape both the page and the app can fill. */
@@ -243,6 +245,7 @@ export function formatReport(r: ReportInput): string {
         `  push ${h.push ? 'включён' : 'выключен'}, код администратора ${h.adminCodeActive === false ? 'уже использован' : 'действует'}`,
         `  push ${h.push ? 'on' : 'off'}, admin code ${h.adminCodeActive === false ? 'already used' : 'active'}`,
       ),
+      tr(`  стикеры Telegram по ссылке: ${h.telegramStickers ? 'включено' : 'выключено'}`, `  Telegram stickers by link: ${h.telegramStickers ? 'on' : 'off'}`),
       tr(`  часы сервера минус часы устройства: ${r.clockOffsetSec ?? '?'} с`, `  server clock minus device clock: ${r.clockOffsetSec ?? '?'} s`),
     );
   } else lines.push(tr(`hello: ОШИБКА ${r.hello.error} (${r.hello.ms} мс)`, `hello: FAILED ${r.hello.error} (${r.hello.ms} ms)`));

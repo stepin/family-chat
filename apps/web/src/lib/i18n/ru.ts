@@ -750,9 +750,66 @@ export const ru = {
           'unsupported-browser': 'этот браузер не умеет распаковывать архивы',
           unsupported: 'не стикер',
           duplicate: 'повтор',
+          video: 'видеостикер',
+          'download-failed': 'не загрузился',
         } as Record<string, string>
       )[code] ?? 'файл не подошёл',
     failed: (why: string) => `Не получилось: ${why}.`,
+    sourceTelegram: 'Ссылка из Telegram',
+    sourceFiles: 'Файлы',
+    linkLabel: 'Ссылка на набор',
+    linkHint: 'Например, https://t.me/addstickers/имя_набора. Видеостикеры пока не поддерживаются.',
+    load: 'Загрузить',
+    cancelLoad: 'Отмена',
+    tgOff: 'Загрузка по ссылке выключена на сервере. Попросите владельца сервера включить её.',
+    tgHowTo: 'Как включить (docs/ADMIN.md)',
+    replaceTitle: 'Заменить текущий черновик?',
+    replaceText: 'Набор, который вы ещё не опубликовали, пропадёт с этого экрана.',
+    replace: 'Заменить',
+    tgOpening: 'Открываем набор…',
+    tgWaiting: (n: number) => `Telegram просит подождать, продолжим через ${n} с`,
+    tgLoaded: (n: number, m: number) => `Загружено ${n} из ${m}`,
+    tgProgress: 'Загрузка набора из Telegram',
+    tgCancelled: 'Загрузка отменена',
+    tgSummary: (ready: number, video: number, failed: number) =>
+      [
+        `Готово ${ready}`,
+        ...(video > 0 ? [`видео не поддерживаются ${video}`] : []),
+        ...(failed > 0 ? [`не загрузились ${failed}`] : []),
+      ].join(' · '),
+    tgRetry: 'Повторить незагрузившиеся',
+    publishN: (n: number) => `Опубликовать ${n} ${plural(n, ['стикер', 'стикера', 'стикеров'])}`,
+    tgError: (code: string, reason: string | undefined, seconds: number | undefined, admin: boolean): string => {
+      switch (code) {
+        case 'telegram_disabled':
+          return admin
+            ? 'Загрузка по ссылке выключена на сервере. Задайте токен бота Telegram (инструкция в docs/ADMIN.md).'
+            : 'Загрузка по ссылке выключена на сервере. Попросите владельца сервера включить её.';
+        case 'not_found':
+          return 'Набор не найден. Проверьте ссылку.';
+        case 'telegram_unavailable':
+          return admin && reason === 'token_rejected'
+            ? 'Telegram отклонил токен бота, см. docs/ADMIN.md#telegram.'
+            : 'Telegram сейчас не отвечает, попробуйте позже.';
+        case 'telegram_busy':
+        case 'rate_limited':
+          return `Слишком много загрузок, попробуйте через ${seconds ?? 60} с.`;
+        case 'telegram_emoji_set':
+        case 'emoji_link':
+          return 'Это набор эмодзи, а не стикеров.';
+        case 'bad_link':
+        case 'bad_request':
+          return 'Нужна ссылка вида t.me/addstickers/…';
+        case 'video_only':
+          return 'В этом наборе только видеостикеры, их приложение пока не показывает.';
+        case 'no_stickers':
+          return 'Ни один стикер не загрузился. Попробуйте позже.';
+        case 'offline':
+          return 'Нет связи с сервером семьи. Проверьте интернет.';
+        default:
+          return 'Не удалось загрузить набор.';
+      }
+    },
   },
 
   share: {
@@ -944,6 +1001,14 @@ export const ru = {
     events: (n: number) => `Сообщений на сервере: ${n}`,
     serverVersion: (v: string) => `Версия сервера ${v}`,
     push: (on: boolean) => (on ? 'Уведомления на сервере включены' : 'Уведомления на сервере выключены'),
+    telegram: (on: boolean, bot: string | null, status: string): string =>
+      !on
+        ? 'Стикеры Telegram по ссылке: выключено (нет токена бота)'
+        : status === 'token_rejected'
+          ? 'Стикеры Telegram по ссылке: Telegram отклонил токен бота, см. docs/ADMIN.md#telegram'
+          : status === 'unavailable'
+            ? 'Стикеры Telegram по ссылке: Telegram не отвечает'
+            : `Стикеры Telegram по ссылке: включено${bot ? ` (бот @${bot})` : ''}`,
     loadFailed: 'Не удалось загрузить сведения с сервера.',
     check: 'Проверка сервера',
     checkLead: 'Проходят ли долгие запросы через ваш прокси и доходят ли уведомления до этого устройства.',

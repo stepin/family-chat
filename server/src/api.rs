@@ -891,6 +891,10 @@ pub async fn stats(State(st): State<Arc<AppState>>, Admin(_): Admin) -> Result<R
             "groups": m.chats.values().filter(|c| c.kind == ChatKind::Group).count(),
             "retentionDays": st.settings.retention_days,
             "push": st.settings.push,
+            "telegram": st.telegram.as_ref().map(|tg| {
+                let (health, bot) = tg.health();
+                json!({ "status": health.as_str(), "bot": bot })
+            }),
         })
     });
     Ok(Json(v).into_response())

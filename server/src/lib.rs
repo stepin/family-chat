@@ -21,6 +21,7 @@ pub mod notice;
 pub mod packs;
 pub mod ratelimit;
 pub mod store;
+pub mod telegram;
 pub mod tls;
 pub mod webpush;
 
@@ -41,7 +42,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Git commit of this build (12 hex digits), empty when unknown.
 pub const GIT_COMMIT: &str = env!("FCD_GIT_COMMIT");
 
-/// `0.1.0 (commit 0123456789ab)`, or `0.1.0` when the commit is unknown.
+/// `1.0.0 (commit 0123456789ab)`, or `1.0.0` when the commit is unknown.
 pub const VERSION_LINE: &str = env!("FCD_VERSION_LINE");
 
 /// The command line. Help texts are set at run time in the chosen language
@@ -82,6 +83,18 @@ pub struct Cli {
     /// Offer family setup on the first screen even when this server has a family.
     #[arg(long, value_name = "BOOL", value_parser = parse_bool)]
     pub offer_setup: Option<bool>,
+    /// Telegram bot token for sticker sets by link (secret; prefer the file or the variable).
+    #[arg(long, value_name = "TOKEN", value_parser = parse_secret)]
+    pub telegram_bot_token: Option<config::Secret>,
+    /// A file with the Telegram bot token.
+    #[arg(long, value_name = "FILE")]
+    pub telegram_bot_token_file: Option<String>,
+    /// Telegram Bot API address.
+    #[arg(long, value_name = "URL")]
+    pub telegram_api_url: Option<String>,
+    /// Allow http:// for the Bot API address beyond loopback.
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool)]
+    pub telegram_api_allow_http: Option<bool>,
     /// Web client from a folder.
     #[arg(long, value_name = "DIR")]
     pub web_dir: Option<PathBuf>,
@@ -105,6 +118,11 @@ pub fn parse_bool(v: &str) -> Result<bool, String> {
         "false" | "0" => Ok(false),
         _ => Err(lang::l("нужно true, false, 1 или 0", "expected true, false, 1 or 0").to_string()),
     }
+}
+
+/// A secret flag value (never echoed back in errors).
+fn parse_secret(v: &str) -> Result<config::Secret, String> {
+    Ok(config::Secret::new(v.trim()))
 }
 
 /// `mailto:` or `https://` contact for push services; errors give the value.
@@ -133,6 +151,10 @@ pub const ENV_VARS: &[(&str, &str)] = &[
     ("push_subject", "FCD_PUSH_SUBJECT"),
     ("min_free_mb", "FCD_MIN_FREE_MB"),
     ("offer_setup", "FCD_OFFER_SETUP"),
+    ("telegram_bot_token", "FCD_TELEGRAM_BOT_TOKEN"),
+    ("telegram_bot_token_file", "FCD_TELEGRAM_BOT_TOKEN_FILE"),
+    ("telegram_api_url", "FCD_TELEGRAM_API_URL"),
+    ("telegram_api_allow_http", "FCD_TELEGRAM_API_ALLOW_HTTP"),
     ("web_dir", "FCD_WEB_DIR"),
     ("tls_cert", "FCD_TLS_CERT"),
     ("tls_key", "FCD_TLS_KEY"),
@@ -235,6 +257,21 @@ impl Cli {
             && let Some((n, v)) = var("offer_setup")
         {
             self.offer_setup = Some(parse_bool(&v).map_err(|why| bad(n, &v, &why))?);
+        }
+        // The token is a secret: never part of an error message.
+        if self.telegram_bot_token.is_none() {
+            self.telegram_bot_token = var("telegram_bot_token").map(|(_, v)| config::Secret::new(v.trim()));
+        }
+        if self.telegram_bot_token_file.is_none() {
+            self.telegram_bot_token_file = var("telegram_bot_token_file").map(|(_, v)| v.trim().to_string());
+        }
+        if self.telegram_api_url.is_none() {
+            self.telegram_api_url = var("telegram_api_url").map(|(_, v)| v.trim().to_string());
+        }
+        if self.telegram_api_allow_http.is_none()
+            && let Some((n, v)) = var("telegram_api_allow_http")
+        {
+            self.telegram_api_allow_http = Some(parse_bool(&v).map_err(|why| bad(n, &v, &why))?);
         }
         if self.web_dir.is_none() {
             self.web_dir = var("web_dir").map(|(_, v)| PathBuf::from(v));
@@ -375,6 +412,26 @@ Logging: RUST_LOG=debug for more detail, NO_COLOR=1 for plain output.",
             "offer_setup",
             "Предлагать на первом экране «Настроить для своей семьи», даже когда семья на сервере уже есть: веб-приложение поможет настроить семью на другом сервере. Сервер по-прежнему держит одну семью [по умолчанию: false].",
             "Offer “Set up for my family” on the first screen even when this server already has a family: the web app helps set up a family on another server. The server still holds one family [default: false].",
+        ),
+        (
+            "telegram_bot_token",
+            "Токен бота Telegram для загрузки наборов стикеров по ссылке t.me/addstickers/…; пусто — выключено. Значение флага видно в списке процессов: лучше --telegram-bot-token-file или переменная.",
+            "Telegram bot token for loading sticker sets by link t.me/addstickers/…; empty: off. A flag value shows in the process list: prefer --telegram-bot-token-file or the variable.",
+        ),
+        (
+            "telegram_bot_token_file",
+            "Файл с токеном бота Telegram (секреты Docker и Podman).",
+            "A file with the Telegram bot token (Docker and Podman secrets).",
+        ),
+        (
+            "telegram_api_url",
+            "Адрес Telegram Bot API (свой telegram-bot-api без --local) [по умолчанию: https://api.telegram.org].",
+            "Telegram Bot API address (own telegram-bot-api without --local) [default: https://api.telegram.org].",
+        ),
+        (
+            "telegram_api_allow_http",
+            "Разрешить http:// в --telegram-api-url не только для 127.0.0.1 и localhost (своя сеть compose) [по умолчанию: false].",
+            "Allow http:// in --telegram-api-url beyond 127.0.0.1 and localhost (own compose network) [default: false].",
         ),
         (
             "web_dir",
@@ -630,6 +687,11 @@ impl Cli {
             trust_forwarded_for: self.trust_forwarded_for,
             offer_setup: self.offer_setup,
             lang: self.lang.clone(),
+            // An empty flag value turns loading by link off.
+            telegram_bot_token: self.telegram_bot_token.clone(),
+            telegram_bot_token_file: self.telegram_bot_token_file.clone(),
+            telegram_api_url: self.telegram_api_url.clone(),
+            telegram_api_allow_http: self.telegram_api_allow_http,
         }
     }
 }
@@ -829,6 +891,16 @@ pub async fn main_with(cli: Cli) -> i32 {
         }
     };
     app::spawn_maintenance(state.clone());
+    match &state.telegram {
+        Some(tg) => tg.spawn_check(),
+        None => tracing::info!(
+            "{}",
+            lang::l(
+                "Загрузка стикеров из Telegram: выключена (нет токена бота)",
+                "Loading stickers from Telegram: off (no bot token)"
+            )
+        ),
+    }
 
     tracing::info!(
         "{}",

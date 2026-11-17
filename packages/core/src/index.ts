@@ -29,7 +29,10 @@ export { StickerError, isStickerError } from './stickers/errors.ts';
 export type { StickerErrorCode } from './stickers/errors.ts';
 // The import pipeline (zip.ts, import.ts, tgs.ts) is reached through the facade
 // (importStickers, readTgs, stickerAnimation), which loads it on first use.
-export type { ImportInput, ImportedSticker, StickerImport } from './stickers/import.ts';
+export type { ImportInput, ImportedSticker, SkipReason, StickerImport, TelegramSource } from './stickers/import.ts';
+export { parseTelegramSetLink, TelegramImportError, isTelegramImportError } from './stickers/telegram-link.ts';
+export type { TelegramLink, TelegramImportCode } from './stickers/telegram-link.ts';
+export type { TelegramProgress, TelegramImportOptions } from './stickers/telegram.ts';
 export type { SanitizedLottie, LottieInfo } from './stickers/tgs.ts';
 export type { ZipLimits, ZipEntry } from './stickers/zip.ts';
 export { webpInfo } from './stickers/webp.ts';

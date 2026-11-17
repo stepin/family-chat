@@ -24,6 +24,8 @@ export interface Hello {
    * server has its family (to set one up on another server).
    */
   readonly offerSetup: boolean;
+  /** The server has a Telegram bot token: sticker sets load by link (false from older servers). */
+  readonly telegramStickers: boolean;
   /** Limits (docs/API.md 1.7). */
   readonly maxPartBytes: number;
   readonly maxBlobBytes: number;
@@ -263,6 +265,8 @@ export interface ServerStats {
   readonly groups: number;
   readonly retentionDays: number;
   readonly push: boolean;
+  /** Telegram sticker sets by link: null without a bot token. `status` is of the last real call. */
+  readonly telegram: { readonly status: 'unknown' | 'ok' | 'token_rejected' | 'unavailable'; readonly bot: string | null } | null;
 }
 
 // ---- groups, keys, blobs, avatars ----
@@ -334,4 +338,12 @@ export interface InviteCheck {
   readonly createdBy: { readonly userId: string; readonly name: string | null; readonly gender: 'm' | 'f' };
   readonly createdAt: number;
   readonly expiresAt: number;
+}
+
+/** `GET /v1/telegram/sets/{name}`. */
+export interface TelegramSet {
+  readonly name: string;
+  readonly title: string;
+  readonly stickers: readonly { readonly id: string; readonly emoji: string | null; readonly type: 'webp' | 'tgs' }[];
+  readonly skipped: { readonly video: number; readonly other: number };
 }

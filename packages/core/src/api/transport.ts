@@ -39,6 +39,7 @@ import type {
   PushSubscriptionInput,
   ServerEvent,
   ServerStats,
+  TelegramSet,
   UserEntry,
 } from './types.ts';
 
@@ -66,6 +67,9 @@ export interface TransportOptions {
   readonly timeoutMs?: number;
   readonly onExchange?: (info: ExchangeInfo) => void;
 }
+
+/** Timeout of the Telegram routes: the server answers within 40 s. */
+export const TELEGRAM_TIMEOUT_MS = 45_000;
 
 /** Longest `wait` the server accepts, seconds. */
 export const MAX_WAIT_SECONDS = 30;
@@ -136,6 +140,7 @@ export class Transport {
       maxEventBytes: num(o, 'maxEventBytes'),
       adminCodeActive: bool(o, 'adminCodeActive'),
       offerSetup: bool(o, 'offerSetup'),
+      telegramStickers: o.telegramStickers === true,
       maxPartBytes: num(o, 'maxPartBytes'),
       maxBlobBytes: num(o, 'maxBlobBytes'),
       maxAvatarBytes: num(o, 'maxAvatarBytes'),
@@ -605,6 +610,7 @@ export class Transport {
       groups: num(o, 'groups'),
       retentionDays: num(o, 'retentionDays'),
       push: bool(o, 'push'),
+      telegram: telegramState(o.telegram),
     };
   }
 
@@ -655,6 +661,50 @@ export class Transport {
     );
     if (!isObject(o.last)) return null;
     return { at: num(o.last, 'at'), result: str(o.last, 'result') };
+  }
+
+  // ---- Telegram sticker sets ----
+
+  /** The list of a Telegram sticker set (the server asks Telegram; 45 s timeout). */
+  async telegramSet(token: string, name: string, signal?: AbortSignal): Promise<TelegramSet> {
+    const o = obj(
+      await this.#json({
+        method: 'GET',
+        path: `/v1/telegram/sets/${encodeURIComponent(name)}`,
+        template: '/v1/telegram/sets/{name}',
+        token,
+        signal,
+        timeoutMs: TELEGRAM_TIMEOUT_MS,
+      }),
+      'telegram set',
+    );
+    const skipped = isObject(o.skipped) ? o.skipped : {};
+    return {
+      name: str(o, 'name'),
+      title: str(o, 'title'),
+      stickers: arr(o, 'stickers').map((v) => {
+        const s = obj(v, 'telegram sticker');
+        const type = s.type === 'tgs' ? 'tgs' : s.type === 'webp' ? 'webp' : null;
+        if (!type) throw unexpected('telegram sticker');
+        return { id: str(s, 'id'), emoji: nullableStr(s, 'emoji'), type };
+      }),
+      skipped: {
+        video: typeof skipped.video === 'number' ? skipped.video : 0,
+        other: typeof skipped.other === 'number' ? skipped.other : 0,
+      },
+    };
+  }
+
+  /** One file of a Telegram sticker set, by its id from the list. */
+  async telegramFile(token: string, name: string, id: string, signal?: AbortSignal): Promise<Uint8Array> {
+    return this.#bytes({
+      method: 'GET',
+      path: `/v1/telegram/sets/${encodeURIComponent(name)}/files/${encodeURIComponent(id)}`,
+      template: '/v1/telegram/sets/{name}/files/{id}',
+      token,
+      signal,
+      timeoutMs: TELEGRAM_TIMEOUT_MS,
+    });
   }
 
   // ---- plumbing ----
@@ -856,6 +906,12 @@ function arr(o: Obj, k: string): unknown[] {
 function envelope(v: unknown, what: string): SignedEnvelope {
   const o = obj(v, what);
   return { payload: str(o, 'payload'), sig: str(o, 'sig') };
+}
+
+function telegramState(v: unknown): ServerStats['telegram'] {
+  if (!isObject(v)) return null;
+  const status = v.status === 'ok' || v.status === 'token_rejected' || v.status === 'unavailable' ? v.status : 'unknown';
+  return { status, bot: typeof v.bot === 'string' && v.bot ? v.bot : null };
 }
 
 function issued(v: unknown): IssuedToken {

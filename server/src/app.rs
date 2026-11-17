@@ -48,6 +48,8 @@ pub struct AppState {
     pub limiter: RateLimiter,
     /// Server checks (`/v1/check/*`): pending delayed pushes, last outcomes.
     pub checks: Checks,
+    /// Telegram sticker sets by link; `None` without a bot token.
+    pub telegram: Option<Arc<crate::telegram::Telegram>>,
 }
 
 impl AppState {
@@ -73,6 +75,7 @@ impl AppState {
         let packs = PackStore::open(&dir.path, settings.min_free_mb);
         Ok(Arc::new(AppState {
             push: settings.push.then(|| PushClient::new(settings.push_subject.clone())),
+            telegram: settings.telegram.as_ref().map(crate::telegram::Telegram::new),
             settings,
             server_id: dir.server.server_id.clone(),
             vapid: dir.vapid.clone(),
@@ -144,6 +147,8 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(packs::get).put(packs::publish).delete(packs::delete),
         )
         .route("/v1/packs/{id}/files/{hash}", get(packs::get_file).put(packs::put_file))
+        .route("/v1/telegram/sets/{name}", get(crate::telegram::get_set))
+        .route("/v1/telegram/sets/{name}/files/{id}", get(crate::telegram::get_file))
         .route("/v1/admin/invites", post(api::create_invite).get(api::list_invites))
         .route("/v1/admin/invites/{id}", delete(api::delete_invite))
         .route("/v1/admin/users", get(api::admin_users))
@@ -191,7 +196,7 @@ async fn cors(req: Request, next: Next) -> Response {
     );
     h.insert(
         header::ACCESS_CONTROL_EXPOSE_HEADERS,
-        HeaderValue::from_static("Retry-After"),
+        HeaderValue::from_static("Retry-After, X-Request-Id"),
     );
     h.insert(header::ACCESS_CONTROL_MAX_AGE, HeaderValue::from_static("86400"));
     res
@@ -247,6 +252,7 @@ async fn hello(State(st): State<Arc<AppState>>) -> Response {
         "maxPackBytes": crate::envelope::MAX_PACK_BYTES,
         "adminCodeActive": st.store.read(|m| !m.server.admin_code_hash.is_empty()),
         "offerSetup": s.offer_setup,
+        "telegramStickers": st.telegram.is_some(),
     }))
     .into_response()
 }
