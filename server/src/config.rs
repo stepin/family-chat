@@ -359,7 +359,8 @@ retention_days = {retention}
 # Предел размера одного файла, МБ.
 max_file_mb = {max_file}
 
-# Уведомления Web Push. false: сервер не обращается ни к каким внешним адресам.
+# Уведомления Web Push. false: сервер не обращается к push-сервисам
+# (без токена Telegram ни к каким внешним адресам).
 push = {push}
 
 # Контакт для push-сервисов (RFC 8292): mailto:адрес или https://адрес.
@@ -399,7 +400,8 @@ retention_days = {retention}
 # Size limit of one file, MB.
 max_file_mb = {max_file}
 
-# Web Push notifications. false: the server never contacts any outside address.
+# Web Push notifications. false: the server never contacts push services
+# (without a Telegram token, no outside address at all).
 push = {push}
 
 # Contact for push services (RFC 8292): mailto:address or https://address.

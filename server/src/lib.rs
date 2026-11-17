@@ -383,8 +383,8 @@ Logging: RUST_LOG=debug for more detail, NO_COLOR=1 for plain output.",
         ),
         (
             "push",
-            "Уведомления Web Push; false: сервер не обращается ни к каким внешним адресам [по умолчанию: true].",
-            "Web Push notifications; false: the server never contacts any outside address [default: true].",
+            "Уведомления Web Push; false: сервер не обращается к push-сервисам (без токена Telegram ни к каким внешним адресам) [по умолчанию: true].",
+            "Web Push notifications; false: the server never contacts push services (without a Telegram token, no outside address at all) [default: true].",
         ),
         (
             "trust_forwarded_for",

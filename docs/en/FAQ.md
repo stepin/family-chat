@@ -24,7 +24,7 @@ In order:
    `push_subject` in `config.toml`; Apple wants a contact that looks real), then restart the server.
 
 The administrator can test delivery: in the app, Settings → Family and server → Server check → "Send a test
-notification" (before the family is set up, the `/server/` page does the same with the admin code). If nothing
+notification" (before the family is set up, the `/server/` page does the same with the server admin code). If nothing
 arrives, look for the server log lines `test push sent` and `delayed test push failed`. More:
 [installation](ADMIN.md#server-check).
 

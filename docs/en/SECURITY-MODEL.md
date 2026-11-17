@@ -13,9 +13,25 @@ Most important: Family Chat uses its own cryptographic protocol, and it **has no
 - The server knows who is in the family, who talks to whom, when and how much. It could not deliver messages
   otherwise.
 - The app comes from the server whose address you opened it from, and whoever runs that server is a trusted party:
-  if they want to, they can technically replace the app and get the keys. Usually that is your family's server. If
-  the family was set up through the app of someone else's server (one started with `--offer-setup`), you trust its
-  owner as well.
+  if they want to, they can technically replace the app and get the keys. Usually that is your family's server.
+
+## Several families on one server
+
+Families on one `fcd` are meant for families of one server owner that trust each other.
+
+- **Separate:** each family's serverId, device tokens, data (messages, members, groups, files, stickers), join codes
+  and administrators. The server gives a family's data only to its members, at its address.
+- **Shared by every family of the server:** one process and one disk (one storage quota), the VAPID notification
+  key, the Telegram token, the limit on wrong codes. In the browser all families of one server open from one origin:
+  one IndexedDB database on the device (as for all families on a device today) and one service worker.
+- **Identity keys are shared** when a person joins a second family with the same identity (the default in “Add
+  family”): the same userId, fingerprint and recovery words, and both families can tell it is one person.
+- Whoever has the server admin code can create families, and `fcd families list` on the server shows their names.
+  The server's administrator, as with one family, sees the metadata of every family and could technically replace
+  the app.
+
+The word “isolated” does not apply to families of one server without these caveats. A fully separate family: a
+second `fcd` with its own data folder at its own address.
 
 ## What the server sees
 
@@ -79,7 +95,10 @@ person or by phone and marked as checked. If the key of someone you know changes
 - **Protection from malware** on the phone or computer.
 - **Anonymity.** The Apple, Google and Mozilla push services learn when notifications happen and the server address
   (not content or names: the payload is encrypted for the browser). The internet provider sees that you connect to
-  the server. The administrator can switch notifications off entirely; then the server contacts no outside address.
+  the server. The administrator can switch notifications off entirely; then the server contacts no push service (and no outside
+  address at all unless a Telegram token is set).
+- **Telegram**, when sticker sets are loaded by link, sees the server's address and the names of the sets members
+  load. The server keeps the bot token; members never see it; without a token the server never contacts Telegram.
 
 ## What leaves the device besides messages
 
@@ -94,9 +113,8 @@ person or by phone and marked as checked. If the key of someone you know changes
 
 The app opens only from your own server: the project site does not carry it, the site and the server are not
 connected. When you open the app you trust whoever runs the server whose address you opened it from. Usually that is
-your family's administrator. If a server runs with `--offer-setup` and its app was used to set up a family on
-another server, the app still comes from the first server, and its owner stays a trusted party
-([installation](ADMIN.md#settings)).
+your family's administrator. If the app of one server was used to add a family on another server, the app still
+comes from the first server, and its owner stays a trusted party.
 
 ## More
 

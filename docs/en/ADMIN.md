@@ -75,37 +75,52 @@ INFO слушаю 0.0.0.0:8787 (HTTP)
 INFO откройте http://192.168.1.10:8787/ (приложение)
 INFO откройте http://192.168.1.10:8787/server/ (проверка сервера)
 INFO первый запуск: папка данных создана
-INFO код администратора: 7K3D-XXXX-XXXX-XXXX
+INFO код администратора сервера: 7K3D-XXXX-XXXX-XXXX
 INFO дальше: откройте приложение, нажмите “Set up for my family” и введите этот код
 ```
 
-The **administrator code** (`код администратора`) is shown once; keep it. Then:
+(With `--lang en` the same lines are in English.) The **server admin code** (`код администратора сервера`) is shown
+once; keep it like a password. It is reusable and does one thing only: it creates families on this server. Nobody
+joins a family with it. Then:
 
 1. Set up HTTPS (next section) and open the server address in a phone or computer browser. Without HTTPS the app
-   works only on the same computer at `http://localhost:8787/`.
+   works only on the same computer at `http://localhost:8787/`. The app sends the server code only over HTTPS (or
+   to this same computer).
 2. Press “Set up for my family”, enter the server address and the code.
 3. Enter your name, write down the 24 recovery words (the app checks three of them) and create the first
-   invitation. Whoever joins with the code becomes the administrator.
+   invitation. On a fresh server this sets up the root family (at the server's own address) and you become its
+   administrator. The same code later creates other families on this server ([Several families on one
+   server](#several-families-on-one-server)).
 
 To stop: Ctrl+C or SIGTERM. The server waits for open requests for at most 10 seconds. A second instance on the
 same folder refuses to start and says so.
 
-### Lost code
+### Two kinds of codes
 
-Stop the server and issue a new code; the old one stops working:
+- **The server admin code** is one per server and reusable. It only creates families (in the app: “Set up for my
+  family”). A new code (the old one stops working), with the server stopped:
 
-```sh
-fcd reset-admin-code --data /var/lib/family-chat
-```
+  ```sh
+  fcd reset-admin-code --data /var/lib/family-chat
+  ```
 
-The code works once: whoever joins with it becomes an administrator and the code stops working. A new code from
-`reset-admin-code` is one-time as well; it helps when every administrator has lost access. Relatives join with
-invitations.
+  A server that ran version 0.1.0 has no server code: run this command once.
+- **A family's join code** belongs to one family and works once: whoever joins with it becomes an administrator of
+  that family, and the code stops working. It is a setup code (creating a family gives one; it lasts 1 hour) or a
+  recovery code, when every administrator of the family has lost access:
 
-While the code is active, the app's first screen offers everyone "Set up for my family". After `reset-admin-code`
-the button is back for everyone until someone joins with the new code: that is the point, the code is reset so that
-a new administrator can join. Checking the server does not need a reset: the administrator checks it in the app
-(section [Server check](#server-check)).
+  ```sh
+  fcd families list --data /var/lib/family-chat          # family ids
+  fcd reset-admin-code --data /var/lib/family-chat --family root     # the root family
+  fcd reset-admin-code --data /var/lib/family-chat --family <id>     # another family
+  ```
+
+  The recovery code is entered in the app as the admin code when joining the family; a member who joins with it
+  becomes an administrator.
+
+Relatives join with invitations. The first screen always shows “Set up for my family”, with a line under it saying
+that a code from the server owner is needed. Checking the server does not need a reset: the administrator checks
+it in the app (section [Server check](#server-check)).
 
 ### A second administrator
 
@@ -117,7 +132,9 @@ fcd admin list --data /var/lib/family-chat
 fcd admin add <userId> --data /var/lib/family-chat
 ```
 
-`fcd admin list` shows each member's `userId`, name and role.
+`fcd admin list` shows each member's `userId`, name and role. Without `--family` the commands work on the root
+family, with `--family <id>` on another family of this server. Commands with `--family` also need the server
+stopped: that stops every family of the server.
 
 ## Settings
 
@@ -134,30 +151,29 @@ anything.
 | `--data` | `FCD_DATA` | | | data folder (needed to start; in the Docker image `/data`) |
 | `--port` | `FCD_PORT` | `port` | `8787` | port |
 | `--listen` | `FCD_LISTEN` | `listen` | `0.0.0.0` | address; `127.0.0.1` when the proxy is on the same computer |
-| `--family-name` | `FCD_FAMILY_NAME` | `family_name` | `Семья` (`Family` in English) | family name everyone sees |
+| `--family-name` | `FCD_FAMILY_NAME` | `family_name` | `Семья` (`Family` in English) | name of the root family, everyone in it sees it |
 | `--retention-days` | `FCD_RETENTION_DAYS` | `retention_days` | `90` | how many days the server keeps messages and files (7 to 90) |
 | `--max-file-mb` | `FCD_MAX_FILE_MB` | `max_file_mb` | `200` | size limit of one file, MB |
-| `--push` | `FCD_PUSH` | `push` | `true` | notifications; `false`: the server never contacts outside addresses |
+| `--push` | `FCD_PUSH` | `push` | `true` | notifications; `false`: the server never contacts push services (without a Telegram token, no outside address at all) |
 | `--trust-forwarded-for` | `FCD_TRUST_FORWARDED_FOR` | `trust_forwarded_for` | `false` | take the client address from `X-Forwarded-For` (only behind a proxy) |
 | `--lang` | `FCD_LANG` | `lang` | see below | language of the server's messages: `ru` or `en` |
 | `--tls-cert`, `--tls-key` | `FCD_TLS_CERT`, `FCD_TLS_KEY` | | | HTTPS with your own certificate files (both are needed) |
 | `--web-dir` | `FCD_WEB_DIR` | | | serve the app from a folder (development) |
 | `--push-subject` | `FCD_PUSH_SUBJECT` | `push_subject` | `mailto:fcd-admin@example.org` | contact for the Apple, Google and Mozilla push services: `mailto:` or `https://` |
 | `--min-free-mb` | `FCD_MIN_FREE_MB` | `min_free_mb` | `100` | below this much free space, MB, the server refuses new data; `0`: no check |
-| `--offer-setup` | `FCD_OFFER_SETUP` | `offer_setup` | `false` | offer "Set up for my family" even when the server already has its family |
+| `--telegram-bot-token` | `FCD_TELEGRAM_BOT_TOKEN` | `telegram_bot_token` | | Telegram bot token for sticker sets by link ([Telegram](#telegram)); empty: off |
+| `--telegram-bot-token-file` | `FCD_TELEGRAM_BOT_TOKEN_FILE` | `telegram_bot_token_file` | | a file with the token (Docker and Podman secrets) |
+| `--telegram-api-url` | `FCD_TELEGRAM_API_URL` | `telegram_api_url` | `https://api.telegram.org` | Bot API address (own telegram-bot-api) |
+| `--telegram-api-allow-http` | `FCD_TELEGRAM_API_ALLOW_HTTP` | `telegram_api_allow_http` | `false` | allow `http://` in the Bot API address beyond this computer |
 
 **Contact for push services.** Some push services reject the default `mailto:fcd-admin@example.org`. Set your own:
 `--push-subject mailto:you@example.com` (or `FCD_PUSH_SUBJECT`, or `push_subject` in `config.toml`). A wrong value
 stops the server with an error that names the source and the value.
 
-**One family per server.** The server holds one family. While it has no administrator, the app's first screen
-offers "Set up for my family"; once the administrator has joined, the button is gone and a line under the actions
-says the server already has a family and one joins by invitation. With `--offer-setup true` the button stays: the
-web app offers to set up a new family on another server (the address field is empty; one types the address of
-their own server). The server still holds one family. Note that whoever sets up a family through the app of
-someone else's server also trusts that server's owner ([security model](SECURITY-MODEL.md)).
+**`--offer-setup` is gone in 1.0.0.** Remove the `offer_setup` line from `config.toml` (version 0.1.0 wrote it)
+before starting 1.0.0; otherwise the server and `fcd reset-admin-code` stop with an error that names this line.
 
-The commands `healthcheck`, `reset-admin-code` and `admin` read the same variables where they apply (`FCD_DATA`,
+The commands `healthcheck`, `reset-admin-code`, `families` and `admin` read the same variables where they apply (`FCD_DATA`,
 `FCD_PORT`, `FCD_LISTEN`, `FCD_LANG`). Other `FCD_*` names are ignored (`FCD_GIT_COMMIT` and `FCD_BIN` belong to the
 build and the tests).
 
@@ -167,6 +183,93 @@ system locale (`LC_ALL`, `LC_MESSAGES`, `LANG`), else Russian. The examples in t
 few lines come from the `clap` library and stay in English in the Russian help: some rare command-line errors.
 
 The full list with explanations: `fcd --help`. Detailed log: environment variable `RUST_LOG=debug`.
+
+## Several families on one server
+
+One `fcd` holds several families. The root family answers at the server's own address (`https://chat.example.org`),
+every other one at its own address `https://chat.example.org/f/<id>` (`<id>` is 16 lowercase letters and digits).
+To the app each such family is a server of its own: its own serverId, members, invitations
+`https://chat.example.org/f/<id>/#invite=…`, administrators and codes.
+
+**Create a family.** In the app: “Set up for my family” (or “Add a family”, “I am an administrator: a new
+family”), the server address, the server admin code, the family name (names differ on one server, ignoring case).
+The app joins the new family at once with its setup code, you become its administrator, and the “Done” screen shows
+the family address and an invitation for relatives. The app has no list of families of a server.
+
+**List of families:** `fcd families list --data …` shows the id, name and state of each family (set up, not set up,
+broken). The command only reads and works while the server runs.
+
+**Shared and separate.** Shared by the whole server: port and address, HTTPS, notifications (on/off and
+`push_subject`), the notification key `vapid.json`, retention, file limit, `min_free_mb`, the Telegram token, the
+log language, the limit on wrong codes. Separate per family: serverId, name, join code, administrators, members and
+all data.
+
+**Data folder.** The root family lives in the folder itself, as before. Other families live in `families/<id>/`
+with the same layout but without their own `fcd.lock`, `config.toml` and `vapid.json`. The server is never started
+on a family folder by itself (`fcd --data …/families/<id>` refuses and suggests `--family`).
+
+**The proxy** must pass the paths `/f/…`; the Caddy and nginx examples below proxy the whole `/`, which is enough.
+
+**A broken family.** If a family's `server.json` or folder cannot be read, the server starts anyway: the log names
+the family and the reason, and its address answers “the family is temporarily unavailable” (503). Restore
+`families/<id>` from a backup, or move the folder out of `families/` and restart the server. `fcd healthcheck` still
+exits 0 then (otherwise the container with every family would restart) and prints broken families as warnings;
+with `--strict` they give exit code 1.
+
+**A family created by mistake:** stop the server, move the folder `families/<id>` away (for example into your
+backups), start the server. Removing a family from the app is not available yet.
+
+**Cost.** Each family takes its own writer thread and memory for the indexes of its data. Measured on macOS (debug
+build, 17.11.2026): a server with one family uses about 11 MB of memory, with the root and 20 empty families about
+14 MB, and starts with 20 families in under 0.1 seconds.
+
+**The alternative:** a second `fcd` with its own data folder at its own address (a subdomain or a port) still
+works. It is fully separate but needs a second address and certificate.
+
+## Telegram
+
+Telegram sticker sets are added in the app by their link `https://t.me/addstickers/<name>`. Telegram serves sets
+only through the Bot API with a bot token. The server keeps the token; family members never see it. Video stickers
+(`.webm`) are skipped for now.
+
+1. In Telegram open @BotFather, send `/newbot`, choose a name and get a token like `123456:ABC…`.
+2. Give the token to the server in one of these ways and restart the server:
+   - the variable `FCD_TELEGRAM_BOT_TOKEN` (best in a container);
+   - a file with the token: `--telegram-bot-token-file /run/secrets/telegram_bot_token` (Docker and Podman secrets);
+   - the line `telegram_bot_token = "…"` in `config.toml`;
+   - the flag `--telegram-bot-token` (its value shows in the process list, so prefer the others).
+
+   Docker:
+
+   ```sh
+   docker run -d --name fcd --restart unless-stopped \
+     -p 127.0.0.1:8787:8787 -v fcd-data:/data \
+     -e FCD_TELEGRAM_BOT_TOKEN=123456:ABC... \
+     ghcr.io/stepin/fcd:latest
+   ```
+
+   compose (`environment:` of the `fcd` service): `FCD_TELEGRAM_BOT_TOKEN: "123456:ABC..."`. Podman Quadlet (in
+   `[Container]`): `Environment=FCD_TELEGRAM_BOT_TOKEN=123456:ABC...` or `Secret=telegram_bot_token,type=env,target=FCD_TELEGRAM_BOT_TOKEN`.
+   systemd: the line `FCD_TELEGRAM_BOT_TOKEN=123456:ABC...` in the service's environment file.
+3. At start the server writes one line: “Loading stickers from Telegram: on (bot @name)”, “Telegram rejected the
+   token” or “Telegram is unreachable”. The administrator sees the same in the app: Settings, Family and server;
+   the `/server/` page shows only “on” or “off”.
+
+The token is a secret, like a password. A new token: edit and restart; an empty value turns loading by link off.
+The server never writes the token into a new `config.toml` and never logs it (request addresses show `bot***`
+instead). If you put the token into `config.toml`, it is in your backups too.
+
+With a token the server contacts `api.telegram.org`: Telegram sees the server's address and the names of the sets
+members load. Your own Bot API server: `--telegram-api-url https://…` (`http://` only for this computer or with
+`--telegram-api-allow-http true`, for example inside a compose network). The `--local` mode of telegram-bot-api is
+not supported.
+
+Limits (for the whole server, all families together): at most 20 requests to Telegram per second and 2 set loads
+at once; a wait in the queue of at most 15 seconds, then the answer “Telegram asks to wait” (503
+`telegram_busy`). After a Telegram 429 the whole server waits the time it names. Per device: at most 3 files at
+once and 300 requests per 10 minutes. Each request has one 40-second deadline, a single call to Telegram 15
+seconds. A set's list is kept in memory for 10 minutes (at most 256 sets). Files: `.webp` up to 512 KB, `.tgs` up
+to 128 KB.
 
 ## HTTPS
 
@@ -187,7 +290,8 @@ through:
   whole family share one counter (10 a minute); so turn it on behind your own proxy.
 
 If the proxy runs on the same computer, start the server with `--listen 127.0.0.1` so that nobody can bypass the
-proxy.
+proxy. The proxy must also pass the paths `/f/…` (other families of this server): the examples below proxy the
+whole `/`.
 
 **Caddy** obtains and renews a Let's Encrypt certificate by itself if the domain points to your address and ports 80
 and 443 are forwarded to the Caddy computer. By default it limits neither response time nor body size, so three
@@ -260,7 +364,7 @@ A health check is built in: `fcd healthcheck`.
 docker run -d --name fcd --restart unless-stopped \
   -p 127.0.0.1:8787:8787 -v fcd-data:/data \
   ghcr.io/stepin/fcd:latest
-docker logs fcd 2>&1 | grep -E 'код администратора|admin code'
+docker logs fcd 2>&1 | grep -E 'код администратора сервера|server admin code'
 ```
 
 `latest` is the latest release. To pin a version, use its tag, for example `ghcr.io/stepin/fcd:1.0.0` (the same
@@ -408,6 +512,10 @@ Windows the data folder is protected by the permissions of your account; the ser
 The data folder format has a version number. A new server upgrades an older folder by itself; an older server does
 not start on a newer folder. So make a backup before updating (next section): it is the only way back.
 
+**From 0.1.0 to 1.0.0:** remove the `offer_setup` line from `config.toml`, start 1.0.0 and run
+`fcd reset-admin-code` once (with the server stopped) to get the server admin code for new families. The root
+family and its data stay as they were.
+
 - **Binary:** stop the server, replace `fcd`, start.
 - **Docker:** `docker pull ghcr.io/stepin/fcd:latest`, then remove and recreate the container
   with the same volume (`docker compose pull && docker compose up -d`).
@@ -436,6 +544,9 @@ docker start fcd
 Restore: stop the server, replace the data folder with the backup's contents (same owner), start. The same works
 on another computer: the backup moves the whole server, including device logins and notification keys.
 
+A backup of the data folder includes every family of the server (the `families/` folder). If you put the Telegram
+token into `config.toml`, it is in the backup too.
+
 What is in the backup: the ciphertext of messages and files, members' public keys and profiles (profile names and
 photos are not encrypted), who is in which chat, the notification key `vapid.json`. Nobody can read the messages
 from it, but keep it as carefully as the folder itself. If `vapid.json` is deleted, the server creates new keys and
@@ -462,7 +573,8 @@ lives only on phones and in archive files ([family guide](FAMILY.md#message-arch
   one person for 7 days and only once. A revoked invitation stops working at once.
 - **Disconnecting a member** happens there too. Their devices stop receiving and sending at once; history already
   received stays with everyone. Owners of groups they were in get a service message.
-- Wrong codes and signatures are limited: at most 10 failures per minute from one address.
+- Wrong codes and signatures are limited: at most 10 failures per minute from one address, shared by every family
+  of the server (together with wrong server admin codes).
 
 ## Server check
 
@@ -470,8 +582,9 @@ Two checks show whether all is well between a phone and the server: the **long r
 gets through your proxy or tunnel; if it breaks earlier, raise the proxy's timeout) and the **test notification**
 (whether notifications reach this phone). The checks are always on; no flag is needed.
 
-- **Before setup**, while nobody has joined with the admin code: the page `https://<your server>/server/` with the
-  admin code. It also shows that the server answers: family name, version, retention, the clock difference.
+- **Before setup**, while the root family is not set up: the page `https://<your server>/server/` with the server
+  admin code (or the family's join code). It also shows that the server answers: family name, version, retention,
+  the clock difference, Telegram. Another family is checked on its own page `https://<your server>/f/<id>/server/`.
 - **After setup**: in the administrator's app, Settings → Family and server → Server check. The admin code is used
   up by then; the app checks the server with its own sign-in. Ordinary members do not see the section; their
   Diagnostics says the administrator does the check.
@@ -490,6 +603,9 @@ comes from `--port` or from `config.toml` in `--data`; it also works with `--tls
 ```sh
 fcd healthcheck --data /var/lib/family-chat
 ```
+
+Broken families (see [Several families](#several-families-on-one-server)) are printed as warnings and do not change
+the exit code; with `--strict` they give exit code 1.
 
 ## What has been tested
 

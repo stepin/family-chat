@@ -26,7 +26,7 @@ Docker (образ `ghcr.io/stepin/fcd`; `latest` это последний вы
 docker run -d --name fcd --restart unless-stopped \
   -p 127.0.0.1:8787:8787 -v fcd-data:/data \
   ghcr.io/stepin/fcd:latest
-docker logs fcd 2>&1 | grep -E 'код администратора|admin code'
+docker logs fcd 2>&1 | grep -E 'код администратора сервера|server admin code'
 ```
 
 Готовый файл для своей системы со страницы выпусков (https://github.com/stepin/family-chat/releases):
@@ -36,7 +36,7 @@ tar xzf fcd-<версия>-x86_64-unknown-linux-musl.tar.gz
 ./fcd-<версия>-x86_64-unknown-linux-musl/fcd --data ./family-chat-data
 ```
 
-При первом запуске сервер печатает адрес и одноразовый код администратора. Приложению нужен HTTPS: поставьте перед
+При первом запуске сервер печатает адрес и код администратора сервера (многоразовый: им создают семьи, один сервер держит несколько семей). Приложению нужен HTTPS: поставьте перед
 сервером обратный прокси (Caddy, nginx, NAS) или дайте ему свои файлы сертификата. Затем откройте адрес, нажмите
 «Настроить для своей семьи» и введите код. Подробно: [установка сервера](docs/ADMIN.md).
 

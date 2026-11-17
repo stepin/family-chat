@@ -97,12 +97,22 @@ app's data: this happens when the phone is low on space or the app is not instal
 
 ## Several families
 
-One app can be in several families, each with its own server: “Settings”, “Families on this device”, “Add family”. You can join with the same identity (one set of words for
-all families) or a separate one (own words per family). Families never mix, and data of one family never goes to
-another family's server.
+One app can be in several families, each with its own address: “Settings”, “Families on this device”, “Add family”.
+One server can hold several families: the root family then has the server's own address and the others an address
+like `https://chat.example.org/f/…`; another family on the same server opens by its own invitation link. You can
+join with the same identity (one set of words for all families) or a separate one (own words per family). Families
+never mix, and data of one family never goes to another family's address.
 
-Notifications on one device come from one family only: that is how browsers work. Other families receive messages
-while the app is open.
+If the app is already on the device, add the second family inside it (“Add family” or the invitation link) rather
+than installing a second icon: then all families are in one app.
+
+Notifications come from every family of one server; from families on different servers only from one (that is how
+browsers work), the others receive messages while the app is open. With several families on the device a
+notification starts with the family's name: “Ivanovs · Mom”. Turning notifications on in one family turns them on
+for the other families of the same server too; turning them off works for each family separately.
+
+Whoever has the server admin code (the server owner gives it) can create a new family: “Set up for my family” on
+the first screen, or “Add family”, “I am an administrator: a new family”.
 
 ## If the phone is lost or someone saw the words
 
@@ -144,6 +154,8 @@ and new history show as one conversation.
   you open.
 - **Photos** are made smaller before sending. “Send original” sends the file as is, including
   the location and time of shooting inside it.
+- **Telegram sticker sets** can be added by their link `https://t.me/addstickers/…` (“Settings”, “Sticker packs”,
+  “Telegram link”) when the server owner turned this on; video stickers are not supported yet.
 - **Stickers** are stored on the family server without encryption: everybody in the family and whoever runs the
   server can see them. Do not make stickers from private photos.
 - **A new group member** sees the group history still on the server. The group owner can add someone "without the
