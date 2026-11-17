@@ -465,8 +465,23 @@ pub async fn delete_push(State(st): State<Arc<AppState>>, Auth(c): Auth) -> Resu
 /// Devices that get a push for a new event: every subscribed device of the
 /// chat's members, the sender's other devices included, except the device
 /// that sent it. Removed and revoked users get nothing.
+///
+/// One browser has one push subscription for all accounts of this fcd on it
+/// (several people on one device, see apps/web/src/lib/push.ts), so the
+/// devices are matched by endpoint: nothing goes to the endpoint of the
+/// sending device (it would notify its own author), and each endpoint gets
+/// one push.
 pub fn push_targets(m: &Mem, chat: &Chat, sender: &UserId, sender_dev: &DevId) -> Vec<(UserId, DevId, Subscription)> {
     let mut out = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    if let Some(s) = m
+        .users
+        .get(sender)
+        .and_then(|u| u.devices.get(sender_dev))
+        .and_then(|d| d.push.as_ref())
+    {
+        seen.insert(s.endpoint.clone());
+    }
     for uid in chat.unique_members() {
         let Some(u) = m.users.get(&uid).filter(|u| u.active()) else {
             continue;
@@ -475,7 +490,9 @@ pub fn push_targets(m: &Mem, chat: &Chat, sender: &UserId, sender_dev: &DevId) -
             if uid == *sender && dev == sender_dev {
                 continue;
             }
-            if let Some(s) = &d.push {
+            if let Some(s) = &d.push
+                && seen.insert(s.endpoint.clone())
+            {
                 out.push((uid, *dev, s.clone()));
             }
         }

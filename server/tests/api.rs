@@ -1008,6 +1008,40 @@ async fn push_reaches_senders_other_devices() {
     assert_eq!(fake.got.lock().unwrap().len(), 2);
 }
 
+/// Two people on one browser share its push subscription: a message from one
+/// to the other does not notify the browser it was written in, and an
+/// endpoint gets one push however many of its accounts are in the chat.
+#[tokio::test]
+async fn push_skips_the_senders_endpoint() {
+    let (service, fake) = fake_push().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = start(tmp.path(), Overrides::default()).await;
+    let (mama, papa) = family(&srv).await;
+    let tablet = second_device(&srv, &mama).await;
+    let (_, _, shared) = subscription(&format!("{service}/push/shared"));
+    let (_, _, own) = subscription(&format!("{service}/push/mama-tablet"));
+    for (m, sub) in [(&mama, &shared), (&papa, &shared), (&tablet, &own)] {
+        assert_eq!(m.send(&srv, "PUT", "/v1/me/push", Some(sub)).await.status, 204);
+    }
+    let names = || {
+        let mut v: Vec<String> = fake.got.lock().unwrap().iter().map(|(n, _)| n.clone()).collect();
+        v.sort();
+        v
+    };
+    let chat = mama.chat_with(&srv.server_id(), &papa);
+    mama.post_event(&srv, &chat, &new_msg_id(), b"hi").await;
+    wait_for(|| !fake.got.lock().unwrap().is_empty()).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(names(), vec!["mama-tablet"]);
+
+    // From the tablet: the shared browser once, for mama and papa together.
+    fake.got.lock().unwrap().clear();
+    tablet.post_event(&srv, &chat, &new_msg_id(), b"hi").await;
+    wait_for(|| !fake.got.lock().unwrap().is_empty()).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(names(), vec!["shared"]);
+}
+
 #[tokio::test]
 async fn push_disabled_refuses_subscriptions() {
     let tmp = tempfile::tempdir().unwrap();
