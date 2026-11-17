@@ -53,26 +53,32 @@ impl FromRequestParts<Arc<AppState>> for ClientIp {
     type Rejection = Infallible;
 
     async fn from_request_parts(parts: &mut Parts, st: &Arc<AppState>) -> Result<Self, Infallible> {
-        if st.settings.trust_forwarded_for {
-            let forwarded = parts
-                .headers
-                .get_all("x-forwarded-for")
-                .iter()
-                .filter_map(|v| v.to_str().ok())
-                .flat_map(|v| v.split(','))
-                .filter_map(|s| s.trim().parse::<IpAddr>().ok())
-                .next_back();
-            if let Some(ip) = forwarded {
-                return Ok(ClientIp(ip));
-            }
-        }
-        let peer = parts
-            .extensions
-            .get::<ConnectInfo<SocketAddr>>()
-            .map(|c| c.0.ip())
-            .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-        Ok(ClientIp(peer))
+        Ok(ClientIp(client_ip(
+            &parts.headers,
+            &parts.extensions,
+            st.settings.trust_forwarded_for,
+        )))
     }
+}
+
+/// The TCP peer, or the rightmost `X-Forwarded-For` entry with `trust_forwarded_for`.
+pub fn client_ip(headers: &HeaderMap, extensions: &axum::http::Extensions, trust_forwarded_for: bool) -> IpAddr {
+    if trust_forwarded_for {
+        let forwarded = headers
+            .get_all("x-forwarded-for")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|v| v.split(','))
+            .filter_map(|s| s.trim().parse::<IpAddr>().ok())
+            .next_back();
+        if let Some(ip) = forwarded {
+            return ip;
+        }
+    }
+    extensions
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|c| c.0.ip())
+        .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
 }
 
 pub fn bearer(headers: &HeaderMap) -> Option<&str> {
@@ -154,7 +160,7 @@ pub async fn read_body(headers: &HeaderMap, body: Body, limit: usize) -> Result<
     }
 }
 
-async fn read_json<T: DeserializeOwned>(headers: &HeaderMap, body: Body) -> Result<T, ApiError> {
+pub async fn read_json<T: DeserializeOwned>(headers: &HeaderMap, body: Body) -> Result<T, ApiError> {
     let bytes = read_body(headers, body, MAX_JSON_BODY).await?;
     serde_json::from_slice(&bytes).map_err(|e| ApiError::bad_request(format!("bad JSON body: {e}")))
 }
@@ -409,7 +415,7 @@ pub async fn invite_check(
         let gender = profile.map(|p| p.gender).unwrap_or_default().as_str();
         Ok(json!({
             "status": status,
-            "familyName": st.settings.family_name,
+            "familyName": st.family_name(),
             "createdBy": { "userId": inv.created_by, "name": name, "gender": gender },
             "createdAt": inv.created_at,
             "expiresAt": inv.expires_at,
@@ -872,9 +878,16 @@ fn dir_size(p: &Path) -> u64 {
 
 pub async fn stats(State(st): State<Arc<AppState>>, Admin(_): Admin) -> Result<Response, ApiError> {
     let path = st.store.path().to_path_buf();
-    let (data_bytes, space) = tokio::task::spawn_blocking(move || (dir_size(&path), crate::store::disk_space(&path)))
-        .await
-        .map_err(|_| ApiError::internal("stats failed"))?;
+    // The root family's own data: the extra families in families/ are not counted.
+    let (data_bytes, space) = tokio::task::spawn_blocking(move || {
+        let families = path.join(crate::datadir::FAMILIES_DIR);
+        (
+            dir_size(&path).saturating_sub(dir_size(&families)),
+            crate::store::disk_space(&path),
+        )
+    })
+    .await
+    .map_err(|_| ApiError::internal("stats failed"))?;
     let v = st.store.read(|m| {
         json!({
             "version": crate::VERSION,

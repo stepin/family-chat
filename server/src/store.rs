@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{oneshot, watch};
 
 use crate::blobs::BlobStore;
-use crate::datadir::{self, ServerFile, check_admin_code, create_private_dir, hex, now_ms, write_atomic_io};
+use crate::datadir::{self, ServerFile, create_private_dir, hex, now_ms, write_atomic_io};
 use crate::envelope::{self, AvatarRef, EnvError, Envelope, Identity, ImageKind, Profile};
 use crate::error::{ApiError, io_error};
 use crate::eventlog::{self, Header};
@@ -388,6 +388,9 @@ struct Shared {
     /// for everyone) takes it exclusively, so no reader sees a half-zeroed
     /// record.
     io: RwLock<()>,
+    /// Tests: the next administrator join stops after the member's files,
+    /// before `server.json` (a crash between the two writes).
+    fail_join: std::sync::atomic::AtomicBool,
 }
 
 type Job = Box<dyn FnOnce(&mut Writer) + Send>;
@@ -685,6 +688,7 @@ impl Store {
             nonces: Mutex::new(HashMap::new()),
             blobs,
             io: RwLock::new(()),
+            fail_join: std::sync::atomic::AtomicBool::new(false),
         });
         let (tx, rx) = mpsc::channel::<Job>();
         let mut writer = Writer {
@@ -720,6 +724,13 @@ impl Store {
 
     pub fn path(&self) -> &Path {
         &self.shared.path
+    }
+
+    /// Tests: simulate a crash in the next administrator join between the
+    /// member's files and `server.json`.
+    #[doc(hidden)]
+    pub fn fail_next_admin_join(&self) {
+        self.shared.fail_join.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub fn server_id(&self) -> &str {
@@ -1452,7 +1463,8 @@ impl Writer {
         Ok(token)
     }
 
-    /// `POST /v1/join`: a new member with an invitation or the administrator code.
+    /// `POST /v1/join`: a new member with an invitation or the family's join
+    /// code (setup or recovery), which makes them an administrator.
     pub fn join(
         &mut self,
         code: JoinCode,
@@ -1462,6 +1474,29 @@ impl Writer {
         now: u64,
     ) -> Result<Issued, ApiError> {
         let uid = identity.user_id;
+        // An existing member first, before the code: a retry after a lost
+        // answer logs in by signature. A valid join code promotes them.
+        let existing = {
+            let m = self.mem();
+            match m.users.get(&uid) {
+                Some(u) if u.revoked.is_some() => {
+                    return Err(ApiError::forbidden("revoked", "this identity was revoked by its owner"));
+                }
+                Some(u) => u.removed_at.is_none(),
+                None => false,
+            }
+        };
+        if existing {
+            if let JoinCode::Admin(c) = &code
+                && self.mem().server.check_join_code(c, now)
+            {
+                self.make_admin(&uid)?;
+            }
+            return Err(ApiError::conflict(
+                "already_member",
+                "already a member; add a device with /v1/auth/device",
+            ));
+        }
         // Check the code first, consume it only when everything else is fine.
         let invite = match &code {
             JoinCode::Invite(c) => {
@@ -1488,10 +1523,10 @@ impl Writer {
                 Some(inv.clone())
             }
             JoinCode::Admin(c) => {
-                if !check_admin_code(&self.mem().server.admin_code_hash, c) {
+                if !self.mem().server.check_join_code(c, now) {
                     return Err(ApiError::forbidden(
                         "invalid_code",
-                        "wrong or already used administrator code",
+                        "wrong, expired or already used administrator code",
                     ));
                 }
                 None
@@ -1500,39 +1535,15 @@ impl Writer {
         if profile.avatar != AvatarRef::None {
             return Err(ApiError::bad_request("avatar must be null when joining"));
         }
-        let rejoin = match self.mem().users.get(&uid) {
-            Some(u) if u.revoked.is_some() => {
-                return Err(ApiError::forbidden("revoked", "this identity was revoked by its owner"));
-            }
-            Some(u) if u.removed_at.is_none() => {
-                return Err(ApiError::conflict(
-                    "already_member",
-                    "already a member; add a device with /v1/auth/device",
-                ));
-            }
-            Some(_) => true,
-            None => false,
-        };
+        // A removed member invited again.
+        let rejoin = self.mem().users.contains_key(&uid);
         self.check_space()?;
 
-        if let Some(mut inv) = invite {
+        if let Some(mut inv) = invite.clone() {
             inv.used_at = Some(now);
             inv.used_by = Some(uid);
             self.write_invite(&inv)?;
             self.mem_mut().invites.insert(inv.id.clone(), inv);
-        } else {
-            let mut s = self.mem().server.clone();
-            s.admin_code_hash.clear();
-            s.admins.push(uid.to_string());
-            self.write_server(&s)?;
-            self.mem_mut().server = s;
-            tracing::info!(
-                "{}",
-                tr!(
-                    "первый администратор вошёл, код администратора больше не действует",
-                    "the first administrator joined, the admin code no longer works"
-                )
-            );
         }
 
         let dir = self.user_dir(&uid);
@@ -1568,6 +1579,15 @@ impl Writer {
             );
         }
         let token = self.issue_device(&uid, dev, now)?;
+        // The administrator is written last: identity, profile and device
+        // are on disk before the family counts as set up and the code is
+        // gone, so a crash in between leaves a member who can retry the code.
+        if invite.is_none() {
+            if self.shared.fail_join.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                return Err(ApiError::internal("simulated crash"));
+            }
+            self.make_admin(&uid)?;
+        }
         let admin = self.mem().is_admin(&uid);
         tracing::info!(
             "{}",
@@ -1582,6 +1602,72 @@ impl Writer {
             dev,
             admin,
         })
+    }
+
+    /// Makes a member an administrator with the join code: the family is set
+    /// up, the code no longer works.
+    fn make_admin(&mut self, uid: &UserId) -> Result<(), ApiError> {
+        let mut s = self.mem().server.clone();
+        let first = !s.is_set_up();
+        if !s.admins.iter().any(|a| *a == uid.to_string()) {
+            s.admins.push(uid.to_string());
+        }
+        s.setup_done = Some(true);
+        s.join_code_hash.clear();
+        s.join_code_expires_at = 0;
+        self.write_server(&s)?;
+        self.mem_mut().server = s;
+        tracing::info!(
+            "{}",
+            if first {
+                crate::lang::l(
+                    "первый администратор вошёл, код входа семьи больше не действует",
+                    "the first administrator joined, the family's join code no longer works",
+                )
+            } else {
+                crate::lang::l(
+                    "вход по коду восстановления: участник стал администратором, код больше не действует",
+                    "joined with a recovery code: the member is an administrator, the code no longer works",
+                )
+            }
+        );
+        Ok(())
+    }
+
+    /// The setup code of the root family on a fresh server, remembering the
+    /// creation key so a repeat after the root is set up is recognised.
+    pub fn new_root_setup_code(
+        &mut self,
+        now: u64,
+        key: Option<String>,
+        fingerprint: String,
+    ) -> Result<Option<String>, ApiError> {
+        let mut s = self.mem().server.clone();
+        if s.is_set_up() {
+            return Ok(None);
+        }
+        let code = s.new_join_code(now, datadir::SETUP_CODE_TTL_MS);
+        if key.is_some() {
+            s.creation_key = key;
+            s.creation_fingerprint = Some(fingerprint);
+            s.created_at = s.created_at.max(1);
+        }
+        self.write_server(&s)?;
+        self.mem_mut().server = s;
+        Ok(Some(code))
+    }
+
+    /// A new join code of this family (`POST /v1/families` for a family not
+    /// set up yet). `None` once it is set up.
+    pub fn new_setup_code(&mut self, now: u64) -> Result<Option<String>, ApiError> {
+        let mut s = self.mem().server.clone();
+        if s.is_set_up() {
+            return Ok(None);
+        }
+        let code = s.new_join_code(now, datadir::SETUP_CODE_TTL_MS);
+        self.write_server(&s)?;
+        self.mem_mut().server = s;
+        Ok(Some(code))
     }
 
     /// `POST /v1/auth/device`: a device of an existing member, by signature.
@@ -2318,8 +2404,7 @@ mod tests {
             format_version: datadir::FORMAT_VERSION,
             server_id: "srv".into(),
             created_at: 0,
-            admin_code_hash: String::new(),
-            admins: vec![],
+            ..Default::default()
         };
         Store::open(
             root,

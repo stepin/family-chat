@@ -33,8 +33,37 @@ pub const MAX_PUSH_DELAY_SECONDS: u64 = 300;
 /// How often old log days, blob folders and expired invitations are removed.
 pub const MAINTENANCE_PERIOD: Duration = Duration::from_secs(3600);
 
+/// What every family of one fcd shares: settings, the web client, the
+/// failure limiter (so guessing codes does not multiply by the number of
+/// families), the push client and key, the Telegram client, the stop signal.
+#[derive(Clone)]
+pub struct Common {
+    pub settings: Settings,
+    pub assets: Assets,
+    pub shutdown: watch::Receiver<bool>,
+    pub limiter: Arc<RateLimiter>,
+    pub push: Option<PushClient>,
+    pub telegram: Option<Arc<crate::telegram::Telegram>>,
+}
+
+impl Common {
+    pub fn new(settings: Settings, assets: Assets, shutdown: watch::Receiver<bool>) -> Common {
+        Common {
+            push: settings.push.then(|| PushClient::new(settings.push_subject.clone())),
+            telegram: settings.telegram.as_ref().map(crate::telegram::Telegram::new),
+            settings,
+            assets,
+            shutdown,
+            limiter: Arc::new(RateLimiter::default()),
+        }
+    }
+}
+
+/// The state of one family (the root one or one at `/f/<id>`).
 pub struct AppState {
     pub settings: Settings,
+    /// `None` for the root family.
+    pub family_id: Option<String>,
     pub server_id: String,
     pub vapid: VapidKey,
     /// `None` when push is disabled in the settings.
@@ -45,7 +74,7 @@ pub struct AppState {
     pub store: Store,
     /// Sticker packs (`packs/`).
     pub packs: PackStore,
-    pub limiter: RateLimiter,
+    pub limiter: Arc<RateLimiter>,
     /// Server checks (`/v1/check/*`): pending delayed pushes, last outcomes.
     pub checks: Checks,
     /// Telegram sticker sets by link; `None` without a bot token.
@@ -53,13 +82,20 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Loads the state of an opened data folder.
+    /// Loads the state of an opened data folder with its own shared parts
+    /// (a single family; tests).
     pub fn new(
         dir: &DataDir,
         settings: Settings,
         assets: Assets,
         shutdown: watch::Receiver<bool>,
     ) -> Result<Arc<AppState>, String> {
+        AppState::open(dir, &Common::new(settings, assets, shutdown), None)
+    }
+
+    /// Loads a family's state; `family_id` is `None` for the root family.
+    pub fn open(dir: &DataDir, common: &Common, family_id: Option<String>) -> Result<Arc<AppState>, String> {
+        let settings = common.settings.clone();
         let store = Store::open(
             &dir.path,
             dir.server.clone(),
@@ -74,18 +110,31 @@ impl AppState {
         )?;
         let packs = PackStore::open(&dir.path, settings.min_free_mb);
         Ok(Arc::new(AppState {
-            push: settings.push.then(|| PushClient::new(settings.push_subject.clone())),
-            telegram: settings.telegram.as_ref().map(crate::telegram::Telegram::new),
+            push: common.push.clone(),
+            telegram: common.telegram.clone(),
             settings,
+            family_id,
             server_id: dir.server.server_id.clone(),
             vapid: dir.vapid.clone(),
-            assets,
-            shutdown,
+            assets: common.assets.clone(),
+            shutdown: common.shutdown.clone(),
             store,
             packs,
-            limiter: RateLimiter::default(),
+            limiter: common.limiter.clone(),
             checks: Checks::default(),
         }))
+    }
+
+    /// The family's name: `family_name` of config.toml for the root one,
+    /// `familyName` of its server.json for an extra one.
+    pub fn family_name(&self) -> String {
+        match self.family_id {
+            None => self.settings.family_name.clone(),
+            Some(_) => self
+                .store
+                .read(|m| m.server.family_name.clone())
+                .unwrap_or_else(|| self.settings.family_name.clone()),
+        }
     }
 }
 
@@ -174,7 +223,7 @@ async fn method_not_allowed() -> Response {
 
 /// CORS for every API response: any origin,
 /// no cookies; authorisation goes in the `Authorization` header.
-async fn cors(req: Request, next: Next) -> Response {
+pub(crate) async fn cors(req: Request, next: Next) -> Response {
     let is_api = headers::is_api_path(req.uri().path());
     if !is_api {
         return next.run(req).await;
@@ -184,7 +233,12 @@ async fn cors(req: Request, next: Next) -> Response {
     } else {
         next.run(req).await
     };
-    let h = res.headers_mut();
+    add_cors(res.headers_mut());
+    res
+}
+
+/// The CORS headers of an API answer.
+pub(crate) fn add_cors(h: &mut HeaderMap) {
     h.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
     h.insert(
         header::ACCESS_CONTROL_ALLOW_METHODS,
@@ -199,7 +253,6 @@ async fn cors(req: Request, next: Next) -> Response {
         HeaderValue::from_static("Retry-After, X-Request-Id"),
     );
     h.insert(header::ACCESS_CONTROL_MAX_AGE, HeaderValue::from_static("86400"));
-    res
 }
 
 async fn fallback(
@@ -229,13 +282,13 @@ async fn fallback(
 
 async fn hello(State(st): State<Arc<AppState>>) -> Response {
     let s = &st.settings;
-    Json(json!({
+    let mut body = json!({
         "protocol": PROTOCOL_VERSION,
         "server": "fcd",
         "version": crate::VERSION,
             "commit": (!crate::GIT_COMMIT.is_empty()).then_some(crate::GIT_COMMIT),
         "serverId": st.server_id,
-        "familyName": s.family_name,
+        "familyName": st.family_name(),
         "retentionDays": s.retention_days,
         "maxFileMb": s.max_file_mb,
         "push": s.push,
@@ -250,11 +303,16 @@ async fn hello(State(st): State<Arc<AppState>>) -> Response {
         "maxGroupMembers": groups::MAX_MEMBERS,
         "maxPackStickers": crate::envelope::MAX_PACK_STICKERS,
         "maxPackBytes": crate::envelope::MAX_PACK_BYTES,
-        "adminCodeActive": st.store.read(|m| !m.server.admin_code_hash.is_empty()),
-        "offerSetup": s.offer_setup,
+        // The family has a join code that works (setup or recovery).
+        "adminCodeActive": st.store.read(|m| m.server.join_code_active(now_ms())),
+        // Kept, always true, for one release: installed apps of 0.1.0 need the field.
+        "offerSetup": true,
         "telegramStickers": st.telegram.is_some(),
-    }))
-    .into_response()
+    });
+    if st.family_id.is_none() {
+        body["rootSetUp"] = json!(st.store.read(|m| m.server.is_set_up()));
+    }
+    Json(body).into_response()
 }
 
 /// Push endpoints must be HTTPS; plain HTTP only to loopback (tests).

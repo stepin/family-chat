@@ -45,7 +45,10 @@ async fn hello_reports_server_info() {
     assert_eq!(j["maxSealedKeyBytes"], 8192);
     assert_eq!(j["maxGroupMembers"], 100);
     assert_eq!(j["push"], true);
-    assert_eq!(j["offerSetup"], false);
+    // Kept for installed apps of 0.1.0, always true.
+    assert_eq!(j["offerSetup"], true);
+    assert_eq!(j["rootSetUp"], false);
+    assert_eq!(j["telegramStickers"], false);
     let key = B64.decode(j["vapidPublicKey"].as_str().unwrap()).unwrap();
     assert_eq!(key.len(), 65);
     assert_eq!(key[0], 4);
@@ -54,6 +57,7 @@ async fn hello_reports_server_info() {
     // No secrets in the public answer.
     let text = String::from_utf8(res.body.clone()).unwrap();
     assert!(!text.contains(&srv.admin_code));
+    assert!(!text.contains(&srv.setup_code));
     assert!(!text.contains(&srv.dir.vapid.to_file().private_key));
 }
 
@@ -116,20 +120,6 @@ async fn cors_preflight_and_errors() {
 }
 
 #[tokio::test]
-async fn hello_reports_offer_setup() {
-    let tmp = tempfile::tempdir().unwrap();
-    let srv = start(
-        tmp.path(),
-        Overrides {
-            offer_setup: Some(true),
-            ..Default::default()
-        },
-    )
-    .await;
-    assert_eq!(get(&srv.url("/v1/hello")).await.json()["offerSetup"], true);
-}
-
-#[tokio::test]
 async fn check_endpoints_need_admin_code() {
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(tmp.path(), Overrides::default()).await;
@@ -155,7 +145,7 @@ async fn check_endpoints_need_admin_code() {
     .await;
     assert_eq!(res.status, 401);
     // Code is accepted in any case and without dashes.
-    let loose = format!("Bearer {}", srv.admin_code.to_lowercase().replace('-', ""));
+    let loose = format!("Bearer {}", srv.setup_code.to_lowercase().replace('-', ""));
     let res = request(
         "GET",
         &srv.url("/v1/check/wait?seconds=0"),
@@ -170,7 +160,7 @@ async fn check_endpoints_need_admin_code() {
 async fn check_access_after_setup() {
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(tmp.path(), Overrides::default()).await;
-    let code = format!("Bearer {}", srv.admin_code);
+    let code = format!("Bearer {}", srv.setup_code);
     let (admin, member) = family(&srv).await;
     let wait = |auth: String| {
         let url = srv.url("/v1/check/wait?seconds=0");
@@ -319,7 +309,7 @@ async fn check_push_cap_and_device_subscription() {
 async fn check_push_failure_is_classified() {
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(tmp.path(), Overrides::default()).await;
-    let auth_header = format!("Bearer {}", srv.admin_code);
+    let auth_header = format!("Bearer {}", srv.setup_code);
     let headers = [
         ("Authorization", auth_header.as_str()),
         ("Content-Type", "application/json"),
@@ -350,7 +340,7 @@ async fn check_push_failure_is_classified() {
 async fn long_request_answers_after_given_time() {
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(tmp.path(), Overrides::default()).await;
-    let auth = format!("Bearer {}", srv.admin_code);
+    let auth = format!("Bearer {}", srv.setup_code);
     let t = Instant::now();
     let res = request(
         "GET",
@@ -382,7 +372,7 @@ async fn long_request_answers_after_given_time() {
 async fn long_request_ends_on_shutdown() {
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(tmp.path(), Overrides::default()).await;
-    let auth = format!("Bearer {}", srv.admin_code);
+    let auth = format!("Bearer {}", srv.setup_code);
     let url = srv.url("/v1/check/wait?seconds=60");
     let t = Instant::now();
     let pending = tokio::spawn(async move { request("GET", &url, &[("Authorization", &auth)], None).await });
@@ -407,7 +397,8 @@ async fn serves_embedded_client() {
 
     let res = get(&srv.url("/server?x=1")).await;
     assert_eq!(res.status, 308);
-    assert_eq!(res.header("location"), Some("/server/?x=1"));
+    // Relative, so under /f/<id>/ it stays in that family.
+    assert_eq!(res.header("location"), Some("server/?x=1"));
     let res = get(&srv.url("/server/")).await;
     assert_eq!(res.status, 200);
     assert!(String::from_utf8_lossy(&res.body).contains("Проверка сервера"));
@@ -490,7 +481,7 @@ async fn test_push_now_and_delayed() {
     let (service, captured) = fake_push_service().await;
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(tmp.path(), Overrides::default()).await;
-    let auth_header = format!("Bearer {}", srv.admin_code);
+    let auth_header = format!("Bearer {}", srv.setup_code);
     let headers = [
         ("Authorization", auth_header.as_str()),
         ("Content-Type", "application/json"),
@@ -537,7 +528,7 @@ async fn test_push_now_and_delayed() {
 async fn test_push_rejects_bad_input() {
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(tmp.path(), Overrides::default()).await;
-    let auth_header = format!("Bearer {}", srv.admin_code);
+    let auth_header = format!("Bearer {}", srv.setup_code);
     let headers = [
         ("Authorization", auth_header.as_str()),
         ("Content-Type", "application/json"),
@@ -575,7 +566,7 @@ async fn test_push_rejects_bad_input() {
         },
     )
     .await;
-    let auth_header = format!("Bearer {}", off.admin_code);
+    let auth_header = format!("Bearer {}", off.setup_code);
     let headers = [
         ("Authorization", auth_header.as_str()),
         ("Content-Type", "application/json"),

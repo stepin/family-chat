@@ -68,8 +68,6 @@ pub struct Overrides {
     pub push_subject: Option<String>,
     pub min_free_mb: Option<u64>,
     pub trust_forwarded_for: Option<bool>,
-    /// Offer family setup on the first screen even when a family exists.
-    pub offer_setup: Option<bool>,
     /// Language of the console output, `ru` or `en` (only in the file; the flag is `--lang`).
     pub lang: Option<String>,
     /// Bot token for loading Telegram sticker sets by link (secret).
@@ -95,7 +93,6 @@ impl Overrides {
             push_subject: self.push_subject.or(lower.push_subject),
             min_free_mb: self.min_free_mb.or(lower.min_free_mb),
             trust_forwarded_for: self.trust_forwarded_for.or(lower.trust_forwarded_for),
-            offer_setup: self.offer_setup.or(lower.offer_setup),
             lang: self.lang.or(lower.lang),
             telegram_bot_token: self.telegram_bot_token.or(lower.telegram_bot_token),
             telegram_bot_token_file: self.telegram_bot_token_file.or(lower.telegram_bot_token_file),
@@ -126,9 +123,6 @@ pub struct Settings {
     /// Take the client address for rate limiting from `X-Forwarded-For`
     /// (only behind a reverse proxy that sets it).
     pub trust_forwarded_for: bool,
-    /// The web app offers family setup even when this server has its family
-    /// (to set up a family on another server). Still one family per server.
-    pub offer_setup: bool,
     /// `None`: no bot token, loading sticker sets by link is off.
     pub telegram: Option<TelegramSettings>,
 }
@@ -295,7 +289,6 @@ impl Settings {
             push_subject,
             min_free_mb: o.min_free_mb.unwrap_or(DEFAULT_MIN_FREE_MB),
             trust_forwarded_for: o.trust_forwarded_for.unwrap_or(false),
-            offer_setup: o.offer_setup.unwrap_or(false),
         })
     }
 }
@@ -318,7 +311,13 @@ pub fn toml_error(path: &Path, text: &str, e: &toml::de::Error) -> String {
     let line = e
         .span()
         .map(|s| text[..s.start.min(text.len())].matches('\n').count() + 1);
-    let msg = e.message().trim();
+    let mut msg = e.message().trim().to_string();
+    if msg.contains("offer_setup") {
+        msg.push_str(crate::lang::l(
+            "; строку offer_setup удалите из config.toml: в 1.0.0 семьи создаются кодом администратора сервера",
+            "; remove the offer_setup line from config.toml: since 1.0.0 families are created with the server admin code",
+        ));
+    }
     match line {
         Some(n) => tr!(
             "ошибка в {}, строка {n}: {msg}",
@@ -333,7 +332,6 @@ pub fn toml_error(path: &Path, text: &str, e: &toml::de::Error) -> String {
 /// commented in the server's language.
 pub fn config_template(s: &Settings) -> String {
     let family = toml::Value::String(s.family_name.clone()).to_string();
-    let offer_setup = s.offer_setup;
     let (port, ip, retention, max_file, push, min_free, trust_xff) = (
         s.listen.port(),
         s.listen.ip(),
@@ -351,7 +349,8 @@ pub fn config_template(s: &Settings) -> String {
 port = {port}
 listen = "{ip}"
 
-# Имя семьи, его видят все участники.
+# Имя корневой семьи (по адресу сервера), его видят все её участники.
+# У других семей этого сервера (адреса /f/…) имя задаётся при создании.
 family_name = {family}
 
 # Срок хранения переписки на сервере, дней (от 7 до 90).
@@ -374,11 +373,6 @@ min_free_mb = {min_free}
 # который этот заголовок выставляет; иначе его может подделать кто угодно.
 trust_forwarded_for = {trust_xff}
 
-# true: первый экран веб-приложения предлагает «Настроить для своей семьи», даже когда
-# семья на этом сервере уже есть, чтобы настроить семью на другом сервере.
-# Сервер по-прежнему держит одну семью.
-offer_setup = {offer_setup}
-
 # Токен бота Telegram для загрузки наборов стикеров по ссылке t.me/addstickers/…
 # (получить у @BotFather, см. docs/ADMIN.md#telegram). Пусто: загрузка по ссылке выключена.
 # С токеном сервер обращается к api.telegram.org. Токен — секрет, как пароль.
@@ -395,7 +389,8 @@ offer_setup = {offer_setup}
 port = {port}
 listen = "{ip}"
 
-# Family name, everyone in the family sees it.
+# Name of the root family (at the server's address), everyone in it sees it.
+# Other families of this server (addresses /f/…) get their name when created.
 family_name = {family}
 
 # How long the server keeps messages, days (7 to 90).
@@ -417,11 +412,6 @@ min_free_mb = {min_free}
 # X-Forwarded-For header. Only turn it on behind a reverse proxy that sets
 # this header; otherwise anyone can fake it.
 trust_forwarded_for = {trust_xff}
-
-# true: the web app's first screen offers "Set up for my family" even when this
-# server already has its family, to set up a family on another server.
-# The server still holds one family.
-offer_setup = {offer_setup}
 
 # Telegram bot token for loading sticker sets by link t.me/addstickers/…
 # (get one from @BotFather, see docs/ADMIN.md#telegram). Empty: loading by link is off.
@@ -527,16 +517,15 @@ mod tests {
     }
 
     #[test]
-    fn offer_setup_round_trips_and_defaults_to_false() {
-        let s = Settings::resolve(Overrides::default()).unwrap();
-        assert!(!s.offer_setup);
-        let on = Settings::resolve(Overrides {
-            offer_setup: Some(true),
-            ..Default::default()
-        })
-        .unwrap();
-        let back: Overrides = toml::from_str(&config_template(&on)).unwrap();
-        assert_eq!(back.offer_setup, Some(true));
+    fn offer_setup_is_gone_and_the_error_says_what_to_remove() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        std::fs::write(&p, "port = 1\noffer_setup = false\n").unwrap();
+        let e = read_config_file(&p).unwrap_err();
+        assert!(e.contains("offer_setup") && e.contains("2"), "{e}");
+        assert!(e.contains("удалите") || e.contains("remove"), "{e}");
+        let t = config_template(&Settings::resolve(Overrides::default()).unwrap());
+        assert!(!t.contains("offer_setup"), "{t}");
     }
 
     const TOKEN: &str = "123456:AAsecretValueForUnitTests_0123456";

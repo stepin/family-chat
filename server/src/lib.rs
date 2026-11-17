@@ -13,6 +13,7 @@ pub mod datadir;
 pub mod envelope;
 pub mod error;
 pub mod eventlog;
+pub mod families;
 pub mod groups;
 pub mod headers;
 pub mod healthcheck;
@@ -32,7 +33,6 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use tokio::sync::watch;
 
-use crate::app::AppState;
 use crate::assets::Assets;
 use crate::config::Overrides;
 use crate::datadir::DataDir;
@@ -80,9 +80,6 @@ pub struct Cli {
     /// Free disk space floor, MB.
     #[arg(long, value_name = "MB")]
     pub min_free_mb: Option<u64>,
-    /// Offer family setup on the first screen even when this server has a family.
-    #[arg(long, value_name = "BOOL", value_parser = parse_bool)]
-    pub offer_setup: Option<bool>,
     /// Telegram bot token for sticker sets by link (secret; prefer the file or the variable).
     #[arg(long, value_name = "TOKEN", value_parser = parse_secret)]
     pub telegram_bot_token: Option<config::Secret>,
@@ -150,7 +147,6 @@ pub const ENV_VARS: &[(&str, &str)] = &[
     ("trust_forwarded_for", "FCD_TRUST_FORWARDED_FOR"),
     ("push_subject", "FCD_PUSH_SUBJECT"),
     ("min_free_mb", "FCD_MIN_FREE_MB"),
-    ("offer_setup", "FCD_OFFER_SETUP"),
     ("telegram_bot_token", "FCD_TELEGRAM_BOT_TOKEN"),
     ("telegram_bot_token_file", "FCD_TELEGRAM_BOT_TOKEN_FILE"),
     ("telegram_api_url", "FCD_TELEGRAM_API_URL"),
@@ -253,11 +249,6 @@ impl Cli {
                 )
             })?);
         }
-        if self.offer_setup.is_none()
-            && let Some((n, v)) = var("offer_setup")
-        {
-            self.offer_setup = Some(parse_bool(&v).map_err(|why| bad(n, &v, &why))?);
-        }
         // The token is a secret: never part of an error message.
         if self.telegram_bot_token.is_none() {
             self.telegram_bot_token = var("telegram_bot_token").map(|(_, v)| config::Secret::new(v.trim()));
@@ -329,11 +320,12 @@ const HELP: HelpText = HelpText {
 Каждый параметр, кроме --data, есть и в config.toml; lang пишется туда же флагом --lang.
 
 Примеры:
-  fcd --data /srv/family-chat                     первый запуск печатает адрес и код администратора
+  fcd --data /srv/family-chat                     первый запуск печатает адрес и код администратора сервера
   fcd --data /srv/family-chat --port 8080 --listen 127.0.0.1
   fcd --data /srv/family-chat --tls-cert fullchain.pem --tls-key privkey.pem
-  fcd reset-admin-code --data /srv/family-chat    (при остановленном сервере)
-  fcd admin list --data /srv/family-chat          (при остановленном сервере)
+  fcd reset-admin-code --data /srv/family-chat    новый код администратора сервера (при остановленном сервере)
+  fcd families list --data /srv/family-chat       семьи сервера и их id
+  fcd admin list --data /srv/family-chat --family <id>   (при остановленном сервере)
   fcd healthcheck --data /srv/family-chat         код выхода 0, если сервер отвечает
 
 У каждого параметра есть переменная окружения (в скобках); порядок: флаг, переменная, config.toml, значение
@@ -345,11 +337,12 @@ Settings also live in <DIR>/config.toml (written at first start); flags win over
 Every option except --data is also a key in config.toml; lang is written there by --lang too.
 
 Examples:
-  fcd --data /srv/family-chat                     first start prints the address and the admin code
+  fcd --data /srv/family-chat                     first start prints the address and the server admin code
   fcd --data /srv/family-chat --port 8080 --listen 127.0.0.1
   fcd --data /srv/family-chat --tls-cert fullchain.pem --tls-key privkey.pem
-  fcd reset-admin-code --data /srv/family-chat    (server stopped)
-  fcd admin list --data /srv/family-chat          (server stopped)
+  fcd reset-admin-code --data /srv/family-chat    a new server admin code (server stopped)
+  fcd families list --data /srv/family-chat       the server's families and their ids
+  fcd admin list --data /srv/family-chat --family <id>   (server stopped)
   fcd healthcheck --data /srv/family-chat         exit code 0 when the server answers
 
 Every option has an environment variable (in brackets); precedence: flag, variable, config.toml,
@@ -409,11 +402,6 @@ Logging: RUST_LOG=debug for more detail, NO_COLOR=1 for plain output.",
             "Below this much free disk space, MB, new messages and files are refused; 0: no check [default: 100].",
         ),
         (
-            "offer_setup",
-            "Предлагать на первом экране «Настроить для своей семьи», даже когда семья на сервере уже есть: веб-приложение поможет настроить семью на другом сервере. Сервер по-прежнему держит одну семью [по умолчанию: false].",
-            "Offer “Set up for my family” on the first screen even when this server already has a family: the web app helps set up a family on another server. The server still holds one family [default: false].",
-        ),
-        (
             "telegram_bot_token",
             "Токен бота Telegram для загрузки наборов стикеров по ссылке t.me/addstickers/…; пусто — выключено. Значение флага видно в списке процессов: лучше --telegram-bot-token-file или переменная.",
             "Telegram bot token for loading sticker sets by link t.me/addstickers/…; empty: off. A flag value shows in the process list: prefer --telegram-bot-token-file or the variable.",
@@ -460,6 +448,16 @@ Logging: RUST_LOG=debug for more detail, NO_COLOR=1 for plain output.",
             "userId участника (26 символов).",
             "The member's userId (26 characters).",
         ),
+        (
+            "family",
+            "Семья: id из `fcd families list` (для reset-admin-code также root); без флага корневая семья.",
+            "The family: an id from `fcd families list` (reset-admin-code also takes root); the root family without it.",
+        ),
+        (
+            "strict",
+            "Сломанные семьи тоже дают код выхода 1.",
+            "Broken families also give exit code 1.",
+        ),
     ],
 };
 
@@ -467,8 +465,18 @@ Logging: RUST_LOG=debug for more detail, NO_COLOR=1 for plain output.",
 const SUBCOMMANDS: &[(&str, &str, &str)] = &[
     (
         "reset-admin-code",
-        "Заменить код администратора и напечатать новый (сначала остановите сервер).",
-        "Replace the administrator code and print the new one (stop the server first).",
+        "Без --family: новый код администратора сервера (им создают семьи), старый перестаёт работать. \
+         С --family: одноразовый код восстановления этой семьи, вход по нему делает администратором. \
+         Сначала остановите сервер.",
+        "Without --family: a new server admin code (it creates families), the old one stops working. \
+         With --family: a one-time recovery code of that family; joining with it makes an administrator. \
+         Stop the server first.",
+    ),
+    ("families", "Семьи этого сервера.", "Families of this server."),
+    (
+        "families list",
+        "id, имя и состояние каждой семьи; только чтение, работает при запущенном сервере.",
+        "Id, name and state of every family; read only, works while the server runs.",
     ),
     (
         "admin",
@@ -652,25 +660,50 @@ pub fn report_cli_error(e: &clap::Error) -> i32 {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Replace the administrator code and print the new one (stop the server first).
-    ResetAdminCode,
+    /// Without --family: replace the server admin code (creates families).
+    /// With --family: a one-time recovery code of that family (stop the server first).
+    ResetAdminCode {
+        /// The family: an id from `fcd families list`, or `root`.
+        #[arg(long, value_name = "ID")]
+        family: Option<String>,
+    },
     /// Manage administrators (stop the server first).
     #[command(subcommand)]
     Admin(AdminCommand),
+    /// Families of this server.
+    #[command(subcommand)]
+    Families(FamiliesCommand),
     /// Check that the server on this machine answers; exit code 0 if it does, 1 if not.
     /// Reads the port from --port or <DIR>/config.toml; works while the server runs.
-    Healthcheck,
+    Healthcheck {
+        /// Broken families fail the check too.
+        #[arg(long)]
+        strict: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
 pub enum AdminCommand {
     /// List members with their userId, name and role.
-    List,
+    List {
+        /// The family (an id from `fcd families list`); the root family without it.
+        #[arg(long, value_name = "ID")]
+        family: Option<String>,
+    },
     /// Make a member an administrator (userId from `fcd admin list`).
     Add {
         /// The member's userId (26 characters).
         user_id: String,
+        /// The family (an id from `fcd families list`); the root family without it.
+        #[arg(long, value_name = "ID")]
+        family: Option<String>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum FamiliesCommand {
+    /// Id, name and state of every family (read only; works while the server runs).
+    List,
 }
 
 impl Cli {
@@ -685,7 +718,6 @@ impl Cli {
             push_subject: self.push_subject.clone(),
             min_free_mb: self.min_free_mb,
             trust_forwarded_for: self.trust_forwarded_for,
-            offer_setup: self.offer_setup,
             lang: self.lang.clone(),
             // An empty flag value turns loading by link off.
             telegram_bot_token: self.telegram_bot_token.clone(),
@@ -715,7 +747,7 @@ pub fn init_tracing() {
 
 /// Entry point used by `main`. Returns the process exit code.
 pub async fn main_with(cli: Cli) -> i32 {
-    if let Some(Command::Healthcheck) = cli.command {
+    if let Some(Command::Healthcheck { strict }) = cli.command {
         let addr = match healthcheck::target(cli.data.as_deref(), &cli.overrides()) {
             Ok(a) => a,
             Err(e) => {
@@ -732,7 +764,26 @@ pub async fn main_with(cli: Cli) -> i32 {
                         "fcd {version} is answering on {addr}"
                     )
                 );
-                0
+                // A broken extra family must not restart the container with all the others:
+                // a warning, and a failure only with --strict.
+                let broken: Vec<_> = cli
+                    .data
+                    .as_deref()
+                    .map(|d| families::scan(d, ""))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|l| Some((l.id?, l.broken?)))
+                    .collect();
+                for (id, why) in &broken {
+                    eprintln!(
+                        "{}",
+                        tr!(
+                            "предупреждение: семья {id} сломана: {why}",
+                            "warning: family {id} is broken: {why}"
+                        )
+                    );
+                }
+                if strict && !broken.is_empty() { 1 } else { 0 }
             }
             Err(e) => {
                 eprintln!("{}: {e}", lang::l("ошибка", "error"));
@@ -752,9 +803,41 @@ pub async fn main_with(cli: Cli) -> i32 {
         return 2;
     };
 
-    if let Some(Command::Admin(AdminCommand::List)) = &cli.command {
-        return match DataDir::open(&data, Overrides::default()) {
-            Ok((dir, _)) => {
+    if let Some(Command::Families(FamiliesCommand::List)) = &cli.command {
+        // Read only, no lock: works while the server runs.
+        if !data.join(datadir::SERVER_FILE).is_file() {
+            eprintln!(
+                "{}: {}",
+                lang::l("ошибка", "error"),
+                tr!("{} не папка данных fcd", "{} is not a fcd data folder", data.display())
+            );
+            return 1;
+        }
+        let root_name = config::read_config_file(&data.join(datadir::CONFIG_FILE))
+            .ok()
+            .and_then(|o| o.family_name)
+            .unwrap_or_else(|| config::default_family_name().to_string());
+        for l in families::scan(&data, &root_name) {
+            let id = l.id.as_deref().unwrap_or("root");
+            let name = l.name.as_deref().unwrap_or(lang::l("(без имени)", "(no name)"));
+            let state = match &l.broken {
+                Some(why) => tr!("сломана: {why}", "broken: {why}"),
+                None if l.set_up => lang::l("настроена", "set up").to_string(),
+                None => lang::l("не настроена", "not set up").to_string(),
+            };
+            println!("{id}  {name}  [{state}]");
+        }
+        return 0;
+    }
+
+    let fail = |e: &dyn std::fmt::Display| {
+        eprintln!("{}: {e}", lang::l("ошибка", "error"));
+        1
+    };
+
+    if let Some(Command::Admin(AdminCommand::List { family })) = &cli.command {
+        return match open_for_cli(&data, family.as_deref()) {
+            Ok((_root, dir)) => {
                 let members = dir.list_members();
                 if members.is_empty() {
                     println!("{}", lang::l("участников пока нет", "no members yet"));
@@ -779,15 +862,12 @@ pub async fn main_with(cli: Cli) -> i32 {
                 }
                 0
             }
-            Err(e) => {
-                eprintln!("{}: {e}", lang::l("ошибка", "error"));
-                1
-            }
+            Err(e) => fail(&e),
         };
     }
 
-    if let Some(Command::Admin(AdminCommand::Add { user_id })) = &cli.command {
-        return match DataDir::open(&data, Overrides::default()).and_then(|(mut dir, _)| dir.add_admin(user_id)) {
+    if let Some(Command::Admin(AdminCommand::Add { user_id, family })) = &cli.command {
+        return match open_for_cli(&data, family.as_deref()).and_then(|(_root, mut dir)| dir.add_admin(user_id)) {
             Ok(true) => {
                 println!(
                     "{}",
@@ -802,32 +882,56 @@ pub async fn main_with(cli: Cli) -> i32 {
                 );
                 0
             }
-            Err(e) => {
-                eprintln!("{}: {e}", lang::l("ошибка", "error"));
-                1
-            }
+            Err(e) => fail(&e),
         };
     }
 
-    if let Some(Command::ResetAdminCode) = cli.command {
-        return match DataDir::open(&data, Overrides::default()) {
-            Ok((mut dir, _)) => match dir.reset_admin_code() {
+    if let Some(Command::ResetAdminCode { family }) = &cli.command {
+        return match family {
+            None => match DataDir::open(&data, Overrides::default()).and_then(|(mut dir, _)| dir.reset_admin_code()) {
                 Ok(code) => {
                     println!(
                         "{}",
-                        tr!("Новый код администратора: {code}", "New administrator code: {code}")
+                        tr!(
+                            "Новый код администратора сервера: {code}",
+                            "New server admin code: {code}"
+                        )
+                    );
+                    println!(
+                        "{}",
+                        lang::l(
+                            "Код многоразовый и только создаёт семьи (в приложении: «Настроить для своей семьи»); \
+                             старый больше не действует. Храните его как пароль.",
+                            "The code is reusable and only creates families (in the app: “Set up for my family”); \
+                             the old one no longer works. Keep it like a password."
+                        )
                     );
                     0
                 }
-                Err(e) => {
-                    eprintln!("{}: {e}", lang::l("ошибка", "error"));
-                    1
-                }
+                Err(e) => fail(&e),
             },
-            Err(e) => {
-                eprintln!("{}: {e}", lang::l("ошибка", "error"));
-                1
-            }
+            Some(f) => match open_for_cli(&data, Some(f)).and_then(|(_root, mut dir)| dir.reset_join_code()) {
+                Ok(code) => {
+                    println!(
+                        "{}",
+                        tr!(
+                            "Код восстановления семьи {f}: {code}",
+                            "Recovery code of family {f}: {code}"
+                        )
+                    );
+                    println!(
+                        "{}",
+                        lang::l(
+                            "Одноразовый: кто войдёт с ним в эту семью как администратор, станет администратором \
+                             (участник семьи тоже).",
+                            "One-time: whoever joins this family with it as an administrator becomes one \
+                             (a member of the family too)."
+                        )
+                    );
+                    0
+                }
+                Err(e) => fail(&e),
+            },
         };
     }
 
@@ -883,14 +987,15 @@ pub async fn main_with(cli: Cli) -> i32 {
     let local = listener.local_addr().unwrap_or(settings.listen);
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let state = match AppState::new(&dir, settings.clone(), assets, shutdown_rx) {
-        Ok(s) => s,
+    let common = app::Common::new(settings.clone(), assets, shutdown_rx);
+    let fams = match families::Families::start(&dir, common) {
+        Ok(f) => f,
         Err(e) => {
             tracing::error!("{e}");
             return 1;
         }
     };
-    app::spawn_maintenance(state.clone());
+    let state = fams.root().clone();
     match &state.telegram {
         Some(tg) => tg.spawn_check(),
         None => tracing::info!(
@@ -938,15 +1043,6 @@ pub async fn main_with(cli: Cli) -> i32 {
             )
         );
     }
-    if settings.offer_setup {
-        tracing::info!(
-            "{}",
-            lang::l(
-                "первый экран предлагает настроить семью (--offer-setup)",
-                "the first screen offers family setup (--offer-setup)"
-            )
-        );
-    }
     let (members, events) = state
         .store
         .read(|m| (m.users.values().filter(|u| u.removed_at.is_none()).count(), m.log.len()));
@@ -957,6 +1053,25 @@ pub async fn main_with(cli: Cli) -> i32 {
             "{members} members, {events} events in the log"
         )
     );
+    let (extra, broken) = fams.summary();
+    if extra > 0 {
+        tracing::info!(
+            "{}",
+            tr!(
+                "других семей на этом сервере: {extra} (список: fcd families list)",
+                "other families on this server: {extra} (list: fcd families list)"
+            )
+        );
+    }
+    for (id, why) in broken {
+        tracing::warn!(
+            "{}",
+            tr!(
+                "семья {id} сломана и отвечает 503: {why}; см. docs/ADMIN.md",
+                "family {id} is broken and answers 503: {why}; see docs/ADMIN.md"
+            )
+        );
+    }
     let scheme = if tls.is_some() { "https" } else { "http" };
     tracing::info!(
         "{}",
@@ -989,7 +1104,10 @@ pub async fn main_with(cli: Cli) -> i32 {
                 "first start: the data folder was created"
             )
         );
-        tracing::info!("{}", tr!("код администратора: {code}", "admin code: {code}"));
+        tracing::info!(
+            "{}",
+            tr!("код администратора сервера: {code}", "server admin code: {code}")
+        );
         tracing::info!(
             "{}",
             lang::l(
@@ -1000,13 +1118,16 @@ pub async fn main_with(cli: Cli) -> i32 {
         tracing::info!(
             "{}",
             lang::l(
-                "код показывается один раз; новый: fcd reset-admin-code --data <DIR> при остановленном сервере",
-                "the code is shown once; a new one: fcd reset-admin-code --data <DIR> with the server stopped"
+                "код многоразовый: им же создают другие семьи на этом сервере; храните его как пароль. \
+                 Показывается один раз; новый: fcd reset-admin-code --data <DIR> при остановленном сервере",
+                "the code is reusable: it also creates other families on this server; keep it like a password. \
+                 It is shown once; a new one: fcd reset-admin-code --data <DIR> with the server stopped"
             )
         );
     }
+    drop(state);
 
-    let app = app::router(state);
+    let app = families::router(fams);
     let result = match tls {
         Some(cfg) => match tls::TlsListener::new(listener, cfg) {
             // `tap_io` gives the listener axum's `ConnectInfo<SocketAddr>`.
@@ -1024,6 +1145,30 @@ pub async fn main_with(cli: Cli) -> i32 {
         Err(e) => {
             tracing::error!("{}", tr!("ошибка сервера: {e}", "server error: {e}"));
             1
+        }
+    }
+}
+
+/// Opens the data folder (with its lock) for a command about one family:
+/// the root one without `family` or with `root`, else `families/<id>`. The
+/// root folder is returned too: it holds the lock while the family is used.
+fn open_for_cli(
+    data: &std::path::Path,
+    family: Option<&str>,
+) -> Result<(Option<DataDir>, DataDir), datadir::OpenError> {
+    let (root, _) = DataDir::open(data, Overrides::default())?;
+    match family {
+        None | Some("root") => Ok((None, root)),
+        Some(id) => {
+            if !datadir::valid_family_id(id) || !root.path.join(datadir::FAMILIES_DIR).join(id).is_dir() {
+                return Err(datadir::OpenError::Config(tr!(
+                    "семья {id} не найдена в папке данных {}; список: fcd families list",
+                    "family {id} not found in the data folder {}; list: fcd families list",
+                    root.path.display()
+                )));
+            }
+            let dir = DataDir::open_family(&root.path, id, root.vapid.clone())?;
+            Ok((Some(root), dir))
         }
     }
 }
@@ -1164,7 +1309,6 @@ mod cli_tests {
                 ("FCD_TRUST_FORWARDED_FOR", "TRUE"),
                 ("FCD_PUSH_SUBJECT", "mailto:me@example.com"),
                 ("FCD_MIN_FREE_MB", "0"),
-                ("FCD_OFFER_SETUP", "1"),
                 ("FCD_WEB_DIR", "/w"),
                 ("FCD_TLS_CERT", "/c.pem"),
                 ("FCD_TLS_KEY", "/k.pem"),
@@ -1182,11 +1326,9 @@ mod cli_tests {
         assert_eq!(c.trust_forwarded_for, Some(true));
         assert_eq!(c.push_subject.as_deref(), Some("mailto:me@example.com"));
         assert_eq!(c.min_free_mb, Some(0));
-        assert_eq!(c.offer_setup, Some(true));
         let o = c.overrides();
         assert_eq!(o.push_subject.as_deref(), Some("mailto:me@example.com"));
         assert_eq!(o.min_free_mb, Some(0));
-        assert_eq!(o.offer_setup, Some(true));
         assert_eq!(c.web_dir.as_deref(), Some(Path::new("/w")));
         assert_eq!(c.tls_cert.as_deref(), Some(Path::new("/c.pem")));
         assert_eq!(c.tls_key.as_deref(), Some(Path::new("/k.pem")));
@@ -1243,7 +1385,6 @@ mod cli_tests {
         for (var, value) in [
             ("FCD_PORT", "eighty"),
             ("FCD_PUSH", "yes"),
-            ("FCD_OFFER_SETUP", "on"),
             ("FCD_MIN_FREE_MB", "lots"),
             ("FCD_PUSH_SUBJECT", "me@example.com"),
             ("FCD_RETENTION_DAYS", "-1"),
@@ -1259,24 +1400,12 @@ mod cli_tests {
     #[test]
     fn new_flags_win_over_variables() {
         let c = cli(
-            &[
-                "--push-subject",
-                "https://example.com/c",
-                "--min-free-mb",
-                "5",
-                "--offer-setup",
-                "false",
-            ],
-            &[
-                ("FCD_PUSH_SUBJECT", "mailto:x@example.com"),
-                ("FCD_MIN_FREE_MB", "7"),
-                ("FCD_OFFER_SETUP", "true"),
-            ],
+            &["--push-subject", "https://example.com/c", "--min-free-mb", "5"],
+            &[("FCD_PUSH_SUBJECT", "mailto:x@example.com"), ("FCD_MIN_FREE_MB", "7")],
         )
         .unwrap();
         assert_eq!(c.push_subject.as_deref(), Some("https://example.com/c"));
         assert_eq!(c.min_free_mb, Some(5));
-        assert_eq!(c.offer_setup, Some(false));
         // A bad flag value names the flag and the value.
         let e = cli(&["--push-subject", "me@example.com"], &[]).unwrap_err();
         assert!(e.contains("--push-subject") && e.contains("me@example.com"), "{e}");

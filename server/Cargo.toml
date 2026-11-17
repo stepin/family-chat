@@ -32,6 +32,8 @@ toml = "1.2.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std", "ansi"] }
 webpki-roots = "1.0.12"
+unicode-normalization = "0.1.26"
+tower = { version = "0.5.3", default-features = false, features = ["util"] }
 
 # Free space on the data disk (the 507 check and the admin statistics).
 [target.'cfg(unix)'.dependencies]

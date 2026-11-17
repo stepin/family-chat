@@ -9,12 +9,13 @@ use aes_gcm::{Aes128Gcm, Nonce};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
 use ed25519_dalek::SigningKey;
-use fcd::app::{self, AppState};
+use fcd::app::{AppState, Common};
 use fcd::assets::Assets;
 use fcd::config::Overrides;
 use fcd::datadir::DataDir;
 use fcd::envelope::testkit;
 use fcd::envelope::{Envelope, Kind};
+use fcd::families::Families;
 use fcd::ids::{ChatId, DevId, MsgId, UserId, b32_encode};
 use hkdf::Hkdf;
 use http_body_util::{BodyExt, Full};
@@ -29,11 +30,14 @@ use tokio::sync::watch;
 
 pub struct TestServer {
     pub addr: SocketAddr,
-    /// Empty when the folder already existed.
+    /// The server admin code (creates families); empty when the folder already existed.
     pub admin_code: String,
+    /// The root family's setup code (from `POST /v1/families` at first start); empty otherwise.
+    pub setup_code: String,
     pub dir: DataDir,
     pub shutdown: watch::Sender<bool>,
     pub state: Arc<AppState>,
+    pub families: Arc<Families>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -51,6 +55,7 @@ impl TestServer {
         let _ = self.shutdown.send(true);
         let _ = self.task.await;
         drop(self.state);
+        drop(self.families);
         drop(self.dir);
     }
 }
@@ -62,16 +67,16 @@ pub async fn start(data: &Path, flags: Overrides) -> TestServer {
     srv
 }
 
-/// Starts on a folder that may already exist.
-pub async fn open(data: &Path, flags: Overrides) -> TestServer {
+/// Starts on a folder that may already exist, without asking for the root setup code.
+pub async fn open_plain(data: &Path, flags: Overrides) -> TestServer {
     let (dir, settings) = DataDir::open(data, flags).expect("open data dir");
     let admin_code = dir.new_admin_code.clone().unwrap_or_default();
     let (tx, rx) = watch::channel(false);
-    let state = AppState::new(&dir, settings, Assets::Embedded, rx.clone()).expect("state");
-    app::spawn_maintenance(state.clone());
+    let families = Families::start(&dir, Common::new(settings, Assets::Embedded, rx.clone())).expect("state");
+    let state = families.root().clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let svc = app::router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
+    let svc = fcd::families::router(families.clone()).into_make_service_with_connect_info::<SocketAddr>();
     let mut stop = rx;
     let task = tokio::spawn(async move {
         axum::serve(listener, svc)
@@ -84,11 +89,40 @@ pub async fn open(data: &Path, flags: Overrides) -> TestServer {
     TestServer {
         addr,
         admin_code,
+        setup_code: String::new(),
         dir,
         shutdown: tx,
         state,
+        families,
         task,
     }
+}
+
+/// Starts on a folder that may already exist; at first start also gets
+/// the root family's setup code with the server code, as the app does.
+pub async fn open(data: &Path, flags: Overrides) -> TestServer {
+    let mut srv = open_plain(data, flags).await;
+    if !srv.admin_code.is_empty() {
+        let res = create_family(&srv, &srv.admin_code.clone(), None, None).await;
+        assert_eq!(res.status, 201, "{}", String::from_utf8_lossy(&res.body));
+        let j = res.json();
+        assert_eq!(j["path"], "");
+        srv.setup_code = j["setupCode"].as_str().unwrap().to_string();
+    }
+    srv
+}
+
+/// `POST /v1/families` with the server code.
+pub async fn create_family(srv: &TestServer, code: &str, name: Option<&str>, key: Option<&str>) -> Res {
+    let mut body = json!({ "adminCode": code });
+    if let Some(n) = name {
+        body["familyName"] = json!(n);
+    }
+    let mut headers = vec![("Content-Type", "application/json")];
+    if let Some(k) = key {
+        headers.push(("Idempotency-Key", k));
+    }
+    request("POST", &srv.url("/v1/families"), &headers, Some(&body.to_string())).await
 }
 
 // ---- a client of the base API ----
@@ -249,7 +283,7 @@ pub async fn join(srv: &TestServer, name: &str, field: &str, code: &str) -> Memb
 
 /// The administrator (first join with the admin code) and one invited member.
 pub async fn family(srv: &TestServer) -> (Member, Member) {
-    let admin = join(srv, "Мама", "adminCode", &srv.admin_code).await;
+    let admin = join(srv, "Мама", "adminCode", &srv.setup_code).await;
     let code = invite(srv, &admin).await;
     let other = join(srv, "Папа", "invite", &code).await;
     (admin, other)

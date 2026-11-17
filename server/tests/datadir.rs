@@ -193,7 +193,7 @@ fn binary_prints_code_once_locks_folder_and_stops_on_sigterm() {
     #[cfg_attr(not(unix), allow(unused_mut))]
     let mut first = Proc::spawn(&args);
     let listen_line = first.wait_line("слушаю", Duration::from_secs(20));
-    let code_line = first.wait_line("код администратора:", Duration::from_secs(20));
+    let code_line = first.wait_line("код администратора сервера:", Duration::from_secs(20));
     let code = code_line.rsplit(' ').next().unwrap().to_string();
     assert_eq!(code.len(), 19, "{code_line}");
 
@@ -294,7 +294,7 @@ fn reset_admin_code_replaces_the_code() {
         .unwrap();
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
-    let new = text.trim().rsplit(' ').next().unwrap();
+    let new = text.lines().next().unwrap().trim().rsplit(' ').next().unwrap();
     let (dir, _) = DataDir::open(tmp.path(), Overrides::default()).unwrap();
     assert!(dir.check_admin_code(new));
     assert!(!dir.check_admin_code(&old));

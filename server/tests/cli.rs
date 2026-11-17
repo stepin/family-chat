@@ -2,6 +2,8 @@
 //! environment. Each test runs `fcd` as a child process with its own
 //! environment, so nothing races on the test process's variables.
 
+mod common;
+
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc;
@@ -189,7 +191,7 @@ fn start_up_admin_and_reset_in_english() {
     );
     let listen = srv.wait_line("listening on 127.0.0.1:");
     srv.wait_line("first start: the data folder was created");
-    let code = srv.wait_line("admin code: ");
+    let code = srv.wait_line("server admin code: ");
     assert_eq!(code.rsplit(' ').next().unwrap().len(), 19, "{code}");
     srv.wait_line("next: open the app");
     assert!(srv.seen.iter().all(|l| !has_cyrillic(l)), "{}", srv.seen.join("\n"));
@@ -224,7 +226,7 @@ fn start_up_admin_and_reset_in_english() {
     // config.toml says nothing about the language: Russian by default.
     assert!(text(&list_ru).contains("участников пока нет"), "{}", text(&list_ru));
     let reset = run(&["reset-admin-code", "--data", data], &[("FCD_LANG", "en")]);
-    assert!(text(&reset).contains("New administrator code: "), "{}", text(&reset));
+    assert!(text(&reset).contains("New server admin code: "), "{}", text(&reset));
     let add = run(&["admin", "add", "nope", "--data", data, "--lang", "en"], &[]);
     assert!(text(&add).contains("does not look like a userId"), "{}", text(&add));
 
@@ -252,7 +254,7 @@ fn settings_from_the_environment() {
     let mut srv = Server::start(&[], &vars);
     srv.wait_line("семья «Ивановы», срок хранения 30 дн.");
     let listen = srv.wait_line("слушаю 127.0.0.1:");
-    srv.wait_line("код администратора: ");
+    srv.wait_line("код администратора сервера: ");
     // Written at first start, like the flags are.
     let config = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
     assert!(
@@ -363,4 +365,183 @@ fn telegram_token_never_reaches_the_log_or_the_config() {
     assert_eq!(broken.status.code(), Some(1), "{}", text(&broken));
     assert!(text(&broken).contains("config.toml"), "{}", text(&broken));
     assert!(!text(&broken).contains(TOKEN), "{}", text(&broken));
+}
+
+/// A first start on a fresh folder; returns the server and its admin code and port.
+fn fresh(data: &str) -> (Server, String, String) {
+    let mut srv = Server::start(
+        &[
+            "--data",
+            data,
+            "--listen",
+            "127.0.0.1",
+            "--port",
+            "0",
+            "--push",
+            "false",
+        ],
+        &[],
+    );
+    let listen = srv.wait_line("слушаю 127.0.0.1:");
+    let code = srv.wait_line("код администратора сервера: ");
+    let code = code.rsplit(' ').next().unwrap().to_string();
+    (srv, code, port_of(&listen))
+}
+
+/// A tiny HTTP/1.1 POST of JSON to 127.0.0.1 (no client crate in tests of the binary).
+fn post_json(port: &str, path: &str, body: &str) -> (u16, String) {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+    write!(
+        s,
+        "POST {path} HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    let status = out.split(' ').nth(1).unwrap().parse().unwrap();
+    (status, out.split("\r\n\r\n").nth(1).unwrap_or("").to_string())
+}
+
+#[test]
+fn families_list_unknown_ids_healthcheck_and_a_clean_stop_after_creating_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path().to_str().unwrap();
+    let (mut srv, code, port) = fresh(data);
+    // Root setup code first (fresh server), then a family.
+    let (s, body) = post_json(&port, "/v1/families", &format!(r#"{{"adminCode":"{code}"}}"#));
+    assert_eq!(s, 201);
+    let setup = body.split("\"setupCode\":\"").nth(1).unwrap()[..19].to_string();
+    let join = common::join_body(&common::new_key(), "Мама", "adminCode", &setup, &common::new_dev());
+    assert_eq!(post_json(&port, "/v1/join", &join).0, 200);
+    let (s, body) = post_json(
+        &port,
+        "/v1/families",
+        &format!(r#"{{"adminCode":"{code}","familyName":"Петровы"}}"#),
+    );
+    assert_eq!(s, 201, "{body}");
+    let id = body.split("\"familyId\":\"").nth(1).unwrap_or_else(|| panic!("{body}"))[..16].to_string();
+
+    // Read only while the server runs.
+    let list = run(&["families", "list", "--data", data], &[]);
+    assert!(list.status.success(), "{}", text(&list));
+    assert!(text(&list).contains("root  Семья  [настроена]"), "{}", text(&list));
+    assert!(
+        text(&list).contains(&format!("{id}  Петровы  [не настроена]")),
+        "{}",
+        text(&list)
+    );
+
+    // SIGTERM right after a runtime creation: a clean exit, the family on disk.
+    #[cfg(unix)]
+    {
+        unsafe { libc_kill(srv.child.id() as i32) };
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let status = loop {
+            if let Some(st) = srv.child.try_wait().unwrap() {
+                break st;
+            }
+            assert!(Instant::now() < deadline, "did not stop");
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert!(status.success(), "{status:?}");
+    }
+    drop(srv);
+    assert!(tmp.path().join("families").join(&id).join("server.json").is_file());
+
+    // --family with an unknown id: exit 1, the id, the folder and where to look.
+    let bad = run(&["admin", "list", "--data", data, "--family", "zzzzzzzzzzzzzzzz"], &[]);
+    assert_eq!(bad.status.code(), Some(1), "{}", text(&bad));
+    assert!(
+        text(&bad).contains("zzzzzzzzzzzzzzzz") && text(&bad).contains("fcd families list"),
+        "{}",
+        text(&bad)
+    );
+    let rec = run(&["reset-admin-code", "--data", data, "--family", &id], &[]);
+    assert!(rec.status.success(), "{}", text(&rec));
+    assert!(
+        text(&rec).contains(&format!("Код восстановления семьи {id}: ")),
+        "{}",
+        text(&rec)
+    );
+    let list = run(&["admin", "list", "--data", data, "--family", &id], &[]);
+    assert!(text(&list).contains("участников пока нет"), "{}", text(&list));
+
+    // A broken family: healthcheck still 0 with a warning, 1 with --strict.
+    std::fs::remove_file(tmp.path().join("families").join(&id).join("server.json")).unwrap();
+    let (srv, _, _) = {
+        let mut s = Server::start(
+            &[
+                "--data",
+                data,
+                "--listen",
+                "127.0.0.1",
+                "--port",
+                "0",
+                "--push",
+                "false",
+            ],
+            &[],
+        );
+        s.wait_line(&format!("семья {id} сломана"));
+        let listen = s.wait_line("слушаю 127.0.0.1:");
+        let p = port_of(&listen);
+        (s, String::new(), p)
+    };
+    let port = port_of(srv.seen.iter().find(|l| l.contains("слушаю")).unwrap());
+    let hc = run(
+        &["healthcheck", "--data", data, "--listen", "127.0.0.1", "--port", &port],
+        &[],
+    );
+    assert_eq!(hc.status.code(), Some(0), "{}", text(&hc));
+    assert!(text(&hc).contains(&format!("семья {id} сломана")), "{}", text(&hc));
+    let strict = run(
+        &[
+            "healthcheck",
+            "--strict",
+            "--data",
+            data,
+            "--listen",
+            "127.0.0.1",
+            "--port",
+            &port,
+        ],
+        &[],
+    );
+    assert_eq!(strict.status.code(), Some(1), "{}", text(&strict));
+    drop(srv);
+    let list = run(&["families", "list", "--data", data], &[]);
+    assert!(
+        text(&list).contains(&format!("{id}  (без имени)  [сломана")),
+        "{}",
+        text(&list)
+    );
+}
+
+#[cfg(unix)]
+unsafe fn libc_kill(pid: i32) {
+    unsafe extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    unsafe { kill(pid, 15) };
+}
+
+#[test]
+fn offer_setup_line_stops_the_server_and_says_to_remove_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path().to_str().unwrap();
+    std::fs::write(tmp.path().join("config.toml"), "port = 0\noffer_setup = true\n").unwrap();
+    for args in [vec!["--data", data], vec!["reset-admin-code", "--data", data]] {
+        let o = run(&args, &[]);
+        assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+        assert!(
+            text(&o).contains("offer_setup") && text(&o).contains("удалите"),
+            "{}",
+            text(&o)
+        );
+    }
+    // The flag is gone too.
+    let o = run(&["--data", data, "--offer-setup", "true"], &[]);
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
 }

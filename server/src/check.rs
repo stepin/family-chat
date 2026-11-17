@@ -21,7 +21,7 @@ use serde_json::json;
 
 use crate::api::{self, ClientIp};
 use crate::app::{AppState, MAX_PUSH_DELAY_SECONDS, MAX_WAIT_SECONDS, endpoint_allowed};
-use crate::datadir::{check_admin_code, now_ms};
+use crate::datadir::now_ms;
 use crate::error::ApiError;
 use crate::ids::{DevId, UserId};
 use crate::webpush::{PushError, PushOutcome, Subscription};
@@ -104,8 +104,8 @@ pub fn access(st: &AppState, ip: IpAddr, headers: &HeaderMap) -> Result<Access, 
         });
     }
     st.limiter.check(ip)?;
-    let hash = st.store.read(|m| m.server.admin_code_hash.clone());
-    if hash.is_empty() {
+    let server = st.store.read(|m| m.server.clone());
+    if !server.join_code_active(now_ms()) {
         st.limiter.fail(ip);
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
@@ -114,7 +114,7 @@ pub fn access(st: &AppState, ip: IpAddr, headers: &HeaderMap) -> Result<Access, 
              device token (app: Settings → Family and server → Server check)",
         ));
     }
-    if check_admin_code(&hash, value) {
+    if server.check_join_code(value, now_ms()) {
         return Ok(Access::AdminCode);
     }
     st.limiter.fail(ip);

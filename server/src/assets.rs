@@ -81,7 +81,8 @@ impl Assets {
                 && !last.contains('.')
                 && self.exists(&format!("{path}/index.html")).await
             {
-                let mut loc = format!("/{path}/");
+                // Relative: under /f/<id>/ the family's own page, not the root's.
+                let mut loc = format!("{last}/");
                 if let Some(q) = uri.query() {
                     loc.push('?');
                     loc.push_str(q);

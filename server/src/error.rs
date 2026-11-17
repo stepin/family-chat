@@ -70,7 +70,13 @@ impl ApiError {
     pub fn is_auth_failure(&self) -> bool {
         matches!(
             self.code,
-            "invalid_invite" | "invite_used" | "invite_expired" | "invalid_code" | "bad_signature" | "bad_nonce"
+            "invalid_invite"
+                | "invite_used"
+                | "invite_expired"
+                | "invalid_code"
+                | "bad_admin_code"
+                | "bad_signature"
+                | "bad_nonce"
         )
     }
 }

@@ -43,7 +43,7 @@ async fn admin_code_works_once_and_files_are_private() {
     let hello = get(&srv.url("/v1/hello")).await.json();
     assert_eq!(hello["adminCodeActive"], true);
     assert_eq!(hello["maxEventBytes"], 262144);
-    let admin = join(&srv, "Мама", "adminCode", &srv.admin_code).await;
+    let admin = join(&srv, "Мама", "adminCode", &srv.setup_code).await;
     assert_eq!(get(&srv.url("/v1/hello")).await.json()["adminCodeActive"], false);
 
     let me = admin.get(&srv, "/v1/me").await;
@@ -61,7 +61,7 @@ async fn admin_code_works_once_and_files_are_private() {
         "POST",
         &srv.url("/v1/join"),
         &[("Content-Type", "application/json")],
-        Some(&join_body(&key, "Чужой", "adminCode", &srv.admin_code, &new_dev())),
+        Some(&join_body(&key, "Чужой", "adminCode", &srv.setup_code, &new_dev())),
     )
     .await;
     assert_eq!(res.status, 403, "{}", text(&res));
@@ -79,6 +79,7 @@ async fn admin_code_works_once_and_files_are_private() {
             let s = String::from_utf8_lossy(&content);
             assert!(!s.contains(&admin.token), "{}", f.display());
             assert!(!s.contains(&srv.admin_code), "{}", f.display());
+            assert!(!s.contains(&srv.setup_code), "{}", f.display());
         }
         #[cfg(unix)]
         {
@@ -101,7 +102,7 @@ async fn admin_code_works_once_and_files_are_private() {
 async fn invitation_is_one_time_and_expires() {
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(tmp.path(), Overrides::default()).await;
-    let admin = join(&srv, "Мама", "adminCode", &srv.admin_code).await;
+    let admin = join(&srv, "Мама", "adminCode", &srv.setup_code).await;
     let res = admin.send(&srv, "POST", "/v1/admin/invites", None).await;
     assert_eq!(res.status, 201);
     let inv = res.json();
@@ -739,7 +740,7 @@ async fn rate_limit_for_wrong_codes() {
         "POST",
         &srv.url("/v1/join"),
         &[("Content-Type", "application/json")],
-        Some(&join_body(&new_key(), "A", "adminCode", &srv.admin_code, &new_dev())),
+        Some(&join_body(&new_key(), "A", "adminCode", &srv.setup_code, &new_dev())),
     )
     .await;
     assert_eq!(res.status, 429);

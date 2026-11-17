@@ -24,28 +24,91 @@ pub const LOCK_FILE: &str = "fcd.lock";
 pub const SERVER_FILE: &str = "server.json";
 pub const VAPID_FILE: &str = "vapid.json";
 pub const CONFIG_FILE: &str = "config.toml";
+/// Folder of the extra families: `families/<familyId>/`.
+pub const FAMILIES_DIR: &str = "families";
+/// How long a setup code of a new family works.
+pub const SETUP_CODE_TTL_MS: u64 = 3600 * 1000;
 /// Directories of the data folder layout.
 pub const DIRS: [&str; 7] = ["users", "invites", "chats", "log", "blobs", "packs", "tmp"];
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+fn is_zero(v: &u64) -> bool {
+    *v == 0
+}
+
+/// `server.json` of a family (the root one or one in `families/<id>/`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerFile {
     pub format_version: u32,
     pub server_id: String,
     /// Milliseconds since the Unix epoch.
     pub created_at: u64,
-    /// SHA-256 (hex) of the normalised one-time administrator code; empty
-    /// once the first administrator joined with it.
-    pub admin_code_hash: String,
+    /// The family's one-time join code (setup or recovery): SHA-256 (hex)
+    /// of the normalised code; empty when there is none. The name on disk is
+    /// unchanged from 0.1.0, so an older fcd still reads the folder.
+    #[serde(rename = "adminCodeHash", default)]
+    pub join_code_hash: String,
+    /// When the join code stops working (ms); 0: no expiry.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub join_code_expires_at: u64,
+    /// Root only: the reusable server code that creates families. Empty
+    /// until `fcd reset-admin-code` on a folder made by 0.1.0.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub server_code_hash: String,
     /// `userId`s of administrators.
     #[serde(default)]
     pub admins: Vec<String>,
+    /// The first administrator is fully written. Missing in folders made
+    /// by 0.1.0: then "has an administrator".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_done: Option<bool>,
+    /// Name of an extra family (the root one's is `family_name` in config.toml).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family_name: Option<String>,
+    /// `Idempotency-Key` of the request that created this family.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_key: Option<String>,
+    /// What that request asked for (the name), to refuse a replay with another one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_fingerprint: Option<String>,
+}
+
+impl ServerFile {
+    pub fn is_set_up(&self) -> bool {
+        self.setup_done.unwrap_or(!self.admins.is_empty())
+    }
+
+    /// The join code works now.
+    pub fn join_code_active(&self, now: u64) -> bool {
+        !self.join_code_hash.is_empty() && (self.join_code_expires_at == 0 || now < self.join_code_expires_at)
+    }
+
+    /// Checks a join code (constant time), counting the expiry.
+    pub fn check_join_code(&self, candidate: &str, now: u64) -> bool {
+        self.join_code_active(now) && check_admin_code(&self.join_code_hash, candidate)
+    }
+
+    /// A new join code that works `ttl_ms` (0: until used).
+    pub fn new_join_code(&mut self, now: u64, ttl_ms: u64) -> String {
+        let code = generate_admin_code();
+        self.join_code_hash = hash_admin_code(&code);
+        self.join_code_expires_at = if ttl_ms == 0 { 0 } else { now + ttl_ms };
+        code
+    }
 }
 
 #[derive(Debug)]
 pub enum OpenError {
     Locked(PathBuf),
-    TooNew { found: u32, supported: u32 },
+    /// `--data` points inside `families/` of another data folder.
+    InsideFamilies {
+        root: PathBuf,
+        id: String,
+    },
+    TooNew {
+        found: u32,
+        supported: u32,
+    },
     Config(String),
     Io(String),
 }
@@ -60,6 +123,18 @@ impl fmt::Display for OpenError {
                     "папка данных {} уже используется другим процессом fcd; остановите его или укажите другую папку",
                     "the data folder {} is already in use by another fcd process; stop it or use another folder",
                     p.display()
+                )
+            ),
+            Self::InsideFamilies { root, id } => write!(
+                f,
+                "{}",
+                tr!(
+                    "это папка семьи внутри папки данных {}; её открывает только fcd этой папки: \
+                     используйте --data {} --family {id}",
+                    "this is a family folder inside the data folder {}; only that folder's fcd opens it: \
+                     use --data {} --family {id}",
+                    root.display(),
+                    root.display()
                 )
             ),
             Self::TooNew { found, supported } => write!(
@@ -84,14 +159,44 @@ fn io_err(what: &str, path: &Path, e: std::io::Error) -> OpenError {
     OpenError::Io(format!("{what} {}: {e}", path.display()))
 }
 
-/// An opened data folder. Holds the lock until dropped.
+/// An opened data folder (the root one holds the lock until dropped) or
+/// the folder of an extra family inside it (no lock of its own).
 pub struct DataDir {
     pub path: PathBuf,
     pub server: ServerFile,
     pub vapid: VapidKey,
-    /// Set only when this start created the folder: the code to print once.
+    /// Set only when this start created the folder: the server code to print once.
     pub new_admin_code: Option<String>,
-    _lock: File,
+    _lock: Option<File>,
+}
+
+/// Is `path` a family folder inside another data folder (`<root>/families/<id>`)?
+fn inside_families(path: &Path) -> Option<(PathBuf, String)> {
+    let parent = path.parent()?;
+    if parent.file_name()? != FAMILIES_DIR {
+        return None;
+    }
+    let root = parent.parent()?;
+    let id = path.file_name()?.to_string_lossy().into_owned();
+    root.join(SERVER_FILE).is_file().then(|| (root.to_path_buf(), id))
+}
+
+/// A family id: 16 characters of lowercase RFC 4648 base32 (80 bits).
+pub fn valid_family_id(id: &str) -> bool {
+    id.len() == 16 && id.bytes().all(|b| b.is_ascii_lowercase() || (b'2'..=b'7').contains(&b))
+}
+
+/// A new family id.
+pub fn new_family_id() -> String {
+    const ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
+    let bytes = random_bytes::<10>();
+    let mut acc: u128 = 0;
+    for b in bytes {
+        acc = (acc << 8) | b as u128;
+    }
+    (0..16)
+        .map(|i| ALPHABET[((acc >> (75 - 5 * i)) & 31) as usize] as char)
+        .collect()
 }
 
 impl DataDir {
@@ -116,6 +221,9 @@ impl DataDir {
         if created {
             restrict(&path, true);
         }
+        if let Some((root, id)) = inside_families(&path) {
+            return Err(OpenError::InsideFamilies { root, id });
+        }
         let lock = acquire_lock(&path)?;
 
         let server_path = path.join(SERVER_FILE);
@@ -138,7 +246,30 @@ impl DataDir {
             // An existing folder may have looser permissions.
             restrict(&p, true);
         }
+        let leftovers = fs::read_dir(path.join("tmp"))
+            .map(|rd| {
+                rd.flatten()
+                    .filter(|e| e.file_name().to_string_lossy().starts_with("family-"))
+                    .count()
+            })
+            .unwrap_or(0);
+        if leftovers > 0 {
+            tracing::warn!(
+                "{}",
+                tr!(
+                    "удалены остатки незавершённого создания семьи в tmp/: {leftovers}",
+                    "removed leftovers of an unfinished family creation in tmp/: {leftovers}"
+                )
+            );
+        }
         clean_tmp(&path.join("tmp"));
+        create_private_dir(&path.join(FAMILIES_DIR)).map_err(|e| {
+            io_err(
+                crate::lang::l("не удалось создать", "could not create"),
+                &path.join(FAMILIES_DIR),
+                e,
+            )
+        })?;
         for f in [LOCK_FILE, CONFIG_FILE, SERVER_FILE, VAPID_FILE] {
             let p = path.join(f);
             if p.exists() {
@@ -183,13 +314,16 @@ impl DataDir {
         let (server, new_admin_code) = match existing {
             Some(s) => (s, None),
             None => {
+                // The server code (reusable, creates families); the root family
+                // gets its setup code through `POST /v1/families` like any other.
                 let code = generate_admin_code();
                 let s = ServerFile {
                     format_version: FORMAT_VERSION,
                     server_id: B64.encode(random_bytes::<16>()),
                     created_at: now_ms(),
-                    admin_code_hash: hash_admin_code(&code),
-                    admins: Vec::new(),
+                    server_code_hash: hash_admin_code(&code),
+                    setup_done: Some(false),
+                    ..Default::default()
                 };
                 // Written last: a start interrupted before this point is
                 // simply a first start again.
@@ -204,16 +338,67 @@ impl DataDir {
                 server,
                 vapid,
                 new_admin_code,
-                _lock: lock,
+                _lock: Some(lock),
             },
             settings,
         ))
     }
 
-    /// Replaces the administrator code and returns the new one.
+    /// Opens an existing extra family `families/<id>/` of the root folder
+    /// `root` (already opened and locked). Never creates `server.json`: a
+    /// family without one is broken, not new. `vapid` is the root's key.
+    pub fn open_family(root: &Path, id: &str, vapid: VapidKey) -> Result<DataDir, OpenError> {
+        let path = root.join(FAMILIES_DIR).join(id);
+        if !path.is_dir() {
+            return Err(OpenError::Io(tr!(
+                "нет папки семьи {}",
+                "no family folder {}",
+                path.display()
+            )));
+        }
+        let server_path = path.join(SERVER_FILE);
+        let bytes = fs::read(&server_path).map_err(|e| {
+            io_err(
+                crate::lang::l("не удалось прочитать", "could not read"),
+                &server_path,
+                e,
+            )
+        })?;
+        let server = parse_server_file(&server_path, &bytes)?;
+        if server.family_name.as_deref().is_none_or(|n| n.trim().is_empty()) {
+            return Err(OpenError::Io(tr!(
+                "в {} нет имени семьи (familyName)",
+                "{} has no family name (familyName)",
+                server_path.display()
+            )));
+        }
+        for d in DIRS {
+            let p = path.join(d);
+            create_private_dir(&p)
+                .map_err(|e| io_err(crate::lang::l("не удалось создать", "could not create"), &p, e))?;
+        }
+        clean_tmp(&path.join("tmp"));
+        Ok(DataDir {
+            path,
+            server,
+            vapid,
+            new_admin_code: None,
+            _lock: None,
+        })
+    }
+
+    /// Replaces the server code (creates families) and returns the new one.
     pub fn reset_admin_code(&mut self) -> Result<String, OpenError> {
         let code = generate_admin_code();
-        self.server.admin_code_hash = hash_admin_code(&code);
+        self.server.server_code_hash = hash_admin_code(&code);
+        write_server_file(&self.path, &self.server)?;
+        Ok(code)
+    }
+
+    /// A recovery code of this family: one-time, makes whoever joins with
+    /// it an administrator (an existing member is promoted).
+    pub fn reset_join_code(&mut self) -> Result<String, OpenError> {
+        let code = self.server.new_join_code(now_ms(), 0);
         write_server_file(&self.path, &self.server)?;
         Ok(code)
     }
@@ -240,8 +425,9 @@ impl DataDir {
         Ok(true)
     }
 
+    /// Checks the server code.
     pub fn check_admin_code(&self, candidate: &str) -> bool {
-        check_admin_code(&self.server.admin_code_hash, candidate)
+        check_admin_code(&self.server.server_code_hash, candidate)
     }
 
     /// Members as stored in `users/` (for `fcd admin list`): userId, the
