@@ -32,6 +32,7 @@ export function statusLine(
     case 'stopped':
       return { text: t.status.connecting, tone: 'busy', relogin: false, removed: false };
     case 'offline':
+      if (s.unavailable) return { text: t.addFamily.unavailable, tone: 'error', relogin: false, removed: false };
       return {
         text: queued > 0 ? `${t.status.offline(s.since)}. ${t.status.offlineQueued}` : t.status.offline(s.since),
         tone: 'warn',

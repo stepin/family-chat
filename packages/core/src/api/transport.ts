@@ -19,6 +19,7 @@ import type {
   ChangeGroupRequest,
   Challenge,
   ChatEntry,
+  CreatedFamily,
   CreateGroupRequest,
   InviteCheck,
   KeysPage,
@@ -139,7 +140,7 @@ export class Transport {
       time: num(o, 'time'),
       maxEventBytes: num(o, 'maxEventBytes'),
       adminCodeActive: bool(o, 'adminCodeActive'),
-      offerSetup: bool(o, 'offerSetup'),
+      ...(typeof o.rootSetUp === 'boolean' ? { rootSetUp: o.rootSetUp } : {}),
       telegramStickers: o.telegramStickers === true,
       maxPartBytes: num(o, 'maxPartBytes'),
       maxBlobBytes: num(o, 'maxBlobBytes'),
@@ -148,6 +149,29 @@ export class Transport {
       maxSealedKeyBytes: num(o, 'maxSealedKeyBytes'),
       maxGroupMembers: num(o, 'maxGroupMembers'),
     };
+  }
+
+  // ---- families ----
+
+  /**
+   * `POST /v1/families` at the root address with the server admin code: the
+   * root family's setup code on a fresh server, otherwise a new family.
+   */
+  async createFamily(req: { adminCode: string; familyName?: string }, idempotencyKey: string, signal?: AbortSignal): Promise<CreatedFamily> {
+    const o = obj(
+      await this.#json({
+        method: 'POST',
+        path: '/v1/families',
+        template: '/v1/families',
+        json: req,
+        headers: { 'Idempotency-Key': idempotencyKey },
+        signal,
+      }),
+      'family',
+    );
+    const path = str(o, 'path');
+    if (path !== '' && !/^\/f\/[a-z2-7]{16}$/.test(path)) throw unexpected('family path');
+    return { familyId: nullableStr(o, 'familyId'), path, setupCode: str(o, 'setupCode') };
   }
 
   // ---- joining and devices ----

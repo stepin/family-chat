@@ -59,7 +59,13 @@ export type ServerErrorCode =
   | 'telegram_disabled'
   | 'telegram_unavailable'
   | 'telegram_busy'
-  | 'telegram_emoji_set';
+  | 'telegram_emoji_set'
+  // Families
+  | 'bad_admin_code'
+  | 'admin_code_not_set'
+  | 'name_taken'
+  | 'already_set_up'
+  | 'family_unavailable';
 
 const SERVER_CODES: ReadonlySet<string> = new Set<ServerErrorCode>([
   'bad_request',
@@ -116,6 +122,11 @@ const SERVER_CODES: ReadonlySet<string> = new Set<ServerErrorCode>([
   'telegram_unavailable',
   'telegram_busy',
   'telegram_emoji_set',
+  'bad_admin_code',
+  'admin_code_not_set',
+  'name_taken',
+  'already_set_up',
+  'family_unavailable',
 ]);
 
 /**

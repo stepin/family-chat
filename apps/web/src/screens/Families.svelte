@@ -2,6 +2,7 @@
   import type { AccountView } from '@family-chat/core';
   import Page from '../components/Page.svelte';
   import { app } from '../lib/app.svelte.ts';
+  import { familyAddressLabel } from '../lib/invite.ts';
   import { nav } from '../lib/nav.svelte.ts';
   import { pushAccountOf } from '../lib/push.ts';
   import { t } from '../lib/strings.ts';
@@ -24,13 +25,6 @@
     return app.accounts.some((b) => b.id !== a.id && b.userId === a.userId);
   }
 
-  function host(url: string): string {
-    try {
-      return new URL(url).host;
-    } catch {
-      return url;
-    }
-  }
 
   function ask(e: MouseEvent, a: AccountView): void {
     opener = e.currentTarget as HTMLElement;
@@ -68,7 +62,7 @@
         <li class="family" data-testid="family-row">
           <div class="lines">
             <span class="fname">{a.familyName}{#if a.id === app.account?.id}<span class="muted small"> · {t.families.current}</span>{/if}</span>
-            <span class="sub">{t.families.server(host(a.serverUrl))}</span>
+            <span class="sub">{t.families.server(familyAddressLabel(a.serverUrl))}</span>
             <span class="sub">{shared(a) ? t.families.sameIdentity : t.families.otherIdentity}{#if n > 0} · {t.families.unread(n)}{/if}</span>
             <span class="sub">{pushAccount?.id === a.id ? t.families.pushHere : t.families.pushElsewhere}</span>
           </div>

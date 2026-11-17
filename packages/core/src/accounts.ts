@@ -129,6 +129,90 @@ export async function recoveryPhrase(ctx: CoreContext, userId: string): Promise<
   return seedToPhrase(row.seed);
 }
 
+/** The root address of a family address: `https://host/f/<id>` gives `https://host`. */
+export function rootServerUrl(url: string): string {
+  return normalizeServerUrl(url).replace(/\/f\/[a-z2-7]{16}$/, '');
+}
+
+/** HTTPS, or plain HTTP to this computer: where the server admin code may be sent. */
+export function isSecureServer(url: string): boolean {
+  const u = new URL(normalizeServerUrl(url));
+  return u.protocol === 'https:' || ['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname);
+}
+
+/** Setting: a family being set up (to repeat a lost answer with the same key and identity). */
+export const SETTING_FAMILY_SETUP = 'family.setup';
+const SETUP_KEY_TTL_MS = 23 * 3600 * 1000;
+
+interface PendingSetup {
+  readonly root: string;
+  readonly familyName: string;
+  readonly key: string;
+  readonly at: number;
+  familyUrl?: string;
+  userId?: string;
+}
+
+export interface SetUpFamilyInput {
+  /** Any address of the server (its root, or of one of its families). */
+  readonly serverUrl: string;
+  /** The server admin code (reusable; creates families). */
+  readonly serverCode: string;
+  /** The name of a new family; not used for the root family of a fresh server. */
+  readonly familyName?: string;
+  readonly name: string;
+  readonly gender?: Gender;
+  /** An identity stored on this device; a new one otherwise. */
+  readonly userId?: string;
+}
+
+/**
+ * Sets up a family with the server admin code: `POST /v1/families` at the
+ * root (the root family on a fresh server, a new family `/f/<id>`
+ * otherwise), then joins it with the one-time setup code. The request key
+ * and the new identity are stored before joining, so a repeat after a lost
+ * answer uses the same ones; a family already set up by this identity is
+ * entered by signature.
+ */
+export async function setUpFamily(ctx: CoreContext, input: SetUpFamilyInput): Promise<{ row: AccountRow; familyUrl: string }> {
+  const root = rootServerUrl(input.serverUrl);
+  if (!isSecureServer(root)) throw new CoreError('insecure-server', 'the server admin code is sent only over HTTPS');
+  const hello = await fetchHello(ctx, root);
+  if (hello.rootSetUp === undefined) {
+    // A 0.1.0 server: its one-time admin code joins the only family directly.
+    const row = await joinServer(ctx, { serverUrl: root, code: { adminCode: input.serverCode }, name: input.name, gender: input.gender ?? 'm', ...(input.userId ? { userId: input.userId } : {}) });
+    return { row, familyUrl: root };
+  }
+  const familyName = hello.rootSetUp ? (input.familyName ?? '').trim() : '';
+  const now = ctx.clock.now();
+  const saved = (await ctx.db.settings.get(SETTING_FAMILY_SETUP))?.value as PendingSetup | undefined;
+  const pending: PendingSetup =
+    saved && saved.root === root && saved.familyName === familyName && now - saved.at < SETUP_KEY_TTL_MS
+      ? { ...saved }
+      : { root, familyName, key: base32Encode(randomBytes(16)), at: now };
+  const save = () => ctx.db.settings.put({ key: SETTING_FAMILY_SETUP, value: pending });
+  await save();
+  const transport = ctx.transport(root);
+  let setupCode: string | null = null;
+  try {
+    const r = await transport.createFamily({ adminCode: input.serverCode, ...(familyName ? { familyName } : {}) }, pending.key);
+    pending.familyUrl = root + r.path;
+    setupCode = r.setupCode;
+  } catch (e) {
+    // Set up already by an earlier attempt whose answer was lost: enter it by signature.
+    if (!(isApiError(e, 'already_set_up') && pending.familyUrl && pending.userId)) throw e;
+  }
+  const familyUrl = pending.familyUrl!;
+  if (!pending.userId) pending.userId = input.userId ?? (await createIdentity(ctx));
+  await save();
+  const row =
+    setupCode === null
+      ? await addDevice(ctx, familyUrl, await ctx.keys(pending.userId), undefined)
+      : await joinServer(ctx, { serverUrl: familyUrl, code: { adminCode: setupCode }, name: input.name, gender: input.gender ?? 'm', userId: pending.userId });
+  await ctx.db.settings.delete(SETTING_FAMILY_SETUP);
+  return { row, familyUrl };
+}
+
 export async function fetchHello(ctx: CoreContext, serverUrl: string): Promise<Hello> {
   const hello = await ctx.transport(normalizeServerUrl(serverUrl)).hello();
   if (hello.protocol !== SUPPORTED_PROTOCOL) throw new CoreError('unsupported-server');

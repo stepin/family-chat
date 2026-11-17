@@ -154,6 +154,16 @@ async fn check_endpoints_need_admin_code() {
     )
     .await;
     assert_eq!(res.status, 200);
+    // Before setup the server code (the only one printed) opens the checks too.
+    let server_code = format!("Bearer {}", srv.admin_code);
+    let res = request(
+        "GET",
+        &srv.url("/v1/check/wait?seconds=0"),
+        &[("Authorization", &server_code)],
+        None,
+    )
+    .await;
+    assert_eq!(res.status, 200);
 }
 
 #[tokio::test]
@@ -166,9 +176,11 @@ async fn check_access_after_setup() {
         let url = srv.url("/v1/check/wait?seconds=0");
         async move { request("GET", &url, &[("Authorization", &auth)], None).await }
     };
-    // The spent code names the device-token path.
+    // The spent code names the device-token path; the server code no longer opens the checks.
     let res = wait(code.clone()).await;
     assert_eq!(res.status, 401);
+    assert_eq!(res.json()["error"], "admin_code_inactive");
+    let res = wait(format!("Bearer {}", srv.admin_code)).await;
     assert_eq!(res.json()["error"], "admin_code_inactive");
     assert!(res.json()["message"].as_str().unwrap().contains("device token"));
     assert_eq!(wait(admin.auth()).await.status, 200);

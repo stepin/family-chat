@@ -105,7 +105,11 @@ pub fn access(st: &AppState, ip: IpAddr, headers: &HeaderMap) -> Result<Access, 
     }
     st.limiter.check(ip)?;
     let server = st.store.read(|m| m.server.clone());
-    if !server.join_code_active(now_ms()) {
+    // Until the root family is set up its checks also take the server code:
+    // it is the only code the owner has then (printed at first start). It
+    // only opens these checks, never a family.
+    let server_code = st.family_id.is_none() && !server.is_set_up() && !server.server_code_hash.is_empty();
+    if !server.join_code_active(now_ms()) && !server_code {
         st.limiter.fail(ip);
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
@@ -114,7 +118,9 @@ pub fn access(st: &AppState, ip: IpAddr, headers: &HeaderMap) -> Result<Access, 
              device token (app: Settings → Family and server → Server check)",
         ));
     }
-    if server.check_join_code(value, now_ms()) {
+    if server.check_join_code(value, now_ms())
+        || (server_code && crate::datadir::check_admin_code(&server.server_code_hash, value))
+    {
         return Ok(Access::AdminCode);
     }
     st.limiter.fail(ip);

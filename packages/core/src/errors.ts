@@ -49,7 +49,9 @@ export type CoreErrorCode =
   /** Forwarding needs the attachment files on this device (download them first). */
   | 'not-downloaded'
   /** The message cannot be changed this way (not mine, deleted, not a message). */
-  | 'not-allowed';
+  | 'not-allowed'
+  /** The server admin code would go over plain HTTP to a host that is not this computer. */
+  | 'insecure-server';
 
 export class CoreError extends Error {
   override readonly name = 'CoreError';

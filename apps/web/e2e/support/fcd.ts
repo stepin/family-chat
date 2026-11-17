@@ -32,7 +32,7 @@ export class Fcd {
       const timer = setTimeout(() => reject(new Error(`fcd did not start:\n${this.output}`)), 30_000);
       const onData = (chunk: Buffer) => {
         this.output += chunk.toString();
-        const code = /код администратора: ([0-9A-Z-]{19})/.exec(this.output);
+        const code = /код администратора сервера: ([0-9A-Z-]{19})/.exec(this.output);
         if (code) this.adminCode = code[1]!;
         const addr = /слушаю 127\.0\.0\.1:(\d+)/.exec(this.output);
         if (addr && this.adminCode) {

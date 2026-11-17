@@ -13,6 +13,8 @@ import {
   formatLogEntry,
   formatReport,
   longRequest,
+  codeWorks,
+  familyOfPage,
   normalizeServerUrl,
   pushServiceHost,
   sameBytes,
@@ -32,6 +34,7 @@ const locale = intlLocale(pageLang);
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const serverInput = $<HTMLInputElement>('server');
+const pageTitle = document.querySelector('h1')!;
 const codeInput = $<HTMLInputElement>('code');
 const helloStatus = $('hello-status');
 const helloList = $<HTMLDListElement>('hello');
@@ -45,7 +48,9 @@ const pushLaterBtn = $<HTMLButtonElement>('push-later-btn');
 
 const waitSeconds = waitSecondsFromQuery(location.search);
 waitBtn.textContent = tr(`Проверить длинный запрос (${waitSeconds} с)`, `Check a long request (${waitSeconds} s)`);
-serverInput.value = location.origin;
+// The family of this page: `/server/` → the root, `/f/<id>/server/` → that family.
+const pageFamily = familyOfPage(location.href);
+serverInput.value = pageFamily;
 
 let hello: Outcome<Hello> | null = null;
 let helloBase = '';
@@ -109,7 +114,7 @@ function renderLog(): void {
 }
 
 function server(): string {
-  const s = normalizeServerUrl(serverInput.value, location.origin);
+  const s = normalizeServerUrl(serverInput.value, pageFamily);
   serverInput.value = s;
   return s;
 }
@@ -165,6 +170,8 @@ function renderHello(): void {
   const h = hello.value;
   helloStatus.className = '';
   helloStatus.textContent = tr(`Сервер отвечает (${hello.ms} мс).`, `The server is answering (${hello.ms} ms).`);
+  // The header names the family and the address being checked.
+  pageTitle.textContent = tr(`Проверка: семья «${h.familyName}», ${helloBase}`, `Check: family “${h.familyName}”, ${helloBase}`);
   const rows: [string, string][] = [
     [tr('Семья', 'Family'), h.familyName],
     [tr('Версия', 'Version'), tr(`fcd ${h.version}, протокол ${h.protocol}`, `fcd ${h.version}, protocol ${h.protocol}`)],
@@ -176,7 +183,7 @@ function renderHello(): void {
     ['Telegram', h.telegramStickers ? tr('стикеры по ссылке: включено', 'stickers by link: on') : tr('стикеры по ссылке: выключено', 'stickers by link: off')],
     [
       tr('Код администратора', 'Admin code'),
-      h.adminCodeActive === false
+      !codeWorks(h)
         ? tr(`уже использован: проверяйте сервер в приложении (${settingsPath})`, `already used: check the server in the app (${settingsPath})`)
         : tr('действует', 'active'),
     ],

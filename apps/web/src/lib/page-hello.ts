@@ -1,11 +1,7 @@
-// The hello of the server the app was opened from: Welcome and
-// AdminSetup share one request per address, so both screens agree on
-// pending/done/failed and the request is not sent twice.
-//
-// One server holds one family. "Set up for my family" is offered while the
-// server has no administrator (the admin code is active), when the server
-// runs with `--offer-setup`, or when the hello could not be read (never hide
-// the only way to set up because of a network error).
+// The hello of the server the app was opened from, one request per address
+// (AdminSetup reads it to fill the server field). "Set up for my family" is
+// always offered: one fcd holds several families, and setting one up needs
+// the server admin code anyway.
 
 import type { FamilyChatCore, Hello } from '@family-chat/core';
 
@@ -36,25 +32,4 @@ export function pageHello(core: Pick<FamilyChatCore, 'serverInfo'>, url: string,
 /** For tests. */
 export function forgetPageHello(): void {
   cache.clear();
-}
-
-/** Show the setup button? `undefined` while the hello is pending (the slot is kept, the button hidden). */
-export function offerSetup(state: HelloState, hello: Pick<Hello, 'adminCodeActive' | 'offerSetup'> | null): boolean | undefined {
-  if (state === 'pending') return undefined;
-  if (state === 'failed' || !hello) return true;
-  return hello.adminCodeActive || hello.offerSetup;
-}
-
-export type SetupField =
-  /** The page's own server: its address. */
-  | { kind: 'page' }
-  /** This server is taken, setup goes to another server: an empty field with a hint. */
-  | { kind: 'other' }
-  /** This server is taken and setup is not offered: "an administrator already exists". */
-  | { kind: 'taken' };
-
-/** What AdminSetup puts in the server field, by the page server's hello. */
-export function setupField(state: HelloState, hello: Pick<Hello, 'adminCodeActive' | 'offerSetup'> | null): SetupField {
-  if (state !== 'done' || !hello || hello.adminCodeActive) return { kind: 'page' };
-  return hello.offerSetup ? { kind: 'other' } : { kind: 'taken' };
 }

@@ -20,9 +20,11 @@ import {
   removeAccount,
   restoreAccount,
   revokeIdentity,
+  setUpFamily,
   updateProfile,
   type JoinInput,
   type RestoreInput,
+  type SetUpFamilyInput,
 } from './accounts.ts';
 import type { FetchFn } from './api/transport.ts';
 import type {
@@ -491,6 +493,19 @@ export class FamilyChatCore {
     let firstChatId: string | null = null;
     if (inviter && inviter !== row.userId) firstChatId = await this.openChat(row.id, inviter).catch(() => null);
     return { ...view, firstChatId };
+  }
+
+  /**
+   * Sets up a family with the server admin code and joins it as its first
+   * administrator: the root family of a fresh server, otherwise a new family
+   * at `/f/<id>` (its address is `familyUrl`). Throws CoreError
+   * `insecure-server` before sending the code over plain HTTP to another
+   * computer; ApiError `bad_admin_code`, `admin_code_not_set`, `name_taken`.
+   */
+  async setUpFamily(input: SetUpFamilyInput): Promise<JoinResult & { readonly familyUrl: string }> {
+    const { row, familyUrl } = await setUpFamily(this.#ctx, input);
+    const view = await this.#adopt(row);
+    return { ...view, firstChatId: null, familyUrl };
   }
 
   /**

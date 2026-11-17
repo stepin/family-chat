@@ -10,7 +10,7 @@ export function joinProblem(e: unknown): JoinProblem {
   if (isApiError(e, 'invite_used')) return 'used';
   if (isApiError(e, 'invite_expired')) return 'expired';
   if (isApiError(e, 'invalid_invite')) return 'invalid';
-  if (isApiError(e, 'invalid_code')) return 'code';
+  if (isApiError(e, 'invalid_code') || isApiError(e, 'bad_admin_code')) return 'code';
   if (isCoreError(e, 'account-exists')) return 'already';
   return null;
 }
@@ -43,6 +43,10 @@ export function errorText(e: unknown): string {
   if (isCoreError(e, 'busy')) return t.errors.busy;
   if (isApiError(e, 'rate_limited')) return t.errors.rateLimited(e.retryAfterMs ? Math.ceil(e.retryAfterMs / 1000) : undefined);
   if (isApiError(e, 'storage_full')) return t.errors.storageFull;
+  if (isApiError(e, 'admin_code_not_set')) return t.admin.codeNotSet;
+  if (isApiError(e, 'name_taken')) return t.admin.nameTaken;
+  if (isCoreError(e, 'insecure-server')) return t.admin.insecure;
+  if (isApiError(e, 'family_unavailable')) return t.addFamily.unavailable;
   if (isApiError(e, 'unexpected_response') || isApiError(e, 'not_found')) return t.errors.notServer;
   if (isApiError(e) && e.status >= 500) return t.errors.unreachable;
   const code = e instanceof Error ? (e as { code?: unknown }).code : undefined;

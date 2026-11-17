@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AccountView } from '@family-chat/core';
 import { showUnread } from './badge.ts';
-import { sameServer } from './invite.ts';
+import { familyAddressLabel, sameServer } from './invite.ts';
 import { notifyState, pushAccountOf, type NotifyEnv } from './push.ts';
 
 function acc(over: Partial<AccountView>): AccountView {
@@ -84,5 +84,18 @@ describe('badge without the API', () => {
     expect(doc.title).toBe('(5) Family Chat');
     const throwing = { setAppBadge: () => { throw new Error('denied'); } };
     expect(() => showUnread(1, throwing, doc)).not.toThrow();
+  });
+});
+
+describe('family address labels', () => {
+  it('tells families of one host apart', () => {
+    const root = familyAddressLabel('https://chat.example.org');
+    const a = familyAddressLabel('https://chat.example.org/f/abcdefghijklmnop');
+    const b = familyAddressLabel('https://chat.example.org/f/qrstuvwxyz234567/');
+    expect(root).toBe('chat.example.org');
+    expect(a).toBe('chat.example.org · /f/abcd…');
+    expect(b).toBe('chat.example.org · /f/qrst…');
+    expect(new Set([root, a, b]).size).toBe(3);
+    expect(familyAddressLabel('https://example.org/chat')).toBe('example.org/chat');
   });
 });

@@ -84,3 +84,21 @@ export function sameServer(a: string, b: string): boolean {
   };
   return norm(a) === norm(b);
 }
+
+/**
+ * How a family's address is shown under its name: the host for a family at
+ * a server's own address, "host · /f/abcd…" (the first 4 characters of its
+ * id) for one of several families on one server, so families of one host
+ * can be told apart.
+ */
+export function familyAddressLabel(serverUrl: string): string {
+  try {
+    const u = new URL(serverUrl);
+    const m = /\/f\/([a-z2-7]{16})\/?$/.exec(u.pathname);
+    if (m) return `${u.host} · /f/${m[1]!.slice(0, 4)}…`;
+    const path = u.pathname.replace(/\/+$/, '');
+    return path ? `${u.host}${path}` : u.host;
+  } catch {
+    return serverUrl;
+  }
+}

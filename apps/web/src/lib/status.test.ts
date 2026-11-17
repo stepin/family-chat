@@ -14,6 +14,11 @@ describe('statusLine', () => {
     expect(statusLine({ kind: 'offline', since }, 'Семья', 2).text).toContain('отправятся, когда связь вернётся');
     expect(statusLine({ kind: 'login-invalid' }, 'Семья')).toMatchObject({ text: 'Вход недействителен', relogin: true });
     expect(statusLine({ kind: 'removed' }, 'Ивановы')).toMatchObject({ text: 'Вас отключили от семьи «Ивановы»', removed: true });
+    // A family broken on its server (503 family_unavailable): the same words as in "Add a family".
+    expect(statusLine({ kind: 'offline', since, unavailable: true }, 'Семья')).toMatchObject({
+      text: 'Семья временно недоступна на сервере. Сообщите владельцу сервера.',
+      tone: 'error',
+    });
   });
 });
 

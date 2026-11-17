@@ -7,6 +7,7 @@ import {
   fetchHello,
   formatReport,
   longRequest,
+  familyOfPage,
   normalizeServerUrl,
   pushServiceHost,
   sameBytes,
@@ -29,7 +30,6 @@ const hello: Hello = {
   vapidPublicKey: 'BAAA',
   time: 1_700_000_000_000,
   adminCodeActive: true,
-  offerSetup: false,
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -41,6 +41,15 @@ describe('server check', () => {
     expect(normalizeServerUrl('', 'http://localhost:8787')).toBe('http://localhost:8787');
     expect(normalizeServerUrl(' chat.example.net/ ', 'x')).toBe('https://chat.example.net');
     expect(normalizeServerUrl('http://192.168.1.10:8787/server/', 'x')).toBe('http://192.168.1.10:8787');
+    // A family of several on one server keeps its path.
+    expect(normalizeServerUrl('https://chat.example.net/f/abcdefghijklmnop/', 'x')).toBe('https://chat.example.net/f/abcdefghijklmnop');
+    expect(normalizeServerUrl('https://chat.example.net/f/abcdefghijklmnop/server/', 'x')).toBe('https://chat.example.net/f/abcdefghijklmnop');
+  });
+
+  it('takes the family from the page address', () => {
+    expect(familyOfPage('https://chat.example.net/server/')).toBe('https://chat.example.net');
+    expect(familyOfPage('https://chat.example.net/f/abcdefghijklmnop/server/?x=1#y')).toBe('https://chat.example.net/f/abcdefghijklmnop');
+    expect(familyOfPage('http://localhost:8787/proxy/sub/server/')).toBe('http://localhost:8787/proxy/sub');
     expect(normalizeServerUrl('ftp://a', 'fallback')).toBe('fallback');
   });
 

@@ -4,6 +4,7 @@
   import Icon from './Icon.svelte';
   import { emblems } from '../lib/emblem.ts';
   import { app } from '../lib/app.svelte.ts';
+  import { familyAddressLabel } from '../lib/invite.ts';
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
@@ -74,7 +75,7 @@
           {#if marks.get(a.id)}<FamilyEmblem emblem={marks.get(a.id)!} size={32} />{/if}
           <span class="lines">
             <span class="fname">{a.familyName}</span>
-            <span class="sub">{a.id === account.id ? t.families.current : new URL(a.serverUrl).host}</span>
+            <span class="sub">{a.id === account.id ? t.families.current : familyAddressLabel(a.serverUrl)}</span>
           </span>
           {#if n > 0}
             <span class="badge tabular" aria-hidden="true">{n}</span>

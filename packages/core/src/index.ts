@@ -61,7 +61,8 @@ export { MAX_AVATAR_BYTES } from './avatars.ts';
 // Attachment limits and types of the protocol, for the UI's own checks.
 export { IMAGE_TYPES, MAX_ATTACHMENTS, MAX_THUMB_BYTES } from '@family-chat/protocol';
 export type { FileStore, FileStoreKind, FileStorePreference, OpfsDirectory } from './files.ts';
-export type { JoinInput, RestoreInput } from './accounts.ts';
+export type { JoinInput, RestoreInput, SetUpFamilyInput } from './accounts.ts';
+export { rootServerUrl, isSecureServer } from './accounts.ts';
 export type { ConnectionState } from './sync.ts';
 export type { PushNotice } from './push.ts';
 export { SETTING_PUSH_SHOW_TEXT } from './push.ts';

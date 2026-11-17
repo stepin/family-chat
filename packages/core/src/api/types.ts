@@ -18,12 +18,13 @@ export interface Hello {
   /** Server clock, ms. */
   readonly time: number;
   readonly maxEventBytes: number;
+  /** The family has a join code that works (a setup or recovery code). */
   readonly adminCodeActive: boolean;
   /**
-   * `fcd --offer-setup`: the first screen offers family setup even when this
-   * server has its family (to set one up on another server).
+   * Only at the root address of a fcd 1.0+: the root family is set up.
+   * Undefined at `/f/<id>` and from 0.1.0 servers.
    */
-  readonly offerSetup: boolean;
+  readonly rootSetUp?: boolean;
   /** The server has a Telegram bot token: sticker sets load by link (false from older servers). */
   readonly telegramStickers: boolean;
   /** Limits (docs/API.md 1.7). */
@@ -346,4 +347,14 @@ export interface TelegramSet {
   readonly title: string;
   readonly stickers: readonly { readonly id: string; readonly emoji: string | null; readonly type: 'webp' | 'tgs' }[];
   readonly skipped: { readonly video: number; readonly other: number };
+}
+
+/** `POST /v1/families`. */
+export interface CreatedFamily {
+  /** Null for the root family (its setup on a fresh server). */
+  readonly familyId: string | null;
+  /** `/f/<id>`, or `` for the root family. */
+  readonly path: string;
+  /** The one-time code to join as the first administrator (1 hour). */
+  readonly setupCode: string;
 }

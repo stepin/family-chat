@@ -20,7 +20,8 @@ import { writable, type Readable, type Writable } from './util/readable.ts';
 export type ConnectionState =
   | { readonly kind: 'connecting' }
   | { readonly kind: 'connected'; readonly since: number }
-  | { readonly kind: 'offline'; readonly since: number }
+  /** `unavailable`: the server answers that this family is broken there (503 `family_unavailable`). */
+  | { readonly kind: 'offline'; readonly since: number; readonly unavailable?: boolean }
   | { readonly kind: 'login-invalid' }
   /** Removed from the family, or (`reason: 'revoked'`) my identity was revoked. */
   | { readonly kind: 'removed'; readonly reason?: 'removed' | 'revoked' }
@@ -126,7 +127,10 @@ export class SyncEngine {
         }
         if (isNetworkError(e) && e.reason === 'aborted') continue; // kick()
         this.#failures++;
-        if (isTransient(e)) {
+        if (isApiError(e, 'family_unavailable')) {
+          this.#offlineSince ??= ctx.clock.now();
+          this.#state.set({ kind: 'offline', since: this.#offlineSince, unavailable: true });
+        } else if (isTransient(e)) {
           this.#offlineSince ??= ctx.clock.now();
           this.#state.set({ kind: 'offline', since: this.#offlineSince });
         } else {

@@ -1,5 +1,5 @@
 // End to end against real fcd servers: the setup button on the first
-// screen only while the server is free (or with --offer-setup), the server
+// screen always (it needs the server admin code), the server
 // check in Family and server for administrators only, Diagnostics links, and
 // a single emoji shown twice as large. Each scenario runs on its own fcd
 // (fresh folder, --port 0), so the admin code of one never affects another.
@@ -33,46 +33,40 @@ async function back(page: Page, times = 1): Promise<void> {
   for (let i = 0; i < times; i++) await page.getByRole('button', { name: 'Назад' }).click();
 }
 
-test('the setup button is offered only while the server is free; the server check is for administrators', async ({ newUser }) => {
+test('the setup button is always offered, with who has the code; the server check is for administrators', async ({ newUser }) => {
   test.setTimeout(240_000);
   const fcd = await server();
 
-  await test.step('a free server offers setup, and the slot does not jump', async () => {
+  await test.step('the first screen: the invitation first, setup second with its hint', async () => {
     const visitor = await newUser();
-    // Hold the hello to see the pending state: the setup slot is kept, hidden.
-    let release = () => {};
-    const held = new Promise<void>((r) => (release = r));
-    await visitor.page.route('**/v1/hello', async (route) => {
-      await held;
-      await route.continue();
-    });
     await visitor.page.goto(`${fcd.url}/`);
-    const welcome = visitor.page.locator('main.welcome');
-    await expect(welcome).toHaveAttribute('data-hello', 'pending');
-    await expect(setupButton(visitor.page)).toBeHidden();
     const invite = visitor.page.getByRole('button', { name: 'У меня есть приглашение' });
-    const before = await invite.boundingBox();
-    release();
-    await expect(welcome).toHaveAttribute('data-hello', 'done');
+    await expect(invite).toBeVisible();
     await expect(setupButton(visitor.page)).toBeVisible();
-    expect(await invite.boundingBox()).toEqual(before);
-    await expect(visitor.page.getByTestId('server-taken')).toHaveCount(0);
+    await expect(setupButton(visitor.page)).toHaveAccessibleDescription('Нужен код от владельца сервера.');
+    expect((await invite.boundingBox())!.y).toBeLessThan((await setupButton(visitor.page).boundingBox())!.y);
     await visitor.context.close();
   });
 
   const mama: User = await newUser({ viewport: { width: 1200, height: 800 } });
   const { inviteLink } = await setupAdmin(mama.page, fcd);
 
-  await test.step('after the administrator joined, a new visitor gets no setup button', async () => {
+  await test.step('after the administrator joined, setup is still offered (a new family on this server)', async () => {
     const visitor = await newUser();
     await visitor.page.goto(`${fcd.url}/`);
-    await expect(visitor.page.locator('main.welcome')).toHaveAttribute('data-hello', 'done');
-    await expect(setupButton(visitor.page)).toHaveCount(0);
-    await expect(visitor.page.getByTestId('server-taken')).toHaveText(
-      'На этом сервере уже есть семья. Чтобы войти, попросите приглашение у её участника.',
-    );
-    // A direct link to setup says at once that the server is taken.
-    await visitor.page.getByRole('button', { name: 'У меня есть приглашение' }).click();
+    await expect(setupButton(visitor.page)).toBeVisible();
+    await expect(visitor.page.getByTestId('server-taken')).toHaveCount(0);
+    // A wrong server code is named as such.
+    await setupButton(visitor.page).click();
+    await expect(visitor.page.getByLabel('Адрес сервера')).toHaveValue(fcd.url);
+    await visitor.page.getByLabel('Код администратора сервера').fill('0000-0000-0000-0000');
+    await visitor.page.getByRole('button', { name: 'Дальше' }).click();
+    await expect(visitor.page.getByText('Сервер отвечает. На нём будет новая семья со своим адресом.')).toBeVisible();
+    await visitor.page.getByLabel('Название семьи').fill('Чужие');
+    await visitor.page.getByLabel('Как вас зовут').fill('Чужой');
+    await visitor.page.getByRole('button', { name: 'Создать семью' }).click();
+    await expect(visitor.page.getByRole('alert')).toHaveText('Код не подошёл. Нужен код администратора сервера, его даёт владелец сервера.');
+    await expect(visitor.page.getByLabel('Код администратора сервера')).toHaveAttribute('aria-invalid', 'true');
     await visitor.context.close();
   });
 
@@ -112,27 +106,6 @@ test('the setup button is offered only while the server is free; the server chec
     await expect(papa.page.getByTestId('server-check-admin-only')).toHaveText('Проверку сервера делает администратор семьи.');
     await expect(papa.page.getByRole('button', { name: 'Проверить сервер' })).toHaveCount(0);
   });
-});
-
-test('with --offer-setup the setup button stays and setup goes to another server', async ({ newUser }) => {
-  test.setTimeout(180_000);
-  const fcd = await server('Петровы', ['--offer-setup', 'true']);
-  const mama: User = await newUser();
-  await setupAdmin(mama.page, fcd, 'Мама', 'Петровы');
-
-  const visitor = await newUser();
-  await visitor.page.goto(`${fcd.url}/`);
-  await expect(visitor.page.locator('main.welcome')).toHaveAttribute('data-hello', 'done');
-  await setupButton(visitor.page).click();
-  await expect(visitor.page.getByTestId('setup-other-server')).toHaveText('На этом сервере уже есть семья. Укажите адрес своего сервера.');
-  const field = visitor.page.getByLabel('Адрес сервера');
-  await expect(field).toBeEnabled();
-  await expect(field).toHaveValue('');
-  // An error about the other server names the address typed.
-  await field.fill(fcd.url);
-  await visitor.page.getByLabel('Код администратора').fill('0000-0000-0000-0000');
-  await visitor.page.getByRole('button', { name: 'Дальше' }).click();
-  await expect(visitor.page.getByRole('alert')).toContainText(`На сервере ${fcd.url} администратор уже есть`);
 });
 
 test('a single emoji is twice as large; edited to text it is normal; with a quote it keeps the bubble', async ({ newUser }) => {

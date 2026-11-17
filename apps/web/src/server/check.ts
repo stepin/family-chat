@@ -27,7 +27,8 @@ export interface Hello {
   vapidPublicKey: string | null;
   time: number;
   adminCodeActive?: boolean;
-  offerSetup?: boolean;
+  /** At the root address of fcd 1.0: the root family is set up. */
+  rootSetUp?: boolean;
   /** A Telegram bot token is set (sticker sets by link). */
   telegramStickers?: boolean;
 }
@@ -61,17 +62,33 @@ export interface LogEntry {
   text: string;
 }
 
-/** Trims, adds `https://` when no scheme is given, drops path and trailing slash. */
+/**
+ * Trims, adds `https://` when no scheme is given, drops a trailing
+ * `/server/` (the page itself), query and slash. The path stays: a family at
+ * `https://host/f/<id>` is checked at its own address.
+ */
+/** The checks take a code now: the family's join code, or the server code before the root family is set up. */
+export function codeWorks(h: Pick<Hello, 'adminCodeActive' | 'rootSetUp'>): boolean {
+  return h.adminCodeActive !== false || h.rootSetUp === false;
+}
+
 export function normalizeServerUrl(input: string, fallback: string): string {
   const raw = input.trim() || fallback;
   const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
   try {
     const u = new URL(withScheme);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return fallback;
-    return u.origin;
+    const path = u.pathname.replace(/\/(server\/?|server\/index\.html)$/, '/').replace(/\/+$/, '');
+    return `${u.origin}${path}`;
   } catch {
     return fallback;
   }
+}
+
+/** The family whose page this is: the page address without its `/server/` tail. */
+export function familyOfPage(href: string): string {
+  const u = new URL(href);
+  return normalizeServerUrl(`${u.origin}${u.pathname}`, u.origin);
 }
 
 /** Upper case, no spaces; dashes kept as typed (the server ignores them). */
@@ -242,8 +259,8 @@ export function formatReport(r: ReportInput): string {
         `  family “${h.familyName}”, kept for ${h.retentionDays} days, files up to ${h.maxFileMb} MB`,
       ),
       tr(
-        `  push ${h.push ? 'включён' : 'выключен'}, код администратора ${h.adminCodeActive === false ? 'уже использован' : 'действует'}`,
-        `  push ${h.push ? 'on' : 'off'}, admin code ${h.adminCodeActive === false ? 'already used' : 'active'}`,
+        `  push ${h.push ? 'включён' : 'выключен'}, код администратора ${codeWorks(h) ? 'действует' : 'уже использован'}`,
+        `  push ${h.push ? 'on' : 'off'}, admin code ${codeWorks(h) ? 'active' : 'already used'}`,
       ),
       tr(`  стикеры Telegram по ссылке: ${h.telegramStickers ? 'включено' : 'выключено'}`, `  Telegram stickers by link: ${h.telegramStickers ? 'on' : 'off'}`),
       tr(`  часы сервера минус часы устройства: ${r.clockOffsetSec ?? '?'} с`, `  server clock minus device clock: ${r.clockOffsetSec ?? '?'} s`),

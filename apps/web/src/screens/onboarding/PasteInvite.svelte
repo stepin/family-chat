@@ -6,7 +6,7 @@
   import { nav } from '../../lib/nav.svelte.ts';
   import { t } from '../../lib/strings.ts';
 
-  let { installed = false, setup = true }: { installed?: boolean; setup?: boolean } = $props();
+  let { installed = false }: { installed?: boolean } = $props();
 
   let text = $state('');
   let error = $state<string | null>(null);
@@ -61,7 +61,7 @@
     </form>
     {#if installed}
       <div class="others">
-        {#if setup}<button class="link-btn" type="button" onclick={() => nav.push({ name: 'admin' })}>{t.welcome.setup}</button>{/if}
+        <button class="link-btn" type="button" onclick={() => nav.push({ name: 'admin' })}>{t.welcome.setup}</button>
         <button class="link-btn" type="button" onclick={() => nav.push({ name: 'restore' })}>{t.welcome.restore}</button>
       </div>
     {/if}

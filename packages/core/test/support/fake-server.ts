@@ -108,8 +108,10 @@ export class FakeServer {
   oldestGseq = 1;
   nextGseq = 1;
   now = 1_800_000_000_000;
-  /** `/v1/hello` offerSetup (`fcd --offer-setup`). */
-  offerSetup = false;
+  /** `/v1/hello` offerSetup (kept by fcd 1.0 for installed 0.1.0 apps, always true). */
+  offerSetup = true;
+  /** `/v1/hello` rootSetUp (fcd 1.0 root address); undefined: not sent (a /f/ family or 0.1.0). */
+  rootSetUp: boolean | undefined = undefined;
   /** Test notifications sent by `/v1/check/push`: device and delay. */
   readonly checkPushes: { dev: string; delaySeconds: number }[] = [];
   readonly msPerSecond: number;
@@ -344,6 +346,7 @@ export class FakeServer {
           maxGroupMembers: 100,
           adminCodeActive: this.adminCodeActive,
           offerSetup: this.offerSetup,
+          ...(this.rootSetUp === undefined ? {} : { rootSetUp: this.rootSetUp }),
         },
       };
     }
@@ -721,6 +724,9 @@ export class FakeServer {
       return err(401, 'bad_signature');
     }
     let admin = false;
+    // As fcd 1.0: an existing member is answered before the code is checked.
+    const member = this.users.get(identity.userId);
+    if (member && !member.removed) return err(409, 'already_member');
     if (b.adminCode !== undefined) {
       if (!this.adminCodeActive || b.adminCode.toUpperCase() !== this.adminCode) return err(403, 'invalid_code');
     } else {

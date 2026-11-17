@@ -30,7 +30,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     const timer = setTimeout(() => reject(new Error(`fcd did not start:\n${out}`)), 30_000);
     const onData = (chunk: Buffer) => {
       out += chunk.toString();
-      const m = /код администратора: ([0-9A-Z-]{19})/.exec(out);
+      const m = /код администратора сервера: ([0-9A-Z-]{19})/.exec(out);
       if (m && out.includes('слушаю')) {
         clearTimeout(timer);
         resolve(m[1]!);
