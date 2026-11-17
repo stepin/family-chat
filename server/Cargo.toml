@@ -1,6 +1,6 @@
 [package]
 name = "fcd"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 description = "Family Chat server: end-to-end encrypted family chat on your own computer"
 license = "MIT"

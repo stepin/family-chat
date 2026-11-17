@@ -20,7 +20,7 @@ English: [installation](docs/en/ADMIN.md), [family guide](docs/en/FAMILY.md), [s
 ## Быстрый старт
 
 Docker (образ `ghcr.io/stepin/fcd`; `latest` это последний выпуск, для закрепления берите тег версии, например
-`ghcr.io/stepin/fcd:1.0.0`):
+`ghcr.io/stepin/fcd:1.0.1`):
 
 ```sh
 docker run -d --name fcd --restart unless-stopped \

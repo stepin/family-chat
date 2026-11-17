@@ -139,7 +139,7 @@ Authorization: Bearer <токен устройства>
 {
   "protocol": 1,
   "server": "fcd",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "commit": "3208eeb2c67a",
   "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
   "familyName": "Семья",
@@ -1017,7 +1017,7 @@ curl -sS -H "Authorization: Bearer $TOKEN" -o 1.webp https://chat.example.org/v1
 
 ```json
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "commit": "3208eeb2c67a",
   "dataBytes": 1234567,
   "freeBytes": 9876543210,

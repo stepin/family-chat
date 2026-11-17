@@ -66,7 +66,7 @@ fcd --data /var/lib/family-chat
 `--data` это папка данных. При первом запуске сервер создаёт её и пишет в журнал (в терминал) примерно такое:
 
 ```
-INFO fcd 1.0.0, папка данных /var/lib/family-chat
+INFO fcd 1.0.1, папка данных /var/lib/family-chat
 INFO слушаю 0.0.0.0:8787 (HTTP)
 INFO откройте http://192.168.1.10:8787/ (приложение)
 INFO откройте http://192.168.1.10:8787/server/ (проверка сервера)
@@ -360,7 +360,7 @@ docker logs fcd 2>&1 | grep -E 'код администратора сервер
 ```
 
 `latest` указывает на последний выпуск. Чтобы закрепить версию, берите тег версии, например
-`ghcr.io/stepin/fcd:1.0.0` (теги те же, что на [странице выпусков](https://github.com/stepin/family-chat/releases),
+`ghcr.io/stepin/fcd:1.0.1` (теги те же, что на [странице выпусков](https://github.com/stepin/family-chat/releases),
 без буквы `v`).
 
 Настройки передаются переменными окружения, например `-e FCD_TRUST_FORWARDED_FOR=true` (флаги после имени образа
