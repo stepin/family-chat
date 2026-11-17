@@ -2,7 +2,7 @@
   import type { AccountView } from '@family-chat/core';
   import Page from '../components/Page.svelte';
   import { app } from '../lib/app.svelte.ts';
-  import { familyAddressLabel } from '../lib/invite.ts';
+  import { familyAddressLabel, pageServerUrl } from '../lib/invite.ts';
   import { nav } from '../lib/nav.svelte.ts';
   import { pushAccountOf } from '../lib/push.ts';
   import { t } from '../lib/strings.ts';
@@ -18,7 +18,7 @@
   let busy = $state(false);
   let error = $state<string | null>(null);
   const unread = $derived(app.unreadByAccount);
-  const pushAccount = $derived(pushAccountOf(app.accounts, location.origin));
+  const pushAccount = $derived(pushAccountOf(app.accounts, pageServerUrl(location)));
   const lastOfIdentity = $derived(!!target && app.accounts.filter((a) => a.userId === target!.userId).length === 1);
 
   function shared(a: AccountView): boolean {
@@ -64,7 +64,7 @@
             <span class="fname">{a.familyName}{#if a.id === app.account?.id}<span class="muted small"> · {t.families.current}</span>{/if}</span>
             <span class="sub">{t.families.server(familyAddressLabel(a.serverUrl))}</span>
             <span class="sub">{shared(a) ? t.families.sameIdentity : t.families.otherIdentity}{#if n > 0} · {t.families.unread(n)}{/if}</span>
-            <span class="sub">{pushAccount?.id === a.id ? t.families.pushHere : t.families.pushElsewhere}</span>
+            <span class="sub">{a.pushRegistered || pushAccount?.id === a.id ? t.families.pushHere : t.families.pushElsewhere}</span>
           </div>
           <div class="row">
             {#if a.id !== app.account?.id}

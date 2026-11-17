@@ -62,7 +62,13 @@ function fakeWindow(url: string): FakeWindow {
   return { url, messages, focus: async () => undefined, postMessage: (m) => void messages.push(m) };
 }
 
-function worker(factory: IDBFactory, badge = true, languages: readonly string[] = ['ru-RU'], windows: FakeWindow[] = []) {
+function worker(
+  factory: IDBFactory,
+  badge = true,
+  languages: readonly string[] = ['ru-RU'],
+  windows: FakeWindow[] = [],
+  net: { cache?: Map<string, Response>; fetches?: { url: string; init?: RequestInit }[]; subscribe?: () => unknown } = {},
+) {
   const opened: string[] = [];
   const listeners = new Map<string, Listener[]>();
   const notifications: {
@@ -75,11 +81,23 @@ function worker(factory: IDBFactory, badge = true, languages: readonly string[] 
     registration: {
       scope: SCOPE,
       showNotification: async (title: string, options: never) => void notifications.push({ title, options }),
+      pushManager: { subscribe: async () => net.subscribe?.() },
     },
     navigator: badge ? { setAppBadge, languages } : { languages },
   };
   const clients = { matchAll: async () => windows, openWindow: async (u: string) => void opened.push(u) };
-  new Function('self', 'clients', 'indexedDB', CODE)(self, clients, factory);
+  const caches = {
+    match: async (url: string, opts?: { ignoreSearch?: boolean }) => {
+      const key = opts?.ignoreSearch ? url.split('?')[0]! : url;
+      return net.cache?.get(key)?.clone();
+    },
+  };
+  const fetchFn = async (input: Request | string, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input.url;
+    net.fetches?.push({ url, ...(init ? { init } : {}) });
+    return new Response('network', { status: 200 });
+  };
+  new Function('self', 'clients', 'indexedDB', 'caches', 'fetch', CODE)(self, clients, factory, caches, fetchFn);
   const dispatch = async (type: string, event: Record<string, unknown>) => {
     const waits: Promise<unknown>[] = [];
     let response: Promise<Response> | undefined;
@@ -100,9 +118,9 @@ describe('push: badge and routing', () => {
     expect(await setting(factory, SETTING_BADGE_COUNT)).toBe(5);
     expect(w.setAppBadge).toHaveBeenCalledWith(5);
     expect(w.notifications).toHaveLength(1);
-    // The chat is the title; the family is named only because two share the device.
-    expect(w.notifications[0]!.title).toBe('Бабушка');
-    expect(w.notifications[0]!.options.body).toBe('Новое сообщение · Петровы');
+    // The title is the chat, after the family's name because two families share the device.
+    expect(w.notifications[0]!.title).toBe('Петровы · Бабушка');
+    expect(w.notifications[0]!.options.body).toBe('Новое сообщение');
     expect(w.notifications[0]!.options.data!.url).toBe(`${SCOPE}?chat=${'c'.repeat(26)}&account=accountbbbbbbbbb`);
     expect(w.notifications[0]!.options.data!.accountId).toBe('accountbbbbbbbbb');
     await w.dispatch('push', { data: { json: () => ({ chatId: 'c'.repeat(26), gseq: 8 }) } });
@@ -246,5 +264,80 @@ describe('Web Share Target', () => {
     form.set('text', 'привет');
     const r = await (await w.dispatch('fetch', { request: sharePost(form) }))!;
     expect(r.headers.get('location')).toBe(`${SCOPE}?share=unavailable`);
+  });
+});
+
+describe('one worker for every family of the server', () => {
+  const FAM = `${SCOPE}f/abcdefghijklmnop/`;
+
+  it('answers pages of /f/<id>/ from the root cache, never the API', async () => {
+    const cache = new Map([
+      [`${SCOPE}index.html`, new Response('<app>')],
+      [`${SCOPE}assets/main.js`, new Response('js')],
+    ]);
+    const fetches: { url: string }[] = [];
+    const w = worker(new IDBFactory(), true, ['ru-RU'], [], { cache, fetches });
+    const page = await w.dispatch('fetch', { request: new Request(FAM), stopImmediatePropagation: () => undefined });
+    expect(await (await page!).text()).toBe('<app>');
+    const asset = await w.dispatch('fetch', { request: new Request(`${FAM}assets/main.js?v=1`) });
+    expect(await (await asset!).text()).toBe('js');
+    // Not cached: the network.
+    const other = await w.dispatch('fetch', { request: new Request(`${FAM}icon-192.png`) });
+    expect(await (await other!).text()).toBe('network');
+    expect(fetches.map((f) => f.url)).toEqual([`${FAM}icon-192.png`]);
+    // The API, bad ids and the root's own pages are left alone.
+    expect(await w.dispatch('fetch', { request: new Request(`${FAM}v1/hello`) })).toBeUndefined();
+    expect(await w.dispatch('fetch', { request: new Request(`${SCOPE}f/ABCDEFGHIJKLMNOP/`) })).toBeUndefined();
+    expect(await w.dispatch('fetch', { request: new Request(SCOPE) })).toBeUndefined();
+  });
+
+  it('takes a share into a family page and opens that page', async () => {
+    const factory = new IDBFactory();
+    await appDb(factory);
+    const w = worker(factory);
+    const form = new FormData();
+    form.set('text', 'привет');
+    const r = await (await w.dispatch('fetch', { request: new Request(`${FAM}share-target`, { method: 'POST', body: form }) }))!;
+    expect(r.headers.get('location')).toBe(`${FAM}?share=1`);
+  });
+
+  it('a tap opens the family chat in the root window, or a new root window', async () => {
+    const click = (data: unknown) => ({ notification: { close: () => undefined, data } });
+    const data = { chatId: 'c'.repeat(26), accountId: 'accountbbbbbbbbb', url: `${SCOPE}?chat=${'c'.repeat(26)}&account=accountbbbbbbbbb` };
+    const root = fakeWindow(SCOPE);
+    const fam = fakeWindow(FAM);
+    const w = worker(new IDBFactory(), true, ['ru-RU'], [fam, root]);
+    await w.dispatch('notificationclick', click(data));
+    expect(root.messages).toEqual([{ type: 'fc-open-chat', chatId: 'c'.repeat(26), accountId: 'accountbbbbbbbbb' }]);
+    expect(fam.messages).toEqual([]);
+    const lone = worker(new IDBFactory(), true, ['ru-RU'], [fakeWindow(FAM)]);
+    await lone.dispatch('notificationclick', click(data));
+    expect(lone.opened).toEqual([data.url]);
+  });
+
+  it('a new subscription goes to every family of the server that wants notifications', async () => {
+    const factory = new IDBFactory();
+    const open = factory.open('family-chat', 40);
+    open.onupgradeneeded = () => open.result.createObjectStore('accounts', { keyPath: 'id' });
+    const db = await req(open);
+    const tx = db.transaction('accounts', 'readwrite');
+    const key = 'BAAA';
+    const row = (id: string, serverUrl: string, over: Record<string, unknown>) => ({ id, serverUrl, token: `t-${id}`, status: 'active', vapidPublicKey: key, ...over });
+    tx.objectStore('accounts').put(row('root', 'https://chat.example', { pushWanted: true, pushRegistered: true }));
+    tx.objectStore('accounts').put(row('fam', 'https://chat.example/f/abcdefghijklmnop', { pushWanted: true, pushRegistered: true }));
+    tx.objectStore('accounts').put(row('off', 'https://chat.example/f/qrstuvwxyz234567', { pushWanted: false, pushRegistered: false }));
+    tx.objectStore('accounts').put(row('elsewhere', 'https://other.example', { vapidPublicKey: 'BBBB', pushWanted: true }));
+    await new Promise((r) => (tx.oncomplete = r));
+    db.close();
+    const fetches: { url: string; init?: RequestInit }[] = [];
+    const sub = {
+      options: { applicationServerKey: Uint8Array.from(atob(key), (c) => c.charCodeAt(0)).buffer },
+      toJSON: () => ({ endpoint: 'https://push.example/new', keys: { p256dh: 'p', auth: 'a' } }),
+    };
+    const w = worker(factory, true, ['ru-RU'], [], { fetches });
+    await w.dispatch('pushsubscriptionchange', { newSubscription: sub });
+    expect(fetches.map((f) => f.url).sort()).toEqual(['https://chat.example/f/abcdefghijklmnop/v1/me/push', 'https://chat.example/v1/me/push']);
+    expect(new Headers(fetches[0]!.init!.headers).get('authorization')).toMatch(/^Bearer t-/);
+    expect(JSON.parse(String(fetches[0]!.init!.body)).endpoint).toBe('https://push.example/new');
   });
 });

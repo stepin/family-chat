@@ -965,7 +965,10 @@ const en: Strings = {
       'The browser only lets one server send notifications. This family’s messages are checked while the app is open.',
     moveHere: 'Get notifications from this family',
     severalFamilies:
-      'Notifications come only from this family. Other families on this device are checked while the app is open.',
+      'Notifications come from the families of this server. Families from other servers on this device are checked while the app is open.',
+    alsoFor: (families: string) => `Also on for: ${families}`,
+    failedFor: (family: string) => `Couldn’t turn them on for the family “${family}”.`,
+    retry: 'Retry',
   },
 
   server: {

@@ -1,13 +1,27 @@
 /**
- * Registers the app-shell service worker. Bundles live in `<root>/assets/`,
- * so `../sw.js` relative to this module is the app root on any path.
+ * The root of this fcd from the app's own address: bundles live in
+ * `<base>/assets/`, and a family at `<root>/f/<id>/` has `<root>` as its root
+ * (also behind a proxy in a subfolder).
+ */
+export function rootOf(moduleUrl: string): URL {
+  const base = new URL('../', moduleUrl);
+  const m = /^(.*\/)f\/[a-z2-7]{16}\/$/.exec(base.pathname);
+  if (m) base.pathname = m[1]!;
+  return base;
+}
+
+/**
+ * Registers the app-shell service worker: one per fcd, at its root, also
+ * from the pages of other families (`/f/<id>/`). The browser's one push
+ * subscription belongs to it, so pages of the root and of `/f/` families
+ * never overwrite each other's subscription.
  *
  * A new version waits until the person confirms it:
  * `onUpdate` receives a function that activates it and reloads the page.
  */
 export function registerServiceWorker(onUpdate?: (apply: () => void) => void): void {
   if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
-  const root = new URL(/* @vite-ignore */ '../', import.meta.url);
+  const root = rootOf(import.meta.url);
   const start = async () => {
     const reg = await navigator.serviceWorker.register(new URL('sw.js', root), { scope: root.pathname });
     if (!onUpdate) return;

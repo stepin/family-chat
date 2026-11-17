@@ -3,6 +3,7 @@
   import type { CheckLastPush } from '@family-chat/core';
   import NotificationSettings from './NotificationSettings.svelte';
   import { app } from '../lib/app.svelte.ts';
+  import { pageServerUrl } from '../lib/invite.ts';
   import { formatTime } from '../lib/format.ts';
   import { notifyEnv, notifyState, pushAccountOf } from '../lib/push.ts';
   import { t } from '../lib/strings.ts';
@@ -18,7 +19,7 @@
 
   const account = $derived(app.accounts.find((a) => a.id === accountId) ?? app.account!);
   const settingsPath = $derived(`${t.settings.title} → ${t.settings.family} → ${t.server.check}`);
-  const pushState = $derived(notifyState(notifyEnv(), app.platform, account, pushAccountOf(app.accounts, location.origin)));
+  const pushState = $derived(notifyState(notifyEnv(), app.platform, account, pushAccountOf(app.accounts, pageServerUrl(location))));
 
   let waiting = $state(false);
   let elapsed = $state(0);

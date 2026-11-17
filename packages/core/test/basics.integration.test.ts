@@ -46,7 +46,7 @@ afterAll(async () => {
 });
 
 describe('core against fcd', () => {
-  it('admin joins with the admin code; a second member joins by invitation', async () => {
+  it('admin sets up the family with the server code; a second member joins by invitation', async () => {
     expect(fcd.adminCode).toMatch(/^[0-9A-Z]{4}(-[0-9A-Z]{4}){3}$/);
     secrets.push(fcd.adminCode);
     a = core();
@@ -54,11 +54,12 @@ describe('core against fcd', () => {
     await a.start();
     await b.start();
     const hello = await a.serverInfo(fcd.url);
-    expect(hello).toMatchObject({ protocol: 1, familyName: 'Тест', adminCodeActive: true, push: false });
+    expect(hello).toMatchObject({ protocol: 1, familyName: 'Тест', rootSetUp: false, push: false });
 
-    accA = await a.join({ serverUrl: fcd.url, code: { adminCode: fcd.adminCode.toLowerCase() }, name: 'Мама' });
+    accA = await a.setUpFamily({ serverUrl: fcd.url, serverCode: fcd.adminCode.toLowerCase(), name: 'Мама' });
     expect(accA.admin).toBe(true);
-    expect((await a.serverInfo(fcd.url)).adminCodeActive).toBe(false);
+    expect(accA.familyUrl).toBe(fcd.url);
+    expect(await a.serverInfo(fcd.url)).toMatchObject({ adminCodeActive: false, rootSetUp: true });
 
     const inv = await a.admin.createInvite(accA.id);
     expect(inv.link).toBe(`${fcd.url}/#invite=${inv.code}`);

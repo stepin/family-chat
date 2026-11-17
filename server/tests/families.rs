@@ -468,3 +468,48 @@ async fn an_old_data_folder_starts_and_needs_a_new_server_code() {
     assert_eq!(create_family(&srv, &code, Some("Петровы"), None).await.status, 201);
     srv.stop().await;
 }
+
+/// What the hello parser of the 0.1.0 app requires (packages/core transport.ts at 0.1.0): installed apps
+/// run that bundle until they update, so every family's hello must still parse there.
+fn parses_like_0_1_0(h: &Value) {
+    for k in [
+        "protocol",
+        "retentionDays",
+        "maxFileMb",
+        "time",
+        "maxEventBytes",
+        "maxPartBytes",
+        "maxBlobBytes",
+    ] {
+        assert!(h[k].is_number(), "{k}: {h}");
+    }
+    for k in [
+        "maxAvatarBytes",
+        "maxStateBytes",
+        "maxSealedKeyBytes",
+        "maxGroupMembers",
+    ] {
+        assert!(h[k].is_number(), "{k}: {h}");
+    }
+    for k in ["server", "version", "serverId", "familyName"] {
+        assert!(h[k].is_string(), "{k}: {h}");
+    }
+    for k in ["push", "adminCodeActive", "offerSetup"] {
+        assert!(h[k].is_boolean(), "{k}: {h}");
+    }
+    assert!(h["vapidPublicKey"].is_string() || h["vapidPublicKey"].is_null(), "{h}");
+}
+
+#[tokio::test]
+async fn hello_of_every_family_still_parses_in_the_0_1_0_app() {
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = start(tmp.path(), Overrides::default()).await;
+    family(&srv).await;
+    let (id, _) = new_family(&srv, "Петровы").await;
+    for path in ["/v1/hello".to_string(), f(&id, "/v1/hello")] {
+        let h = get(&srv.url(&path)).await.json();
+        parses_like_0_1_0(&h);
+        assert_eq!(h["offerSetup"], true, "{path}");
+    }
+    srv.stop().await;
+}

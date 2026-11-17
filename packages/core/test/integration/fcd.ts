@@ -40,7 +40,7 @@ export class Fcd {
       const onData = (chunk: Buffer) => {
         out += chunk.toString();
         this.output += chunk.toString();
-        const code = /код администратора: ([0-9A-Z-]{19})/.exec(out);
+        const code = /код администратора сервера: ([0-9A-Z-]{19})/.exec(out);
         if (code) this.adminCode = code[1]!;
         const addr = /слушаю 127\.0\.0\.1:(\d+)/.exec(out);
         // On the first start the admin code is printed after the address.

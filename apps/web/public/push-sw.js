@@ -9,9 +9,14 @@
 // (read-only, plain IndexedDB, nothing is created or changed). Text is not
 // decrypted here. Group chats show the group name.
 //
-// The title is the chat (the person, the group, "Избранное"), not the
-// family; the family's name is added only when several families share the
-// device, to tell them apart. The language is the app's (settings key
+// The title is the chat (the person, the group, "Избранное"); when several
+// families share the device it starts with the family's name ("Ивановы ·
+// Мама"), to tell them apart.
+//
+// One worker per fcd: pages of the other families of the server
+// (`<root>/f/<id>/…`) register this root worker too, so its one push
+// subscription serves every family of the server. It answers those pages
+// from the root's cache (the same app), so they open without a network. The language is the app's (settings key
 // `ui.lang`, written by the app), else the first of ru/en in the system's
 // list, else Russian: the same rule as src/lib/locale.ts.
 
@@ -151,10 +156,10 @@ async function lookup(chatId) {
 function describe(info) {
   const t = TEXT[pickLang(info.langPref)];
   const family = info.severalFamilies && info.familyName ? info.familyName : null;
-  const withFamily = (body) => (family ? `${body} · ${family}` : body);
-  if (info.group) return { title: info.groupName || family || 'Family Chat', body: withFamily(t.groupMessage) };
-  if (info.self) return { title: t.selfTitle, body: withFamily(t.self) };
-  if (info.peerName) return { title: info.peerName, body: withFamily(t.message) };
+  const withFamily = (title) => (family ? `${family} · ${title}` : title);
+  if (info.group) return { title: info.groupName ? withFamily(info.groupName) : family || 'Family Chat', body: t.groupMessage };
+  if (info.self) return { title: withFamily(t.selfTitle), body: t.self };
+  if (info.peerName) return { title: withFamily(info.peerName), body: t.message };
   return { title: family || 'Family Chat', body: t.message };
 }
 
@@ -362,8 +367,7 @@ async function stashShare(shareRequest) {
   }
 }
 
-async function handleShare(event) {
-  const scope = self.registration.scope;
+async function handleShare(event, base) {
   let stored = false;
   try {
     stored = await stashShare(event.request);
@@ -371,13 +375,90 @@ async function handleShare(event) {
     stored = false;
   }
   // The share navigates a window of the app to this address; that window takes the stash.
-  return Response.redirect(new URL(stored ? './?share=1' : './?share=unavailable', scope).href, 303);
+  return Response.redirect(new URL(stored ? './?share=1' : './?share=unavailable', base).href, 303);
+}
+
+/** `<scope>f/<id>/`: the base of another family of this server, from a path inside the scope. */
+const FAMILY_PATH = /^f\/([a-z2-7]{16})\/(.*)$/;
+
+function familyOf(url) {
+  const scope = new URL(self.registration.scope);
+  if (url.origin !== scope.origin || !url.pathname.startsWith(scope.pathname)) return null;
+  const m = FAMILY_PATH.exec(url.pathname.slice(scope.pathname.length));
+  return m ? { base: new URL(`f/${m[1]}/`, scope).href, rest: m[2] } : null;
 }
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== 'POST') return;
   const url = new URL(req.url);
-  if (url.href !== new URL('share-target', self.registration.scope).href) return;
-  event.respondWith(handleShare(event));
+  if (req.method === 'POST') {
+    // The share target of the root page or of a family page `/f/<id>/`.
+    const fam = familyOf(url);
+    const base = fam && fam.rest === 'share-target' ? fam.base : self.registration.scope;
+    if (url.href !== new URL('share-target', base).href) return;
+    event.respondWith(handleShare(event, base));
+    return;
+  }
+  if (req.method !== 'GET') return;
+  // A page of another family of this server: the same app as the root's, from the root's cache.
+  const fam = familyOf(url);
+  if (!fam || fam.rest.startsWith('v1/') || fam.rest === 'v1') return;
+  const path = fam.rest === '' || fam.rest.endsWith('/') ? `${fam.rest}index.html` : fam.rest;
+  const target = new URL(path, self.registration.scope).href;
+  event.respondWith(
+    (async () => {
+      const cached = await caches.match(target, { ignoreSearch: true }).catch(() => undefined);
+      return cached || fetch(req);
+    })(),
+  );
+  // The precache router behind would not know this address anyway.
+  if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+});
+
+// ---- A new push subscription ----
+//
+// The push service replaced the subscription: hand the new one to every
+// family of this server on the device that wants notifications (the same
+// key), as the app would at its next start.
+
+function b64url(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    (async () => {
+      let sub = event.newSubscription || null;
+      if (!sub) {
+        const key = event.oldSubscription && event.oldSubscription.options ? event.oldSubscription.options.applicationServerKey : null;
+        if (!key) return;
+        sub = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      }
+      const key = sub.options && sub.options.applicationServerKey ? b64url(sub.options.applicationServerKey) : null;
+      const json = sub.toJSON();
+      if (!key || !json.endpoint || !json.keys) return;
+      const db = await openExisting();
+      let accounts = [];
+      try {
+        if (db.objectStoreNames.contains('accounts')) accounts = await request(db.transaction('accounts', 'readonly').objectStore('accounts').getAll());
+      } finally {
+        db.close();
+      }
+      const body = JSON.stringify({ endpoint: json.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth }, expirationTime: json.expirationTime ?? null });
+      for (const a of accounts) {
+        if (a.status !== 'active' || !a.token || a.vapidPublicKey !== key) continue;
+        if (!(a.pushWanted === true || (a.pushWanted == null && a.pushRegistered))) continue;
+        await fetch(`${a.serverUrl}/v1/me/push`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${a.token}`, 'Content-Type': 'application/json' },
+          body,
+          credentials: 'omit',
+          cache: 'no-store',
+        }).catch(() => undefined);
+      }
+    })(),
+  );
 });

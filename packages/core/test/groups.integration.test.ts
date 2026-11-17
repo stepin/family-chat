@@ -95,7 +95,7 @@ describe('groups and more against fcd', () => {
     c = core();
     d = core();
     for (const x of [a, b, c, d]) await x.start();
-    accA = await a.join({ serverUrl: fcd.url, code: { adminCode: fcd.adminCode }, name: 'Мама' });
+    accA = await a.setUpFamily({ serverUrl: fcd.url, serverCode: fcd.adminCode, name: 'Мама' });
 
     expect(await a.checkInvite(fcd.url, 'aaaaaaaaaaaaaaaaaaaaaaaaaa')).toEqual({ status: 'invalid' });
     const invB = await a.admin.createInvite(accA.id);

@@ -23,7 +23,7 @@ import type {
 import type { NoticeBody, ServerEvent } from '../api/types.ts';
 
 export const DEFAULT_DB_NAME = 'family-chat';
-export const DB_VERSION = 5;
+export const DB_VERSION = 6;
 
 export type AccountStatus = 'active' | 'login-invalid' | 'removed';
 
@@ -65,6 +65,13 @@ export interface AccountRow {
   vapidPublicKey: string | null;
   /** Whether this device registered a push subscription (as far as we know). */
   pushRegistered: boolean;
+  /**
+   * The person's choice: notifications from this family. `undefined` until
+   * decided: a family added later joins the families with the same push key
+   * that want notifications. Turning them off sets `false`, and a refresh
+   * never turns them back on.
+   */
+  pushWanted?: boolean;
   createdAt: number;
   lastSyncAt: number | null;
   /** Cursor of `GET /v1/keys`. */
@@ -580,7 +587,7 @@ export class CoreDb extends Dexie {
     // first release and are not supported). Later versions: add
     // `this.version(6).stores({...new tables or indexes})` below; never change or
     // remove what is here.
-    this.version(DB_VERSION).stores({
+    this.version(5).stores({
       accounts: 'id, serverId',
       identities: 'userId',
       users: '[accountId+userId], accountId',
@@ -610,6 +617,18 @@ export class CoreDb extends Dexie {
       stickerFiles: '[accountId+file], [accountId+packId]',
       links: '[accountId+userId], accountId, [accountId+to]',
     });
+    // 6: `accounts.pushWanted` (the person's choice), separate from `pushRegistered` (the server took it).
+    // Existing accounts keep what they had: wanted = registered.
+    this.version(6)
+      .stores({})
+      .upgrade((tx) =>
+        tx
+          .table('accounts')
+          .toCollection()
+          .modify((a: AccountRow) => {
+            if (a.pushWanted === undefined) a.pushWanted = a.pushRegistered === true;
+          }),
+      );
   }
 }
 

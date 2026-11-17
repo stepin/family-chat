@@ -13,13 +13,13 @@ export const SETTING_PUSH_SHOW_TEXT = 'push.showText';
 
 export async function registerPush(rt: AccountRuntimeLike, sub: PushSubscriptionInput): Promise<void> {
   await rt.session.call((t) => rt.session.transport.putPush(t, sub));
-  await rt.ctx.db.accounts.update(rt.session.accountId, { pushRegistered: true });
+  await rt.ctx.db.accounts.update(rt.session.accountId, { pushRegistered: true, pushWanted: true });
   void rt.ctx.diag.info('push', 'push subscription registered', rt.session.accountId);
 }
 
 export async function unregisterPush(rt: AccountRuntimeLike): Promise<void> {
   await rt.session.call((t) => rt.session.transport.deletePush(t));
-  await rt.ctx.db.accounts.update(rt.session.accountId, { pushRegistered: false });
+  await rt.ctx.db.accounts.update(rt.session.accountId, { pushRegistered: false, pushWanted: false });
   void rt.ctx.diag.info('push', 'push subscription removed', rt.session.accountId);
 }
 

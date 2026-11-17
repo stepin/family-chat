@@ -48,8 +48,8 @@ describe('families and stickers against fcd', () => {
     papa = core();
     const babushka = core();
     for (const c of [mama, papa, babushka]) await c.start();
-    m1 = await mama.join({ serverUrl: one.url, code: { adminCode: one.adminCode }, name: 'Мама' });
-    m2 = await mama.join({ serverUrl: two.url, code: { adminCode: two.adminCode }, name: 'Мама', userId: m1.userId });
+    m1 = await mama.setUpFamily({ serverUrl: one.url, serverCode: one.adminCode, name: 'Мама' });
+    m2 = await mama.setUpFamily({ serverUrl: two.url, serverCode: two.adminCode, name: 'Мама', userId: m1.userId });
     expect(m2.userId).toBe(m1.userId);
     expect(m2.serverId).not.toBe(m1.serverId);
     p1 = await papa.join({ serverUrl: one.url, code: { invite: (await mama.admin.createInvite(m1.id)).code }, name: 'Папа' });

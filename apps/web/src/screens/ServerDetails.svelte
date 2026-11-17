@@ -6,6 +6,7 @@
   import ServerCheck from '../components/ServerCheck.svelte';
   import { app } from '../lib/app.svelte.ts';
   import { formatBytes } from '../lib/format.ts';
+  import { pageServerUrl, sameServer } from '../lib/invite.ts';
   import { nav } from '../lib/nav.svelte.ts';
   import { t } from '../lib/strings.ts';
 
@@ -17,7 +18,7 @@
     [...app.members].sort((a, b) => Number(b.isMe) - Number(a.isMe) || (a.name ?? '').localeCompare(b.name ?? '', 'ru')),
   );
   // The trust line applies when the app was loaded from the family server itself.
-  const fromServer = $derived(account.serverUrl.startsWith(location.origin));
+  const fromServer = $derived(sameServer(account.serverUrl, pageServerUrl(location)));
   let stats = $state<ServerStats | null>(null);
   let statsError = $state(false);
   let toRemove = $state<Member | null>(null);

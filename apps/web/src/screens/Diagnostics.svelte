@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { pageServerUrl } from '../lib/invite.ts';
   import type { DiagnosticEntry } from '@family-chat/core';
   import Page from '../components/Page.svelte';
   import { app, follow } from '../lib/app.svelte.ts';
@@ -18,7 +19,7 @@
 
   onMount(() => {
     void app.core
-      .serverInfo(location.origin)
+      .serverInfo(pageServerUrl(location))
       .then((h) => (pageCodeActive = h.adminCodeActive))
       .catch(() => undefined);
     return follow(app.core.diagnostics, (list) => (entries = [...list].reverse().slice(0, 200)));

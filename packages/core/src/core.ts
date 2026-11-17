@@ -131,6 +131,8 @@ export interface AccountView {
   readonly initialSyncDone: boolean;
   readonly pushAvailable: boolean;
   readonly pushRegistered: boolean;
+  /** The person's choice for this family; null while not decided (see AccountRow.pushWanted). */
+  readonly pushWanted: boolean | null;
   readonly vapidPublicKey: string | null;
   readonly lastSyncAt: number | null;
   /** My identity was revoked on this server (status is 'removed'). */
@@ -269,6 +271,7 @@ function accountView(a: AccountRow): AccountView {
     initialSyncDone: a.initialSyncDone,
     pushAvailable: a.pushAvailable,
     pushRegistered: a.pushRegistered,
+    pushWanted: a.pushWanted ?? null,
     vapidPublicKey: a.vapidPublicKey,
     lastSyncAt: a.lastSyncAt,
     revoked: a.revoked === true,
@@ -1232,6 +1235,10 @@ export class FamilyChatCore {
     register: async (accountId: string, sub: PushSubscriptionInput): Promise<void> =>
       registerPush(await this.#runtime(accountId), sub),
     unregister: async (accountId: string): Promise<void> => unregisterPush(await this.#runtime(accountId)),
+    /** Records the person's choice without talking to the server (a family that joins enabled ones later). */
+    setWanted: async (accountId: string, wanted: boolean): Promise<void> => {
+      await this.db.accounts.update(accountId, { pushWanted: wanted });
+    },
   };
 
   /** What to show for a received push payload `{chatId, gseq}`. Never throws. */

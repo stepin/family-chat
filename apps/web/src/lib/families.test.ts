@@ -23,6 +23,7 @@ function acc(over: Partial<AccountView>): AccountView {
     initialSyncDone: true,
     pushAvailable: true,
     pushRegistered: false,
+    pushWanted: null,
     vapidPublicKey: 'B',
     lastSyncAt: null,
     revoked: false,
@@ -34,11 +35,15 @@ function acc(over: Partial<AccountView>): AccountView {
 }
 
 describe('push with several families', () => {
-  const one = acc({ id: 'one', serverUrl: 'https://one.example' });
-  const two = acc({ id: 'two', serverUrl: 'https://two.example:8443/chat', familyName: 'Петровы' });
+  const one = acc({ id: 'one', serverUrl: 'https://one.example', vapidPublicKey: 'B1' });
+  const two = acc({ id: 'two', serverUrl: 'https://two.example:8443/chat', familyName: 'Петровы', vapidPublicKey: 'B2' });
 
   it('prefers the registered family, then the one the app was opened from, then the first', () => {
-    expect(pushAccountOf([one, two], 'https://two.example:8443')?.id).toBe('two');
+    expect(pushAccountOf([one, two], 'https://two.example:8443/chat/')?.id).toBe('two');
+    // The page's address is compared with its path: the root and a /f/ family of one host differ.
+    const fam = acc({ id: 'fam', serverUrl: 'https://one.example/f/abcdefghijklmnop', vapidPublicKey: 'B1' });
+    expect(pushAccountOf([one, fam], 'https://one.example/f/abcdefghijklmnop')?.id).toBe('fam');
+    expect(pushAccountOf([one, fam], 'https://one.example')?.id).toBe('one');
     expect(pushAccountOf([one, two], 'https://elsewhere.example')?.id).toBe('one');
     expect(pushAccountOf([one, { ...two, pushRegistered: true }], 'https://one.example')?.id).toBe('two');
     expect(pushAccountOf([{ ...one, status: 'removed' }, two], 'https://one.example')?.id).toBe('two');
@@ -53,6 +58,10 @@ describe('push with several families', () => {
     expect(notifyState(env, desktop, registered, registered)).toBe('allowed');
     // Nothing registered yet: every family may enable them.
     expect(notifyState(env, desktop, one, two)).toBe('granted-unregistered');
+    // A family of the same server (same key) is never "another family".
+    const sibling = acc({ id: 'sib', serverUrl: 'https://one.example/f/abcdefghijklmnop', vapidPublicKey: 'B1' });
+    expect(notifyState(env, desktop, sibling, { ...one, pushRegistered: true })).toBe('granted-unregistered');
+    expect(notifyState(env, desktop, { ...sibling, pushRegistered: true }, { ...one, pushRegistered: true })).toBe('allowed');
   });
 });
 

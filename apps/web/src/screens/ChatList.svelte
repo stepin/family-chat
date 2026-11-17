@@ -5,6 +5,7 @@
   import Icon from '../components/Icon.svelte';
   import StatusLine from '../components/StatusLine.svelte';
   import { app } from '../lib/app.svelte.ts';
+  import { pageServerUrl } from '../lib/invite.ts';
   import { formatListTime } from '../lib/format.ts';
   import { displayNames } from '../lib/names.ts';
   import { nav } from '../lib/nav.svelte.ts';
@@ -59,7 +60,7 @@
   });
 
   let notifyEnvNow = $state(notifyEnv());
-  const pushState = $derived(notifyState(notifyEnvNow, app.platform, account, pushAccountOf(app.accounts, location.origin)));
+  const pushState = $derived(notifyState(notifyEnvNow, app.platform, account, pushAccountOf(app.accounts, pageServerUrl(location))));
   const offerNotify = $derived(
     app.flagsLoaded && !app.flags.notifyDismissed && !removed && pushState === 'off' && otherChats.some((c) => c.lastMessage),
   );

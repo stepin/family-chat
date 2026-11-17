@@ -58,7 +58,7 @@ describe('message actions against fcd', () => {
     b = core();
     await a.start();
     await b.start();
-    accA = await a.join({ serverUrl: fcd.url, code: { adminCode: fcd.adminCode }, name: 'Мама' });
+    accA = await a.setUpFamily({ serverUrl: fcd.url, serverCode: fcd.adminCode, name: 'Мама' });
     accB = await b.join({ serverUrl: fcd.url, code: { invite: (await a.admin.createInvite(accA.id)).code }, name: 'Папа' });
     await a.refreshMembers(accA.id);
     chat = await a.openChat(accA.id, accB.userId);
