@@ -967,9 +967,10 @@ async fn push_on_new_event() {
     assert_eq!(mama.get(&srv, "/v1/me").await.json()["push"], false);
 }
 
-/// The sender's other devices are notified too, the sending device is not.
+/// The sender's devices are not notified, the other ones too: only the
+/// other members' devices are.
 #[tokio::test]
-async fn push_reaches_senders_other_devices() {
+async fn push_skips_all_senders_devices() {
     let (service, fake) = fake_push().await;
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(tmp.path(), Overrides::default()).await;
@@ -986,41 +987,40 @@ async fn push_reaches_senders_other_devices() {
     };
     let chat = mama.chat_with(&srv.server_id(), &papa);
     mama.post_event(&srv, &chat, &new_msg_id(), b"hi").await;
-    wait_for(|| fake.got.lock().unwrap().len() == 2).await;
+    wait_for(|| !fake.got.lock().unwrap().is_empty()).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(names(), vec!["mama-tablet", "papa"]);
+    assert_eq!(names(), vec!["papa"]);
 
-    // The chat with oneself: only the other device.
+    // The chat with oneself: nothing at all.
     fake.got.lock().unwrap().clear();
     let me = mama.chat_with(&srv.server_id(), &mama);
     tablet.post_event(&srv, &me, &new_msg_id(), b"note").await;
-    wait_for(|| !fake.got.lock().unwrap().is_empty()).await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(names(), vec!["mama-phone"]);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(names().is_empty(), "{:?}", names());
 
     // A duplicate sends nothing.
     fake.got.lock().unwrap().clear();
     let key = new_msg_id();
     mama.post_event(&srv, &chat, &key, b"x").await;
-    wait_for(|| fake.got.lock().unwrap().len() == 2).await;
+    wait_for(|| fake.got.lock().unwrap().len() == 1).await;
     mama.post_event(&srv, &chat, &key, b"x").await;
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(fake.got.lock().unwrap().len(), 2);
+    assert_eq!(fake.got.lock().unwrap().len(), 1);
 }
 
-/// Two people on one browser share its push subscription: a message from one
+/// Accounts on one browser share its push subscription: a message from one
 /// to the other does not notify the browser it was written in, and an
-/// endpoint gets one push however many of its accounts are in the chat.
+/// endpoint gets one push however many devices have it.
 #[tokio::test]
 async fn push_skips_the_senders_endpoint() {
     let (service, fake) = fake_push().await;
     let tmp = tempfile::tempdir().unwrap();
     let srv = start(tmp.path(), Overrides::default()).await;
     let (mama, papa) = family(&srv).await;
-    let tablet = second_device(&srv, &mama).await;
+    let papa2 = second_device(&srv, &papa).await;
     let (_, _, shared) = subscription(&format!("{service}/push/shared"));
-    let (_, _, own) = subscription(&format!("{service}/push/mama-tablet"));
-    for (m, sub) in [(&mama, &shared), (&papa, &shared), (&tablet, &own)] {
+    let (_, _, laptop) = subscription(&format!("{service}/push/papa-laptop"));
+    for (m, sub) in [(&mama, &shared), (&papa, &shared), (&papa2, &laptop)] {
         assert_eq!(m.send(&srv, "PUT", "/v1/me/push", Some(sub)).await.status, 204);
     }
     let names = || {
@@ -1032,11 +1032,13 @@ async fn push_skips_the_senders_endpoint() {
     mama.post_event(&srv, &chat, &new_msg_id(), b"hi").await;
     wait_for(|| !fake.got.lock().unwrap().is_empty()).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(names(), vec!["mama-tablet"]);
+    assert_eq!(names(), vec!["papa-laptop"]);
 
-    // From the tablet: the shared browser once, for mama and papa together.
+    // Both of papa's devices on one endpoint: one push.
     fake.got.lock().unwrap().clear();
-    tablet.post_event(&srv, &chat, &new_msg_id(), b"hi").await;
+    assert_eq!(papa2.send(&srv, "PUT", "/v1/me/push", Some(&shared)).await.status, 204);
+    assert_eq!(mama.send(&srv, "DELETE", "/v1/me/push", None).await.status, 204);
+    mama.post_event(&srv, &chat, &new_msg_id(), b"hi").await;
     wait_for(|| !fake.got.lock().unwrap().is_empty()).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(names(), vec!["shared"]);

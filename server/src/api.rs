@@ -463,8 +463,10 @@ pub async fn delete_push(State(st): State<Arc<AppState>>, Auth(c): Auth) -> Resu
 }
 
 /// Devices that get a push for a new event: every subscribed device of the
-/// chat's members, the sender's other devices included, except the device
-/// that sent it. Removed and revoked users get nothing.
+/// chat's other members. The sender's devices get nothing (no one needs a
+/// notification about their own message, also in the chat with oneself);
+/// their other devices see it when they open. Removed and revoked users get
+/// nothing.
 ///
 /// One browser has one push subscription for all accounts of this fcd on it
 /// (several people on one device, see apps/web/src/lib/push.ts), so the
@@ -483,13 +485,13 @@ pub fn push_targets(m: &Mem, chat: &Chat, sender: &UserId, sender_dev: &DevId) -
         seen.insert(s.endpoint.clone());
     }
     for uid in chat.unique_members() {
+        if uid == *sender {
+            continue;
+        }
         let Some(u) = m.users.get(&uid).filter(|u| u.active()) else {
             continue;
         };
         for (dev, d) in &u.devices {
-            if uid == *sender && dev == sender_dev {
-                continue;
-            }
             if let Some(s) = &d.push
                 && seen.insert(s.endpoint.clone())
             {
