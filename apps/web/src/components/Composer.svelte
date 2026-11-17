@@ -75,12 +75,15 @@
   }
 
   /**
-   * Inserts text at the caret, replacing a selection, and puts the focus
-   * back into the field with the caret after it (the emoji picker, shared
-   * text). The caret was remembered when the field lost the focus, which on
-   * phones happens as soon as the emoji button is touched.
+   * Inserts text at the caret, replacing a selection (the emoji picker,
+   * shared text). The caret was remembered when the field lost the focus,
+   * which on phones happens as soon as the emoji button is touched. With
+   * `focus` (the default) the focus goes back into the field with the caret
+   * after the text; without it only the text and the remembered caret change:
+   * `setSelectionRange` is not called either, because on iOS it focuses the
+   * field and opens the keyboard.
    */
-  export function insert(value: string): void {
+  export function insert(value: string, opts: { focus?: boolean } = {}): void {
     const len = text.length;
     const start = Math.min(caret?.start ?? len, len);
     const end = Math.min(Math.max(caret?.end ?? len, start), len);
@@ -89,30 +92,23 @@
     caret = { start: pos, end: pos };
     if (field) {
       field.value = text;
-      field.focus({ preventScroll: true });
-      field.setSelectionRange(pos, pos);
+      if (opts.focus ?? true) {
+        field.focus({ preventScroll: true });
+        field.setSelectionRange(pos, pos);
+      }
     }
     queueMicrotask(resize);
     if (!editing) onInput();
   }
 
   /**
-   * An emoji from the picker, as in Telegram: into an empty field (not
-   * editing) it goes out at once as a message of its own (as the reply, if
-   * one is being written); otherwise it is inserted at the caret.
+   * An emoji from the picker always goes into the field at the caret
+   * (replacing a selection); nothing is sent. On a touch screen the field
+   * does not take the focus, so the keyboard does not cover the chat and a
+   * second emoji can be picked straight away.
    */
   export function pickEmoji(emoji: string): void {
-    if (!editing && text.trim().length === 0) {
-      if (text !== '') {
-        text = '';
-        saveDraft();
-      }
-      caret = null;
-      void sendText(emoji);
-      if (!coarse) field?.focus({ preventScroll: true });
-      return;
-    }
-    insert(emoji);
+    insert(emoji, { focus: !coarse });
   }
 
   /** Puts the focus into the field (after choosing "Ответить"). */

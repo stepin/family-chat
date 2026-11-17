@@ -134,8 +134,8 @@ and new history show as one conversation.
 - **Gender** (M or F) is chosen next to your name when you join, and in “My profile”. Russian needs it to word
   messages about you correctly (“created the group” has a male and a female form). Everyone in the family and the
   server can see it, like your name.
-- **Emoji**: if the message field is empty, the emoji you pick is sent at once as a message of its own, as in
-  Telegram. If there is text already, the emoji goes where the cursor is.
+- **Emoji**: the emoji you pick always goes into the message field where the cursor is and is not sent by itself.
+  Send it like any text. On a phone the keyboard does not open, so you can pick several emoji in a row.
 
 ## Good to know
 

@@ -1,6 +1,6 @@
 // End to end against a real fcd: the emoji picker with real mouse clicks
-// and finger taps (send at once into an empty field, insert at the caret
-// otherwise, never send while editing, reactions), the invitation flow, the
+// and finger taps (always inserted at the caret, never sent by itself, no
+// keyboard on a touch screen, reactions), the invitation flow, the
 // header without the family name, the profile's gender, and the appearance
 // settings with an axe matrix over every palette in light and dark.
 
@@ -91,9 +91,11 @@ test('emoji picker by mouse and touch, invitations, header, gender, appearance',
     await expect(petya.page.getByRole('heading', { name: 'Мама' })).toBeVisible();
   });
 
-  await test.step('desktop, mouse: an emoji into an empty field is sent at once and the picker closes', async () => {
+  await test.step('desktop, mouse: an emoji into an empty field is inserted, nothing is sent, Enter sends', async () => {
     const page = mama.page;
     await openChat(page, 'Петя');
+    await expect(body(page, 'Привет, мама')).toHaveCount(1);
+    const sentBefore = await page.getByTestId('message').count();
     await page.getByTestId('emoji-button').click();
     const picker = page.getByTestId('emoji-picker');
     await expect(picker).toBeVisible();
@@ -101,8 +103,13 @@ test('emoji picker by mouse and touch, invitations, header, gender, appearance',
     const chosen = (await option.textContent())!.trim();
     await mouseClick(page, option);
     await expect(picker).toBeHidden();
+    const box = page.getByLabel('Сообщение');
+    await expect(box).toHaveValue(chosen);
+    expect(await caret(page)).toEqual([chosen.length, chosen.length, true]);
+    expect(await page.getByTestId('message').count()).toBe(sentBefore);
+    await box.press('Enter');
     await expect(body(page, chosen)).toHaveCount(1);
-    await expect(page.getByLabel('Сообщение')).toHaveValue('');
+    await expect(box).toHaveValue('');
     await expect(body(petya.page, chosen)).toHaveCount(1, { timeout: 30_000 });
   });
 
@@ -152,7 +159,7 @@ test('emoji picker by mouse and touch, invitations, header, gender, appearance',
     await expect(body(page, '❤️')).toHaveCount(1);
   });
 
-  await test.step('a reply: the emoji goes out as the reply', async () => {
+  await test.step('a reply: the emoji is inserted and goes out with Enter as the reply', async () => {
     const page = mama.page;
     const m = body(page, 'Привет, мама');
     await m.hover();
@@ -162,6 +169,10 @@ test('emoji picker by mouse and touch, invitations, header, gender, appearance',
     await page.getByTestId('emoji-button').click();
     await page.getByLabel('Найти эмодзи').fill('спасибо');
     await mouseClick(page, page.getByTestId('emoji-picker').getByRole('option', { name: /спасибо/ }).first());
+    const box = page.getByLabel('Сообщение');
+    await expect(box).toHaveValue('🙏');
+    await expect(page.getByTestId('reply-bar')).toBeVisible();
+    await box.press('Enter');
     await expect(page.getByTestId('reply-bar')).toHaveCount(0);
     const reply = body(page, '🙏').last();
     await expect(reply.getByTestId('message-quote')).toContainText('Привет, мама');
@@ -184,9 +195,11 @@ test('emoji picker by mouse and touch, invitations, header, gender, appearance',
     await page.keyboard.press('Escape');
   });
 
-  await test.step('phone, finger taps: send into an empty field, insert at the remembered caret', async () => {
+  await test.step('phone, finger taps: two emoji in a row into the field, no keyboard, insert at the remembered caret', async () => {
+    // Pixel 7: hasTouch and isMobile, so `(pointer: coarse)` matches, not only a narrow width.
     const phone: User = await newUser({ ...devices['Pixel 7'] });
     const page = phone.page;
+    expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
     // Mama's invitation link is used up: Petya's phone restores into the family by joining anew is out of scope,
     // so the phone is a third relative.
     await mama.page.getByRole('button', { name: 'Настройки' }).click();
@@ -199,6 +212,8 @@ test('emoji picker by mouse and touch, invitations, header, gender, appearance',
     await page.getByRole('button', { name: 'Войти в семейный чат' }).tap();
     const box = page.getByLabel('Сообщение');
     await expect(box).toBeVisible();
+    const fieldFocused = () => box.evaluate((el) => document.activeElement === el);
+    const sentBefore = await page.getByTestId('message').count();
 
     await page.getByTestId('emoji-button').tap();
     const picker = page.getByTestId('emoji-picker');
@@ -209,7 +224,19 @@ test('emoji picker by mouse and touch, invitations, header, gender, appearance',
     const chosen = (await option.textContent())!.trim();
     await fingerTap(page, option);
     await expect(picker).toBeHidden();
-    await expect(body(page, chosen)).toHaveCount(1);
+    await expect(box).toHaveValue(chosen);
+    expect(await fieldFocused()).toBe(false);
+    // A second one straight away (the picker opens on "Recent", the same emoji first):
+    // both are in the field, still no keyboard, nothing sent.
+    await page.getByTestId('emoji-button').tap();
+    await expect(picker.getByTestId('emoji-option').first()).toHaveText(chosen);
+    await fingerTap(page, picker.getByTestId('emoji-option').first());
+    await expect(picker).toBeHidden();
+    await expect(box).toHaveValue(chosen + chosen);
+    expect(await fieldFocused()).toBe(false);
+    expect(await page.getByTestId('message').count()).toBe(sentBefore);
+    await page.getByRole('button', { name: 'Отправить', exact: true }).tap();
+    await expect(body(page, chosen + chosen)).toHaveCount(1);
     await expect(box).toHaveValue('');
 
     await box.tap();
@@ -220,7 +247,7 @@ test('emoji picker by mouse and touch, invitations, header, gender, appearance',
     await fingerTap(page, picker.getByTestId('emoji-option').first());
     await expect(picker).toBeHidden();
     await expect(box).toHaveValue(`Доброе${chosen} утро`);
-    expect(await caret(page)).toEqual([6 + chosen.length, 6 + chosen.length, true]);
+    expect(await fieldFocused()).toBe(false);
     await expectAccessible(page, 'chat on a phone after an emoji');
     await phone.context.close();
     await mama.page.getByRole('button', { name: 'Назад' }).click();
