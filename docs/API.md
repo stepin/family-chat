@@ -134,7 +134,7 @@ Authorization: Bearer <токен устройства>
 {
   "protocol": 1,
   "server": "fcd",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "commit": "3208eeb2c67a",
   "serverId": "q8Jb3kVf0w2Xy7HnT1sZ9A",
   "familyName": "Семья",
@@ -915,7 +915,7 @@ chatId = base32( SHA-256( utf8("fc/v1/dm\n" + serverId + "\n" + lo + "\n" + hi) 
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "1.0.0",
   "commit": "3208eeb2c67a",
   "dataBytes": 1234567,
   "freeBytes": 9876543210,
