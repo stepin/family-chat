@@ -447,6 +447,18 @@ systemctl --user enable --now podman-auto-update.timer
 работала без входа в систему, включите `loginctl enable-linger <пользователь>`. Этот файл мы не запускали: Podman
 на машине подготовки не было.
 
+Команды сервера в контейнере (при остановленном сервере). `podman exec` не подойдёт: в образе нет оболочки, а
+сервер должен быть остановлен. Запускайте `podman run` от того же пользователя, что и службу: у rootless Podman и
+у root свои тома, и под другим пользователем появится новый пустой том `fcd-data`.
+
+```sh
+systemctl --user stop fcd
+podman run --rm -v fcd-data:/data -e FCD_LANG=ru ghcr.io/stepin/fcd:latest reset-admin-code
+systemctl --user start fcd
+```
+
+Для файла в `/etc/containers/systemd/` те же команды через `sudo` и без `--user`.
+
 ## systemd без контейнера
 
 Отдельный пользователь, папка данных и служба

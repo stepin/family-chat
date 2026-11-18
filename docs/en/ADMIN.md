@@ -454,6 +454,18 @@ the container. `HealthCmd` is written as an array because the image has no shell
 without a login session, enable `loginctl enable-linger <user>`. We have not run this file: there was no Podman on
 the preparation machine.
 
+Server commands in a container (with the server stopped). `podman exec` will not do: the image has no shell and
+the server has to be stopped. Run `podman run` as the same user as the service: rootless Podman and root keep
+separate volumes, and under another user a new empty `fcd-data` volume appears.
+
+```sh
+systemctl --user stop fcd
+podman run --rm -v fcd-data:/data ghcr.io/stepin/fcd:latest reset-admin-code
+systemctl --user start fcd
+```
+
+For a file in `/etc/containers/systemd/`, the same commands with `sudo` and without `--user`.
+
 ## systemd without containers
 
 A dedicated user, the data folder and the service
