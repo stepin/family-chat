@@ -42,6 +42,11 @@ export function serve(dir, port = 4180, host = '127.0.0.1') {
     if (!existsSync(file)) {
       status = 404;
       file = join(root, '404.html');
+      // No 404 page (the site is not built yet): a plain answer, not a crash.
+      if (!existsSync(file)) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found\n');
+        return;
+      }
     }
     const headers = {
       'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream',

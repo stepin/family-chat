@@ -2,7 +2,9 @@ import { defineConfig, devices } from '@playwright/test';
 
 // Browser checks of the built site (e2e/): accessibility in both themes, the
 // keyboard, 360 px, no requests to other sites, and the web client under
-// app/. Global setup builds the site (with the client) into dist/.
+// app/. The web server command builds the site into dist/ first: Playwright
+// starts webServer before globalSetup, so a build there would come too late
+// on a clean checkout.
 export const SITE_PORT = Number(process.env['SITE_E2E_PORT'] ?? 4181);
 
 export default defineConfig({
@@ -12,9 +14,8 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env['CI'],
   reporter: process.env['CI'] ? [['list'], ['html', { open: 'never', outputFolder: 'playwright-report-site' }]] : 'list',
-  globalSetup: './e2e/global-setup.ts',
   webServer: {
-    command: `node serve.mjs dist ${SITE_PORT}`,
+    command: `node build.mjs && node serve.mjs dist ${SITE_PORT}`,
     url: `http://127.0.0.1:${SITE_PORT}/`,
     reuseExistingServer: false,
   },
