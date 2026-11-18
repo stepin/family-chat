@@ -408,6 +408,8 @@ fn post_json(port: &str, path: &str, body: &str) -> (u16, String) {
 fn families_list_unknown_ids_healthcheck_and_a_clean_stop_after_creating_one() {
     let tmp = tempfile::tempdir().unwrap();
     let data = tmp.path().to_str().unwrap();
+    // `mut` is only needed by the unix-only SIGTERM block below.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let (mut srv, code, port) = fresh(data);
     // Root setup code first (fresh server), then a family.
     let (s, body) = post_json(&port, "/v1/families", &format!(r#"{{"adminCode":"{code}"}}"#));
