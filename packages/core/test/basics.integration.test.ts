@@ -56,9 +56,10 @@ describe('core against fcd', () => {
     const hello = await a.serverInfo(fcd.url);
     expect(hello).toMatchObject({ protocol: 1, familyName: 'Тест', rootSetUp: false, push: false });
 
-    accA = await a.setUpFamily({ serverUrl: fcd.url, serverCode: fcd.adminCode.toLowerCase(), name: 'Мама' });
+    const setUp = await a.setUpFamily({ serverUrl: fcd.url, serverCode: fcd.adminCode.toLowerCase(), name: 'Мама' });
+    expect(setUp.familyUrl).toBe(fcd.url);
+    accA = setUp;
     expect(accA.admin).toBe(true);
-    expect(accA.familyUrl).toBe(fcd.url);
     expect(await a.serverInfo(fcd.url)).toMatchObject({ adminCodeActive: false, rootSetUp: true });
 
     const inv = await a.admin.createInvite(accA.id);
