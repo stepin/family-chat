@@ -66,6 +66,19 @@ test('groups, profiles and "Избранное"', async ({ newUser }) => {
     await send(mama.page, 'Купить хлеб');
     await expect(message(mama.page, 'Купить хлеб')).toHaveAttribute('data-status', 'on-server', { timeout: 30_000 });
     await expect(chatRow(mama.page, 'Избранное')).toContainText('Купить хлеб');
+
+    // A deleted note just goes away: no quiet "deleted" line, the preview falls back to the previous note.
+    await send(mama.page, 'Лишняя заметка');
+    const note = message(mama.page, 'Лишняя заметка');
+    await expect(note).toHaveAttribute('data-status', 'on-server', { timeout: 30_000 });
+    await expect(chatRow(mama.page, 'Избранное')).toContainText('Лишняя заметка');
+    await note.hover();
+    await note.getByTestId('message-more').click();
+    await mama.page.getByTestId('message-menu').getByRole('menuitem', { name: 'Удалить' }).click();
+    await mama.page.getByTestId('delete-dialog').getByRole('button', { name: 'Удалить у всех' }).click();
+    await expect(chatRow(mama.page, 'Избранное')).toContainText('Купить хлеб');
+    await expect(note).toHaveCount(0);
+    await expect(mama.page.getByTestId('message-deleted')).toHaveCount(0);
   });
 
   await test.step('mama creates a group of three; messages arrive for all', async () => {

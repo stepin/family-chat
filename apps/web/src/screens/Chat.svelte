@@ -114,7 +114,9 @@
   const removed = $derived(account?.status === 'removed' || app.connection[accountId]?.kind === 'removed');
   const peerRemoved = $derived(peer?.removed ?? summary?.peerRemoved ?? false);
   const peerRevoked = $derived(peer?.revoked ?? summary?.peerRevoked ?? false);
-  const feed = $derived(groupByDay(messages, now));
+  // "Избранное" hides deleted notes instead of showing the quiet "deleted" line.
+  const shown = $derived(kind === 'self' ? messages.filter((m) => m.kind !== 'deleted') : messages);
+  const feed = $derived(groupByDay(shown, now));
   const images = $derived<ViewerImage[]>(
     messages.flatMap((m) =>
       (m.attachments ?? [])
@@ -674,7 +676,7 @@
 
   <div class="feed chat-bg" bind:this={feedEl} data-testid="feed">
     <div class="top" bind:this={sentinel}>
-      {#if loaded && messages.length > 0}
+      {#if loaded && shown.length > 0}
         {#if older === 'loading'}
           <p class="muted small" role="status">{t.chat.loadingOlder}</p>
         {:else if older === 'done'}
@@ -693,7 +695,7 @@
       {/if}
     </div>
 
-    {#if loaded && messages.length === 0}
+    {#if loaded && shown.length === 0}
       <p class="empty muted">{kind === 'self' ? t.chat.selfEmpty : t.chat.empty(app.myGender)}</p>
     {/if}
 

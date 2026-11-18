@@ -188,6 +188,22 @@ describe('apply rules', { timeout: 60_000 }, () => {
     expect(seen.size).toBe(1);
   });
 
+  it('"Избранное": the preview skips a deleted note and falls back to the previous one, in every order', async () => {
+    const self = (a: Applicable): Applicable => ({ ...a, chatKind: 'self', peerId: ME });
+    const keep = newMessageId();
+    const gone = newMessageId();
+    const items = [self(msg(ME, 2, keep, 'хлеб')), self(msg(ME, 3, gone, 'молоко')), self(del(ME, 4, { author: ME, id: gone }))];
+    for (const order of permutations(items)) {
+      const { snap } = await applyInOrder(order);
+      expect(snap.messages.map((m) => m.kind)).toEqual(['msg', 'deleted']);
+      expect(snap.last).toEqual({ id: keep, kind: 'msg', body: 'хлеб' });
+    }
+    // A fresh device: the server's zeroed record of the deleted note.
+    for (const order of permutations([self(msg(ME, 2, keep, 'хлеб')), self(zeroed(ME, 3, gone))])) {
+      expect((await applyInOrder(order)).snap.last).toEqual({ id: keep, kind: 'msg', body: 'хлеб' });
+    }
+  });
+
   it('a delete or an edit from someone else is ignored in a direct chat; a group owner may delete', async () => {
     const id = newMessageId();
     const t = { author: ALICE, id };

@@ -632,7 +632,7 @@ async function putDeletedRow(ctx: CoreContext, acc: string, t: TombstoneRow, dev
     if (prev && prev.gseq === undefined) await db.tombstones.put({ ...prev, gseq: t.gseq, time: t.time });
   }
   const chat = await db.chats.get([acc, t.chatId]);
-  if (chat && (!chat.last || t.gseq > chat.last.gseq)) await db.chats.put({ ...chat, last: lastOf(row) });
+  if (chat && chat.kind !== 'self' && (!chat.last || t.gseq > chat.last.gseq)) await db.chats.put({ ...chat, last: lastOf(row) });
 }
 
 /** Owners of a group in the accepted states of one epoch. */
@@ -760,9 +760,11 @@ async function eraseMessage(
   const next: ChatRow = { ...chat };
   if (msg.kind !== 'deleted' && author !== me && msg.gseq > chat.readGseq && chat.unread > 0) next.unread -= 1;
   if (chat.last && chat.last.senderId === author && chat.last.msgId === id) {
+    // "Избранное" shows no quiet "deleted" lines: its preview falls back to the previous note.
     const newest = await db.messages
       .where('[accountId+chatId+gseq]')
       .between([acc, msg.chatId, Dexie.minKey], [acc, msg.chatId, Dexie.maxKey])
+      .filter((m) => chat.kind !== 'self' || m.kind !== 'deleted')
       .last();
     next.last = newest ? lastOf(newest) : null;
   }
