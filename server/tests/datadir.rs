@@ -1,16 +1,82 @@
 use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
+use std::path::Path;
+#[cfg(unix)]
+use std::process::ExitStatus;
+use std::process::{Child, Command, Output, Stdio};
+use std::sync::{Mutex, MutexGuard, mpsc};
 use std::time::{Duration, Instant};
 
-use fcd::config::Overrides;
+use fcd::config::{Overrides, Settings};
 use fcd::datadir::{DIRS, DataDir, FORMAT_VERSION, OpenError};
+
+// On Linux a starting child process holds a copy of every open fd of this
+// process between fork and exec, the lock file of a data folder included
+// (flock belongs to the open file, not to the fd). A folder closed in that
+// moment stays locked until the exec, and the next open sees `Locked`. So in
+// this file no data folder is opened or closed while a test starts a process.
+static FORK: Mutex<()> = Mutex::new(());
+
+fn fork_lock() -> MutexGuard<'static, ()> {
+    FORK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// `DataDir::open` under [`FORK`]. A short wait on `Locked` covers what the
+/// lock cannot: Linux wakes the parent of a `spawn` a moment before the child
+/// closes its close-on-exec fds. For a test that expects `Locked`, call
+/// `DataDir::open` itself.
+fn open(path: &Path, flags: Overrides) -> Result<(DataDir, Settings), OpenError> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let res = {
+            let _g = fork_lock();
+            DataDir::open(path, flags.clone())
+        };
+        match res {
+            Err(OpenError::Locked(_)) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            res => return res,
+        }
+    }
+}
+
+fn close(dir: DataDir) {
+    let _g = fork_lock();
+    drop(dir);
+}
+
+/// `spawn`, `output` and `status` that start the process under [`FORK`].
+/// `spawn` returns at the exec, when the copies of the fds are (almost) gone.
+trait SpawnLocked {
+    fn spawn_locked(&mut self) -> std::io::Result<Child>;
+    fn output_locked(&mut self) -> std::io::Result<Output>;
+    // Only the Unix-only signal checks wait for `kill`.
+    #[cfg(unix)]
+    fn status_locked(&mut self) -> std::io::Result<ExitStatus>;
+}
+
+impl SpawnLocked for Command {
+    fn spawn_locked(&mut self) -> std::io::Result<Child> {
+        let _g = fork_lock();
+        self.spawn()
+    }
+
+    fn output_locked(&mut self) -> std::io::Result<Output> {
+        self.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        self.spawn_locked()?.wait_with_output()
+    }
+
+    #[cfg(unix)]
+    fn status_locked(&mut self) -> std::io::Result<ExitStatus> {
+        self.spawn_locked()?.wait()
+    }
+}
 
 #[test]
 fn first_start_creates_layout_and_restart_reuses_it() {
     let tmp = tempfile::tempdir().unwrap();
     let data = tmp.path().join("data");
-    let (dir, settings) = DataDir::open(&data, Overrides::default()).unwrap();
+    let (dir, settings) = open(&data, Overrides::default()).unwrap();
     let code = dir.new_admin_code.clone().expect("code on first start");
     let server_id = dir.server.server_id.clone();
     let vapid_pub = dir.vapid.public_key_b64();
@@ -45,7 +111,7 @@ fn first_start_creates_layout_and_restart_reuses_it() {
         0,
         "no leftovers in tmp/"
     );
-    drop(dir);
+    close(dir);
 
     // Second start: same identity and keys, no new code; config.toml is read.
     std::fs::write(
@@ -53,7 +119,7 @@ fn first_start_creates_layout_and_restart_reuses_it() {
         config.replace("retention_days = 90", "retention_days = 14"),
     )
     .unwrap();
-    let (dir, settings) = DataDir::open(
+    let (dir, settings) = open(
         &data,
         Overrides {
             port: Some(9999),
@@ -73,26 +139,24 @@ fn first_start_creates_layout_and_restart_reuses_it() {
 fn bad_config_is_reported() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("config.toml"), "retention_days = 120\n").unwrap();
-    let err = DataDir::open(tmp.path(), Overrides::default()).err().unwrap();
+    let err = open(tmp.path(), Overrides::default()).err().unwrap();
     assert!(err.to_string().contains("от 7 до 90"), "{err}");
     std::fs::write(tmp.path().join("config.toml"), "colour = 1\n").unwrap();
-    assert!(matches!(
-        DataDir::open(tmp.path(), Overrides::default()),
-        Err(OpenError::Config(_))
-    ));
+    let res = open(tmp.path(), Overrides::default());
+    assert!(matches!(res, Err(OpenError::Config(_))), "{:?}", res.err());
 }
 
 #[test]
 fn refuses_newer_format() {
     let tmp = tempfile::tempdir().unwrap();
-    let (dir, _) = DataDir::open(tmp.path(), Overrides::default()).unwrap();
-    drop(dir);
+    let (dir, _) = open(tmp.path(), Overrides::default()).unwrap();
+    close(dir);
     let p = tmp.path().join("server.json");
     let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
     v["formatVersion"] = (FORMAT_VERSION + 1).into();
     v["somethingNew"] = true.into();
     std::fs::write(&p, serde_json::to_vec(&v).unwrap()).unwrap();
-    match DataDir::open(tmp.path(), Overrides::default()) {
+    match open(tmp.path(), Overrides::default()) {
         Err(OpenError::TooNew { found, supported }) => {
             assert_eq!(found, FORMAT_VERSION + 1);
             assert_eq!(supported, FORMAT_VERSION);
@@ -105,7 +169,7 @@ fn refuses_newer_format() {
 #[test]
 fn second_open_is_locked() {
     let tmp = tempfile::tempdir().unwrap();
-    let (_dir, _) = DataDir::open(tmp.path(), Overrides::default()).unwrap();
+    let (_dir, _) = open(tmp.path(), Overrides::default()).unwrap();
     assert!(matches!(
         DataDir::open(tmp.path(), Overrides::default()),
         Err(OpenError::Locked(_))
@@ -131,7 +195,7 @@ impl Proc {
             .env_remove("RUST_LOG")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
+            .spawn_locked()
             .unwrap();
         let (tx, rx) = mpsc::channel();
         for stream in [
@@ -172,8 +236,20 @@ impl Proc {
         }
     }
 
+    /// Everything the exited process printed: waits until both reader threads
+    /// reach the end of their pipe, as the last lines may still be on the way.
     fn all_output(&self) -> String {
-        self.lines.try_iter().collect::<Vec<_>>().join("\n")
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut lines = Vec::new();
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.lines.recv_timeout(left) {
+                Ok(l) => lines.push(l),
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => panic!("output did not end: {}", lines.join("\n")),
+            }
+        }
+        lines.join("\n")
     }
 }
 
@@ -218,7 +294,7 @@ fn binary_prints_code_once_locks_folder_and_stops_on_sigterm() {
             .env_remove("LC_MESSAGES")
             .env_remove("FCD_LANG")
             .args(["healthcheck", "--data", data, "--listen", "127.0.0.1", "--port", port])
-            .output()
+            .output_locked()
             .unwrap()
     };
     let ok = check(&port);
@@ -229,7 +305,7 @@ fn binary_prints_code_once_locks_folder_and_stops_on_sigterm() {
     {
         let status = Command::new("kill")
             .args(["-TERM", &first.child.id().to_string()])
-            .status()
+            .status_locked()
             .unwrap();
         assert!(status.success());
         assert_eq!(first.wait_exit(Duration::from_secs(10)), 0);
@@ -243,7 +319,7 @@ fn binary_prints_code_once_locks_folder_and_stops_on_sigterm() {
         again.wait_line("слушаю", Duration::from_secs(20));
         let status = Command::new("kill")
             .args(["-INT", &again.child.id().to_string()])
-            .status()
+            .status_locked()
             .unwrap();
         assert!(status.success());
         assert_eq!(again.wait_exit(Duration::from_secs(10)), 0);
@@ -281,21 +357,21 @@ fn binary_refuses_newer_format() {
 #[test]
 fn reset_admin_code_replaces_the_code() {
     let tmp = tempfile::tempdir().unwrap();
-    let (dir, _) = DataDir::open(tmp.path(), Overrides::default()).unwrap();
+    let (dir, _) = open(tmp.path(), Overrides::default()).unwrap();
     let old = dir.new_admin_code.clone().unwrap();
-    drop(dir);
+    close(dir);
     let out = Command::new(env!("CARGO_BIN_EXE_fcd"))
         .env_remove("LANG")
         .env_remove("LC_ALL")
         .env_remove("LC_MESSAGES")
         .env_remove("FCD_LANG")
         .args(["reset-admin-code", "--data", tmp.path().to_str().unwrap()])
-        .output()
+        .output_locked()
         .unwrap();
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
     let new = text.lines().next().unwrap().trim().rsplit(' ').next().unwrap();
-    let (dir, _) = DataDir::open(tmp.path(), Overrides::default()).unwrap();
+    let (dir, _) = open(tmp.path(), Overrides::default()).unwrap();
     assert!(dir.check_admin_code(new));
     assert!(!dir.check_admin_code(&old));
 }

@@ -1072,6 +1072,9 @@ pub async fn main_with(cli: Cli) -> i32 {
             )
         );
     }
+    // Before "listening on": a stop signal right after that line must already
+    // stop the server cleanly, not kill it.
+    let stop = stop_signals();
     let scheme = if tls.is_some() { "https" } else { "http" };
     tracing::info!(
         "{}",
@@ -1131,10 +1134,10 @@ pub async fn main_with(cli: Cli) -> i32 {
     let result = match tls {
         Some(cfg) => match tls::TlsListener::new(listener, cfg) {
             // `tap_io` gives the listener axum's `ConnectInfo<SocketAddr>`.
-            Ok(l) => run(axum::serve::ListenerExt::tap_io(l, |_| {}), app, shutdown_tx).await,
+            Ok(l) => run(axum::serve::ListenerExt::tap_io(l, |_| {}), app, shutdown_tx, stop).await,
             Err(e) => Err(e),
         },
-        None => run(listener, app, shutdown_tx).await,
+        None => run(listener, app, shutdown_tx, stop).await,
     };
     drop(dir);
     match result {
@@ -1173,9 +1176,14 @@ fn open_for_cli(
     }
 }
 
-/// Serves until a shutdown signal, then waits for open requests at most
-/// [`SHUTDOWN_GRACE`].
-async fn run<L>(listener: L, app: axum::Router, shutdown_tx: watch::Sender<bool>) -> std::io::Result<()>
+/// Serves until `stop` (a shutdown signal), then waits for open requests at
+/// most [`SHUTDOWN_GRACE`].
+async fn run<L>(
+    listener: L,
+    app: axum::Router,
+    shutdown_tx: watch::Sender<bool>,
+    stop: impl std::future::Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()>
 where
     L: axum::serve::Listener<Addr = SocketAddr>,
     SocketAddr: for<'a> axum::extract::connect_info::Connected<axum::serve::IncomingStream<'a, L>>,
@@ -1183,7 +1191,7 @@ where
     let mut stopping = shutdown_tx.subscribe();
     let server = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).with_graceful_shutdown(
         async move {
-            shutdown_signal().await;
+            stop.await;
             tracing::info!(
                 "{}",
                 lang::l(
@@ -1209,40 +1217,53 @@ where
     }
 }
 
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        let _ = tokio::signal::ctrl_c().await;
-    };
+/// Registers the stop signals now and returns a future that completes on the
+/// first of them. The registration is synchronous on purpose: until it, a
+/// signal kills the process with the default action, so it must happen
+/// before the server says it is listening, not on the first poll.
+/// A signal that cannot be registered is never awaited.
+fn stop_signals() -> impl std::future::Future<Output = ()> + Send + 'static {
+    // Ctrl+C and `kill`, `docker stop`, systemd.
     #[cfg(unix)]
-    let term = async {
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut s) => {
-                s.recv().await;
-            }
-            Err(_) => std::future::pending::<()>().await,
-        }
-    };
-    // Windows: closing the console window, logging off or shutting down.
-    #[cfg(windows)]
-    let term = async {
-        use tokio::signal::windows;
-        match (windows::ctrl_close(), windows::ctrl_shutdown(), windows::ctrl_logoff()) {
-            (Ok(mut close), Ok(mut shutdown), Ok(mut logoff)) => {
-                tokio::select! {
-                    _ = close.recv() => {}
-                    _ = shutdown.recv() => {}
-                    _ = logoff.recv() => {}
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let int = signal(SignalKind::interrupt()).ok();
+        let term = signal(SignalKind::terminate()).ok();
+        async move {
+            let wait = |s: Option<tokio::signal::unix::Signal>| async move {
+                match s {
+                    Some(mut s) => {
+                        s.recv().await;
+                    }
+                    None => std::future::pending::<()>().await,
                 }
+            };
+            tokio::select! {
+                _ = wait(int) => {}
+                _ = wait(term) => {}
             }
-            _ => std::future::pending::<()>().await,
         }
-    };
-    #[cfg(not(any(unix, windows)))]
-    let term = std::future::pending::<()>();
-    tokio::select! {
-        _ = ctrl_c => {}
-        _ = term => {}
     }
+    // Ctrl+C, closing the console window, logging off or shutting down.
+    #[cfg(windows)]
+    {
+        use tokio::signal::windows;
+        let ctrl_c = windows::ctrl_c().ok();
+        let close = windows::ctrl_close().ok();
+        let shutdown = windows::ctrl_shutdown().ok();
+        let logoff = windows::ctrl_logoff().ok();
+        async move {
+            let pending = || std::future::pending::<Option<()>>();
+            tokio::select! {
+                _ = async { match ctrl_c { Some(mut s) => s.recv().await, None => pending().await } } => {}
+                _ = async { match close { Some(mut s) => s.recv().await, None => pending().await } } => {}
+                _ = async { match shutdown { Some(mut s) => s.recv().await, None => pending().await } } => {}
+                _ = async { match logoff { Some(mut s) => s.recv().await, None => pending().await } } => {}
+            }
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    std::future::pending::<()>()
 }
 
 /// Addresses to print for the owner: the app and the check page `/server/`.
