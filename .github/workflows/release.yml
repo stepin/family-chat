@@ -23,15 +23,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter "@family-chat/web..." run build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web-dist
           path: apps/web/dist
@@ -61,7 +61,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust-targets }}
@@ -71,7 +71,7 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/zig"
           "$RUNNER_TEMP/zig/bin/pip" install cargo-zigbuild ziglang
           echo "$RUNNER_TEMP/zig/bin" >> "$GITHUB_PATH"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: web-dist
           path: apps/web/dist
@@ -95,7 +95,7 @@ jobs:
           for _ in $(seq 1 30); do "$bin" healthcheck --port 18787 && break; sleep 1; done
           "$bin" healthcheck --port 18787
           kill "$pid" || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: fcd-${{ matrix.os }}
           path: dist/release/*
@@ -109,8 +109,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: fcd-*
           path: dist
@@ -139,14 +139,14 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Version from Cargo.toml
         id: version
         run: echo "version=$(sed -n 's/^version = "\(.*\)"$/\1/p' server/Cargo.toml | head -n 1)" >> "$GITHUB_OUTPUT"
       # Every compiling stage runs on the runner's platform and cross-compiles
       # (Dockerfile, tonistiigi/xx): no QEMU emulation is needed.
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/metadata-action@v5
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/metadata-action@v6
         id: meta
         with:
           images: ghcr.io/${{ github.repository_owner }}/fcd
@@ -155,13 +155,13 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
             type=sha
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         if: github.ref_type == 'tag' && github.repository == 'stepin/family-chat'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64,linux/arm/v7
