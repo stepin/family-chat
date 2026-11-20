@@ -120,6 +120,8 @@ export interface UserRow {
   keyChange: { identity: SignedEnvelope; detectedAt: number } | null;
   /** Avatar reference from the verified profile. */
   avatar?: AvatarRef | null;
+  /** The server holds this identity's keys for an AI assistant: `helper` or `me` (what the server says). */
+  assistant?: 'helper' | 'me' | null;
   /** Verified revocation: remembered forever, even if the server drops it later. */
   revoked?: { revokedAt: number; envelope: SignedEnvelope; detectedAt: number } | null;
   /** Fingerprint the person confirmed as verified (local mark); compared with the current keys. */

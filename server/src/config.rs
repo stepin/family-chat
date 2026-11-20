@@ -65,6 +65,7 @@ pub struct Overrides {
     pub retention_days: Option<u32>,
     pub max_file_mb: Option<u64>,
     pub push: Option<bool>,
+    pub mcp: Option<bool>,
     pub push_subject: Option<String>,
     pub min_free_mb: Option<u64>,
     pub trust_forwarded_for: Option<bool>,
@@ -90,6 +91,7 @@ impl Overrides {
             retention_days: self.retention_days.or(lower.retention_days),
             max_file_mb: self.max_file_mb.or(lower.max_file_mb),
             push: self.push.or(lower.push),
+            mcp: self.mcp.or(lower.mcp),
             push_subject: self.push_subject.or(lower.push_subject),
             min_free_mb: self.min_free_mb.or(lower.min_free_mb),
             trust_forwarded_for: self.trust_forwarded_for.or(lower.trust_forwarded_for),
@@ -118,6 +120,9 @@ pub struct Settings {
     pub retention_days: u32,
     pub max_file_mb: u64,
     pub push: bool,
+    /// The MCP endpoint (`/mcp`) and its connections. With MCP the server holds
+    /// the keys of the identities connected to it (docs/SECURITY-MODEL.md).
+    pub mcp: bool,
     pub push_subject: String,
     pub min_free_mb: u64,
     /// Take the client address for rate limiting from `X-Forwarded-For`
@@ -125,6 +130,8 @@ pub struct Settings {
     pub trust_forwarded_for: bool,
     /// `None`: no bot token, loading sticker sets by link is off.
     pub telegram: Option<TelegramSettings>,
+    /// The server itself answers over HTTPS (`--tls-cert`); set at start, not a setting of its own.
+    pub tls: bool,
 }
 
 /// Where the bot token can come from, for error messages (never the value).
@@ -286,9 +293,11 @@ impl Settings {
             retention_days,
             max_file_mb,
             push: o.push.unwrap_or(true),
+            mcp: o.mcp.unwrap_or(true),
             push_subject,
             min_free_mb: o.min_free_mb.unwrap_or(DEFAULT_MIN_FREE_MB),
             trust_forwarded_for: o.trust_forwarded_for.unwrap_or(false),
+            tls: false,
         })
     }
 }
@@ -341,6 +350,7 @@ pub fn config_template(s: &Settings) -> String {
         s.min_free_mb,
         s.trust_forwarded_for,
     );
+    let mcp = s.mcp;
     tr!(
         r#"# Настройки fcd. Флаги командной строки важнее значений из этого файла.
 # После правки перезапустите сервер.
@@ -365,6 +375,10 @@ push = {push}
 
 # Контакт для push-сервисов (RFC 8292): mailto:адрес или https://адрес.
 # push_subject = "mailto:you@example.com"
+
+# MCP: подключение ИИ-помощников по адресу /mcp. Ключи подключённых
+# личностей хранятся на сервере. false: адреса нет, подключения не работают.
+mcp = {mcp}
 
 # Если свободного места на диске меньше этого, МБ, сервер не принимает новые сообщения.
 min_free_mb = {min_free}
@@ -406,6 +420,10 @@ push = {push}
 
 # Contact for push services (RFC 8292): mailto:address or https://address.
 # push_subject = "mailto:you@example.com"
+
+# MCP: AI assistants connect at /mcp. The server keeps the keys of the
+# connected identities. false: no endpoint, connections do not work.
+mcp = {mcp}
 
 # Below this much free disk space, MB, the server refuses new messages.
 min_free_mb = {min_free}

@@ -155,6 +155,7 @@ anything.
 | `--retention-days` | `FCD_RETENTION_DAYS` | `retention_days` | `90` | how many days the server keeps messages and files (7 to 90) |
 | `--max-file-mb` | `FCD_MAX_FILE_MB` | `max_file_mb` | `200` | size limit of one file, MB |
 | `--push` | `FCD_PUSH` | `push` | `true` | notifications; `false`: the server never contacts push services (without a Telegram token, no outside address at all) |
+| `--mcp` | `FCD_MCP` | `mcp` | `true` | connecting AI assistants over MCP ([AI assistants](#ai-assistants-mcp)); `false`: the `/mcp` address and the screen in the app are off |
 | `--trust-forwarded-for` | `FCD_TRUST_FORWARDED_FOR` | `trust_forwarded_for` | `false` | take the client address from `X-Forwarded-For` (only behind a proxy) |
 | `--lang` | `FCD_LANG` | `lang` | see below | language of the server's messages: `ru` or `en` |
 | `--tls-cert`, `--tls-key` | `FCD_TLS_CERT`, `FCD_TLS_KEY` | | | HTTPS with your own certificate files (both are needed) |
@@ -561,7 +562,9 @@ token into `config.toml`, it is in the backup too.
 
 What is in the backup: the ciphertext of messages and files, members' public keys and profiles (profile names and
 photos are not encrypted), who is in which chat, the notification key `vapid.json`. Nobody can read the messages
-from it, but keep it as carefully as the folder itself. If `vapid.json` is deleted, the server creates new keys and
+from it, but keep it as carefully as the folder itself. The exception: if AI assistants are connected to a family,
+the `mcp/` folder holds the keys of those identities, and their chats can be read from a backup
+([AI assistants](#ai-assistants-mcp)). If `vapid.json` is deleted, the server creates new keys and
 notifications stop on every device until each person enables them again.
 
 A server backup does not replace the archive on devices: the server keeps only the retention period, older history
@@ -587,6 +590,30 @@ lives only on phones and in archive files ([family guide](FAMILY.md#message-arch
   received stays with everyone. Owners of groups they were in get a service message.
 - Wrong codes and signatures are limited: at most 10 failures per minute from one address, shared by every family
   of the server (together with wrong server admin codes).
+
+## AI assistants (MCP)
+
+An AI assistant, Claude for example, can be connected to a family: it reads and writes messages over the MCP
+protocol. Everything is built into `fcd`; there is nothing to install. How to connect one, what it may do and what it
+cannot: [MCP.md](MCP.md).
+
+- **Who connects it.** A family administrator creates helpers (separate members with an identity of their own) in the
+  app: “Settings”, “AI assistants”. Any member can connect an assistant to their own identity there. There are no
+  `fcd` commands for it: connections are managed in the app while the server runs.
+- **What changes for the server.** For connected identities, and only for them, the server keeps the keys (the
+  `mcp/` folder in the family's data) and can read their chats. While there are no connections, the server has no
+  keys ([security](SECURITY-MODEL.md#ai-assistants-mcp)).
+- **The address.** `https://<your server>/mcp`; for a family at `/f/<id>` it is `https://<your server>/f/<id>/mcp`.
+  No separate port is needed.
+- **Proxy.** Waiting requests last up to 50 seconds: the response timeout must be longer (the “long request” check
+  below shows whether 25 seconds get through). The proxy must pass `Host` and `X-Forwarded-Proto`: the server builds
+  the one-time file links from them. To limit wrong tokens by client address behind a proxy you need
+  `trust_forwarded_for = true`, as for codes.
+- **Switching it off.** `mcp = false` in `config.toml` (or `--mcp false`, `FCD_MCP=false`) and a restart. Connections
+  stay on disk; to erase the keys, delete the connections in the app before switching off, or delete the `mcp/`
+  folder with the server stopped (helpers then stay in the member list; remove them in the app).
+- **Log.** The server logs which connection called which tool, without arguments or message texts; reads show up
+  with `RUST_LOG=debug`.
 
 ## Server check
 

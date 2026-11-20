@@ -90,13 +90,14 @@ export class Directory {
             rev: -1,
             admin: entry.admin,
             removed: entry.removed,
+            assistant: entry.assistant ?? null,
             keyChange: null,
             avatar: null,
             revoked: null,
             verifiedFingerprint: null,
           };
         } else {
-          row = { ...old, admin: entry.admin, removed: entry.removed };
+          row = { ...old, admin: entry.admin, removed: entry.removed, assistant: entry.assistant ?? null };
           const sameKeys = sameBytes(old.signPub, identity.signPub) && sameBytes(old.boxPub, identity.boxPub);
           if (!sameKeys) {
             if (!old.keyChange || old.keyChange.identity.payload !== identity.envelope.payload) {

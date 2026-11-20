@@ -27,6 +27,8 @@ export interface Hello {
   readonly rootSetUp?: boolean;
   /** The server has a Telegram bot token: sticker sets load by link (false from older servers). */
   readonly telegramStickers: boolean;
+  /** AI assistants can be connected over MCP (false from older servers and when switched off). */
+  readonly mcp: boolean;
   /** Limits (docs/API.md 1.7). */
   readonly maxPartBytes: number;
   readonly maxBlobBytes: number;
@@ -66,6 +68,12 @@ export interface UserEntry {
   readonly removed: boolean;
   /** Revocation envelope, exactly as its owner sent it; null or absent when not revoked. */
   readonly revoked?: SignedEnvelope | null;
+  /**
+   * The server holds this identity's keys for an AI assistant (docs/MCP.md):
+   * `helper` is an assistant with an identity of its own, `me` a member who
+   * connected one to theirs. Null when neither (and from older servers).
+   */
+  readonly assistant?: McpMode | null;
 }
 
 export interface MeEntry extends UserEntry {
@@ -197,6 +205,36 @@ export interface PushSubscriptionInput {
 }
 
 /** A new invitation. `code` is shown once and is a secret until used. */
+/** What an MCP connection may do (docs/MCP.md). `read` and `write` are on for a new one. */
+export type McpLevel = 'read' | 'write' | 'files' | 'admin' | 'destructive';
+
+export const MCP_LEVELS: readonly McpLevel[] = ['read', 'write', 'files', 'admin', 'destructive'];
+
+/** `helper`: an identity of its own, kept by the server. `me`: a member's own identity. */
+export type McpMode = 'helper' | 'me';
+
+/** An MCP connection as `GET /v1/mcp` lists it. The token is never part of it. */
+export interface McpConnection {
+  readonly id: string;
+  readonly name: string;
+  readonly mode: McpMode;
+  /** The identity the connection acts as. */
+  readonly userId: string;
+  readonly levels: readonly McpLevel[];
+  readonly createdBy: string;
+  readonly createdAt: number;
+  /** I may change it (my own identity's, or a helper when I am an administrator). */
+  readonly mine: boolean;
+  /** The identity is still in the family and not revoked. */
+  readonly active: boolean;
+}
+
+/** A new connection: its bearer token is in this answer and nowhere else. */
+export interface NewMcpConnection {
+  readonly connection: McpConnection;
+  readonly token: string;
+}
+
 export interface NewInvite {
   readonly id: string;
   readonly code: string;

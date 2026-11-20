@@ -22,6 +22,7 @@ use crate::datadir::{DataDir, now_ms};
 pub use crate::error::ApiError;
 use crate::groups;
 use crate::headers;
+use crate::mcp::{self, McpStore};
 use crate::packs::{self, PackStore};
 use crate::ratelimit::RateLimiter;
 use crate::store::{Store, StoreConfig};
@@ -79,6 +80,12 @@ pub struct AppState {
     pub checks: Checks,
     /// Telegram sticker sets by link; `None` without a bot token.
     pub telegram: Option<Arc<crate::telegram::Telegram>>,
+    /// MCP connections (`mcp/`): identities the server acts for.
+    pub mcp: McpStore,
+    /// What each connection sees, decrypted (memory only).
+    pub mcp_views: mcp::view::Views,
+    /// One-time links for files (memory only).
+    pub mcp_links: mcp::files::Links,
 }
 
 impl AppState {
@@ -109,6 +116,7 @@ impl AppState {
             },
         )?;
         let packs = PackStore::open(&dir.path, settings.min_free_mb);
+        let mcp = McpStore::open(&dir.path);
         Ok(Arc::new(AppState {
             push: common.push.clone(),
             telegram: common.telegram.clone(),
@@ -122,6 +130,9 @@ impl AppState {
             packs,
             limiter: common.limiter.clone(),
             checks: Checks::default(),
+            mcp,
+            mcp_views: Default::default(),
+            mcp_links: Default::default(),
         }))
     }
 
@@ -203,6 +214,16 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/admin/users", get(api::admin_users))
         .route("/v1/admin/users/{id}", delete(api::remove_user))
         .route("/v1/admin/stats", get(api::stats))
+        .route("/v1/mcp", get(mcp::manage::list).post(mcp::manage::create))
+        .route("/v1/mcp/{id}", put(mcp::manage::update).delete(mcp::manage::remove))
+        .route("/v1/mcp/{id}/token", post(mcp::manage::rotate))
+        .route(
+            "/mcp",
+            post(mcp::http::post)
+                .get(mcp::http::not_allowed)
+                .delete(mcp::http::not_allowed),
+        )
+        .route("/mcp/files/{code}", put(mcp::files::put).get(mcp::files::get))
         .route("/v1/check/wait", get(check::wait))
         .route("/v1/check/push", get(check::last_push).post(check::push))
         .method_not_allowed_fallback(method_not_allowed)
@@ -308,6 +329,7 @@ async fn hello(State(st): State<Arc<AppState>>) -> Response {
         // Kept, always true, for one release: installed apps of 0.1.0 need the field.
         "offerSetup": true,
         "telegramStickers": st.telegram.is_some(),
+        "mcp": s.mcp,
     });
     if st.family_id.is_none() {
         body["rootSetUp"] = json!(st.store.read(|m| m.server.is_set_up()));

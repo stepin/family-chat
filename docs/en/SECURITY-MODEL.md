@@ -63,6 +63,27 @@ What the administrator cannot do without replacing the app: read messages, write
 are signed with the author's key), quietly add themselves to someone's group (group membership is signed by its
 owner, and the app shows when the server's delivery list does not match it).
 
+## AI assistants (MCP)
+
+An AI assistant can be connected to a family ([more](MCP.md)). It is the only case where the key of an identity is on
+the server, and it happens only when a person decides so.
+
+- **The server keeps the keys of connected identities** (in the data folder, in `mcp/`) and acts for them: it reads
+  their chats and writes in their name. Whoever runs the server or gets a copy of the data folder can do the same.
+- A connected identity is either a helper's (made by a family administrator; a separate member with a name of its
+  own) or a member's own, if they handed its key to the server themselves. The app first explains that the key equals
+  the 24 words and asks for confirmation.
+- Nobody else is affected: a chat between two members with nothing connected to their identities stays closed to the
+  server. But the server can read your chat with a connected identity, so the app shows a note in the profile of such
+  a member.
+- The texts the assistant reads go to whoever provides it and are kept by their rules.
+- What the assistant may do (read, write, files, administration, irreversible) is decided by a person in the app.
+  These permissions cannot be changed through MCP. A connection token works without a password: whoever knows it acts
+  within those permissions.
+- Deleting a connection erases the key from the server. It does not undo what was already read. If the key of your
+  own identity may have ended up in the wrong place, revoke the identity, as for a lost phone.
+- A server with MCP switched off (`mcp = false`), or with no connection at all, keeps nobody's keys.
+
 ## Other family members
 
 The server gives everyone only their own chats. Other members do not see your direct chats, groups they are not in,

@@ -111,6 +111,11 @@
       <p class="notice" role="status">{t.contact.removed(member?.gender ?? 'm')}</p>
     {/if}
 
+    {#if member.assistant && !member.isMe && !member.revoked}
+      <p class="notice" role="note" data-testid="assistant-note">
+        {member.assistant === 'helper' ? t.assistants.memberHelper : t.assistants.memberMe(member.gender)}
+      </p>
+    {/if}
     {#if member.keyChanged && !member.revoked}
       <section class="notice warn stack" aria-labelledby="key-changed">
         <h2 id="key-changed">{t.contact.keyChangedTitle}</h2>

@@ -8,6 +8,7 @@ pub mod app;
 pub mod assets;
 pub mod blobs;
 pub mod check;
+pub mod client;
 pub mod config;
 pub mod datadir;
 pub mod envelope;
@@ -18,6 +19,7 @@ pub mod groups;
 pub mod headers;
 pub mod healthcheck;
 pub mod ids;
+pub mod mcp;
 pub mod notice;
 pub mod packs;
 pub mod ratelimit;
@@ -71,6 +73,9 @@ pub struct Cli {
     /// Web Push.
     #[arg(long, value_name = "BOOL", value_parser = parse_bool)]
     pub push: Option<bool>,
+    /// The MCP endpoint.
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool)]
+    pub mcp: Option<bool>,
     /// X-Forwarded-For for rate limiting.
     #[arg(long, value_name = "BOOL", value_parser = parse_bool)]
     pub trust_forwarded_for: Option<bool>,
@@ -144,6 +149,7 @@ pub const ENV_VARS: &[(&str, &str)] = &[
     ("retention_days", "FCD_RETENTION_DAYS"),
     ("max_file_mb", "FCD_MAX_FILE_MB"),
     ("push", "FCD_PUSH"),
+    ("mcp", "FCD_MCP"),
     ("trust_forwarded_for", "FCD_TRUST_FORWARDED_FOR"),
     ("push_subject", "FCD_PUSH_SUBJECT"),
     ("min_free_mb", "FCD_MIN_FREE_MB"),
@@ -224,6 +230,11 @@ impl Cli {
             && let Some((n, v)) = var("push")
         {
             self.push = Some(parse_bool(&v).map_err(|why| bad(n, &v, &why))?);
+        }
+        if self.mcp.is_none()
+            && let Some((n, v)) = var("mcp")
+        {
+            self.mcp = Some(parse_bool(&v).map_err(|why| bad(n, &v, &why))?);
         }
         if self.trust_forwarded_for.is_none()
             && let Some((n, v)) = var("trust_forwarded_for")
@@ -385,6 +396,11 @@ Logging: RUST_LOG=debug for more detail, NO_COLOR=1 for plain output.",
             "push",
             "Уведомления Web Push; false: сервер не обращается к push-сервисам (без токена Telegram ни к каким внешним адресам) [по умолчанию: true].",
             "Web Push notifications; false: the server never contacts push services (without a Telegram token, no outside address at all) [default: true].",
+        ),
+        (
+            "mcp",
+            "MCP: подключение ИИ-помощников по адресу /mcp; ключи подключённых личностей хранятся на сервере; false: адреса нет [по умолчанию: true].",
+            "MCP: AI assistants connect at /mcp; the server keeps the keys of the connected identities; false: no endpoint [default: true].",
         ),
         (
             "trust_forwarded_for",
@@ -715,6 +731,7 @@ impl Cli {
             retention_days: self.retention_days,
             max_file_mb: self.max_file_mb,
             push: self.push,
+            mcp: self.mcp,
             push_subject: self.push_subject.clone(),
             min_free_mb: self.min_free_mb,
             trust_forwarded_for: self.trust_forwarded_for,
@@ -935,13 +952,14 @@ pub async fn main_with(cli: Cli) -> i32 {
         };
     }
 
-    let (dir, settings) = match DataDir::open(&data, cli.overrides()) {
+    let (dir, mut settings) = match DataDir::open(&data, cli.overrides()) {
         Ok(v) => v,
         Err(e) => {
             tracing::error!("{e}");
             return 1;
         }
     };
+    settings.tls = cli.tls_cert.is_some();
 
     let assets = match &cli.web_dir {
         Some(p) if !p.join("index.html").is_file() => {

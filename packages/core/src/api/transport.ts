@@ -31,6 +31,10 @@ import type {
   HistoryQuery,
   InviteInfo,
   IssuedToken,
+  McpConnection,
+  McpLevel,
+  McpMode,
+  NewMcpConnection,
   JoinRequest,
   MeEntry,
   NewInvite,
@@ -142,6 +146,7 @@ export class Transport {
       adminCodeActive: bool(o, 'adminCodeActive'),
       ...(typeof o.rootSetUp === 'boolean' ? { rootSetUp: o.rootSetUp } : {}),
       telegramStickers: o.telegramStickers === true,
+      mcp: o.mcp === true,
       maxPartBytes: num(o, 'maxPartBytes'),
       maxBlobBytes: num(o, 'maxBlobBytes'),
       maxAvatarBytes: num(o, 'maxAvatarBytes'),
@@ -544,6 +549,44 @@ export class Transport {
     await this.#json({ method: 'DELETE', path: `/v1/packs/${encodeURIComponent(packId)}`, template: '/v1/packs/{packId}', token, signal });
   }
 
+  // ---- MCP connections (AI assistants) ----
+
+  async mcpList(token: string, signal?: AbortSignal): Promise<McpConnection[]> {
+    const o = obj(await this.#json({ method: 'GET', path: '/v1/mcp', template: '/v1/mcp', token, signal }), 'mcp connections');
+    return arr(o, 'connections').map(mcpConnection);
+  }
+
+  /** A helper (administrators), or my own identity with its `seed` (base64url). */
+  async mcpCreate(
+    token: string,
+    req: { mode: 'helper'; name: string; gender?: 'm' | 'f' } | { mode: 'me'; name: string; seed: string },
+    signal?: AbortSignal,
+  ): Promise<NewMcpConnection> {
+    const o = obj(await this.#json({ method: 'POST', path: '/v1/mcp', template: '/v1/mcp', token, json: req, signal }), 'mcp connection');
+    return { connection: mcpConnection(o.connection), token: str(o, 'token') };
+  }
+
+  async mcpUpdate(token: string, id: string, change: { name?: string; levels?: readonly McpLevel[] }, signal?: AbortSignal): Promise<McpConnection> {
+    const o = obj(
+      await this.#json({ method: 'PUT', path: `/v1/mcp/${encodeURIComponent(id)}`, template: '/v1/mcp/{id}', token, json: change, signal }),
+      'mcp connection',
+    );
+    return mcpConnection(o.connection);
+  }
+
+  /** A new token; the old one stops working at once. */
+  async mcpNewToken(token: string, id: string, signal?: AbortSignal): Promise<string> {
+    const o = obj(
+      await this.#json({ method: 'POST', path: `/v1/mcp/${encodeURIComponent(id)}/token`, template: '/v1/mcp/{id}/token', token, signal }),
+      'mcp token',
+    );
+    return str(o, 'token');
+  }
+
+  async mcpDelete(token: string, id: string, signal?: AbortSignal): Promise<void> {
+    await this.#json({ method: 'DELETE', path: `/v1/mcp/${encodeURIComponent(id)}`, template: '/v1/mcp/{id}', token, signal });
+  }
+
   // ---- administration ----
 
   async createInvite(token: string, signal?: AbortSignal): Promise<NewInvite> {
@@ -890,6 +933,26 @@ function unexpected(what: string): ApiError {
   return new ApiError(200, 'unexpected_response', what);
 }
 
+const MCP_LEVEL_NAMES: readonly string[] = ['read', 'write', 'files', 'admin', 'destructive'];
+
+function mcpConnection(v: unknown): McpConnection {
+  const x = obj(v, 'mcp connection');
+  const mode = str(x, 'mode');
+  if (mode !== 'helper' && mode !== 'me') throw new ApiError(200, 'unexpected_response', 'mcp connection: unknown mode');
+  return {
+    id: str(x, 'id'),
+    name: str(x, 'name'),
+    mode: mode satisfies McpMode,
+    userId: str(x, 'userId'),
+    // A level this client does not know is not shown and not sent back.
+    levels: strList(x, 'levels').filter((l): l is McpLevel => MCP_LEVEL_NAMES.includes(l)),
+    createdBy: str(x, 'createdBy'),
+    createdAt: num(x, 'createdAt'),
+    mine: bool(x, 'mine'),
+    active: bool(x, 'active'),
+  };
+}
+
 function obj(v: unknown, what: string): Obj {
   if (!isObject(v)) throw unexpected(what);
   return v;
@@ -952,6 +1015,7 @@ function userEntry(v: unknown): UserEntry {
     admin: bool(o, 'admin'),
     removed: bool(o, 'removed'),
     revoked: o.revoked === null || o.revoked === undefined ? null : envelope(o.revoked, 'revoked'),
+    assistant: o.mcp === 'helper' || o.mcp === 'me' ? o.mcp : null,
   };
 }
 

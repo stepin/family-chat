@@ -29,8 +29,13 @@ pub fn is_api_path(path: &str) -> bool {
     path.starts_with("/v1/") || path == "/v1"
 }
 
+/// The MCP endpoint (`<family>/mcp`): answers like the API, but is not open to other sites' pages.
+pub fn is_mcp_path(path: &str) -> bool {
+    path == "/mcp" || path.starts_with("/mcp/")
+}
+
 pub async fn security_headers(req: Request, next: Next) -> Response {
-    let api = is_api_path(req.uri().path());
+    let api = is_api_path(req.uri().path()) || is_mcp_path(req.uri().path());
     let mut res = next.run(req).await;
     let h = res.headers_mut();
     h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));

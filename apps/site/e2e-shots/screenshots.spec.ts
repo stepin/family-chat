@@ -139,3 +139,32 @@ test('screenshots of the app with the Sokolov family', async ({ browser }) => {
     await fcd.dispose();
   }
 });
+
+test('screenshot of the AI assistants screen', async ({ browser }) => {
+  test.setTimeout(180_000);
+  mkdirSync(OUT, { recursive: true });
+  const fcd = new Fcd();
+  await fcd.start(FAMILY);
+  try {
+    const anna = await person(browser, { width: 390, height: 844 });
+    await setupAdmin(anna, fcd, 'Анна', FAMILY, 'f');
+    await anna.getByRole('button', { name: 'Настройки' }).click();
+    await anna.getByTestId('open-assistants').click();
+    await anna.getByLabel('Имя помощника').fill('Помощник');
+    await anna.getByTestId('create-helper').click();
+    // The token is never in a picture: it is hidden before the shot.
+    await anna.getByRole('button', { name: 'Токен сохранён, скрыть' }).click();
+    await expect(anna.getByTestId('assistant-token')).toHaveCount(0);
+    const card = anna.getByTestId('assistant').filter({ hasText: 'Помощник' });
+    await card.getByRole('checkbox', { name: /Файлы/ }).check();
+    await expect(anna.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
+    // The "saved" line would date the picture: the screen is opened anew.
+    await anna.getByRole('button', { name: 'Назад' }).click();
+    await anna.getByTestId('open-assistants').click();
+    await expect(anna.getByTestId('assistant')).toBeVisible();
+    await anna.getByRole('heading', { name: 'Подключения' }).evaluate((e) => e.scrollIntoView({ block: 'start' }));
+    await shoot(anna, 'assistants');
+  } finally {
+    await fcd.dispose();
+  }
+});

@@ -15,6 +15,11 @@ export type ServerErrorCode =
   | 'not_member'
   | 'not_owner'
   | 'not_admin'
+  // MCP connections (docs/API.md, /v1/mcp).
+  | 'not_allowed'
+  | 'mcp_disabled'
+  | 'seed_mismatch'
+  | 'too_many'
   | 'peer_removed'
   | 'invalid_invite'
   | 'invalid_code'
@@ -80,6 +85,10 @@ const SERVER_CODES: ReadonlySet<string> = new Set<ServerErrorCode>([
   'not_member',
   'not_owner',
   'not_admin',
+  'not_allowed',
+  'mcp_disabled',
+  'seed_mismatch',
+  'too_many',
   'peer_removed',
   'invalid_invite',
   'invalid_code',

@@ -162,5 +162,8 @@ and new history show as one conversation.
   earlier history".
 - If the administrator disconnected you from the family, history on the device stays readable, but you cannot
   write to this family.
+- **An AI assistant** can be a member of the family or help one of your relatives write. The profile of such a member
+  carries a note: the family's server and the assistant itself can read your chat with them. You can connect an
+  assistant to yourself under "Settings", "AI assistants"; the app first explains what that means.
 
 How the protection works and what it does not promise: [Security](SECURITY-MODEL.md).

@@ -276,10 +276,28 @@ fn sorted_users(m: &Mem) -> Vec<&User> {
     v
 }
 
+/// Marks an identity the server holds the keys of (an MCP connection): the
+/// family sees whose chats the server can read. `helper` or `me`.
+fn with_assistant(st: &AppState, user: &UserId, mut v: Value) -> Value {
+    let mode = st
+        .mcp
+        .list()
+        .iter()
+        .find(|c| c.file.user_id == *user)
+        .map(|c| c.file.mode);
+    if let Some(mode) = mode {
+        v["mcp"] = json!(mode);
+    }
+    v
+}
+
 pub async fn users(State(st): State<Arc<AppState>>, Auth(_): Auth) -> Response {
-    let users: Vec<Value> = st
-        .store
-        .read(|m| sorted_users(m).into_iter().map(|u| user_json(m, u)).collect());
+    let users: Vec<Value> = st.store.read(|m| {
+        sorted_users(m)
+            .into_iter()
+            .map(|u| with_assistant(&st, &u.id, user_json(m, u)))
+            .collect()
+    });
     Json(json!({ "users": users })).into_response()
 }
 
@@ -289,7 +307,7 @@ pub async fn me(State(st): State<Arc<AppState>>, Auth(c): Auth) -> Result<Respon
             .users
             .get(&c.user)
             .ok_or_else(|| ApiError::internal("caller vanished"))?;
-        let mut v = user_json(m, u);
+        let mut v = with_assistant(&st, &u.id, user_json(m, u));
         v["devId"] = json!(c.dev);
         v["push"] = json!(u.devices.get(&c.dev).is_some_and(|d| d.push.is_some()));
         Ok(Json(v).into_response())
@@ -504,7 +522,7 @@ pub fn push_targets(m: &Mem, chat: &Chat, sender: &UserId, sender_dev: &DevId) -
 
 /// Sends `{"chatId","gseq"}` to the devices of [`push_targets`].
 /// Subscriptions reported gone (404/410) are deleted.
-fn push_new_event(st: &Arc<AppState>, a: &Appended, sender: UserId, sender_dev: DevId) {
+pub(crate) fn push_new_event(st: &Arc<AppState>, a: &Appended, sender: UserId, sender_dev: DevId) {
     let Some(client) = st.push.clone() else { return };
     let targets = st.store.read(|m| push_targets(m, &a.chat, &sender, &sender_dev));
     let payload = json!({ "chatId": a.chat.id, "gseq": a.gseq }).to_string().into_bytes();

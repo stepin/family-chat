@@ -61,6 +61,7 @@ describe('Transport', () => {
       maxEventBytes: 262144,
       adminCodeActive: true,
       telegramStickers: true,
+      mcp: true,
       rootSetUp: true,
       commit: null,
       maxPartBytes: 4194560,
@@ -76,10 +77,12 @@ describe('Transport', () => {
     expect(calls[0]!.url).toBe('https://fc.test/v1/hello');
     // An older server says nothing about Telegram: off.
     // An older server says nothing about Telegram or the root family; a family at /f/ nothing about the root.
-    const { telegramStickers: _, rootSetUp: _r, ...old } = hello;
+    const { telegramStickers: _, mcp: _m, rootSetUp: _r, ...old } = hello;
     const { t: t2 } = client(() => json(old));
     const h2 = await t2.hello();
     expect(h2.telegramStickers).toBe(false);
+    // ...and nothing about MCP: no AI assistants there.
+    expect(h2.mcp).toBe(false);
     expect('rootSetUp' in h2).toBe(false);
     expect(calls[0]!.init.credentials).toBe('omit');
     expect(calls[0]!.init.cache).toBe('no-store');

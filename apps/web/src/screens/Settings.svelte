@@ -105,6 +105,10 @@
       <span class="label">{t.settings.stickers}<span class="sub">{t.stickers.manageHint}</span></span>
       <Icon name="chevron" size={20} />
     </button>
+    <button class="item" type="button" data-testid="open-assistants" onclick={() => nav.push({ name: 'assistants' })}>
+      <span class="label">{t.assistants.title}<span class="sub">{t.assistants.settingsSub}</span></span>
+      <Icon name="chevron" size={20} />
+    </button>
     <button class="item" type="button" onclick={() => nav.push({ name: 'diagnostics' })}>
       <span class="label">{t.settings.diagnostics}</span>
       <Icon name="chevron" size={20} />

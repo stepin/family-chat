@@ -1,6 +1,6 @@
 [package]
 name = "fcd"
-version = "1.0.1"
+version = "1.1.0"
 edition = "2024"
 description = "Family Chat server: end-to-end encrypted family chat on your own computer"
 license = "MIT"
@@ -10,6 +10,8 @@ publish = false
 aes-gcm = "0.11.1"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "json", "query"] }
 base64 = "0.23.1"
+# X25519 for the client side of the protocol (src/client); already in the tree through ed25519-dalek.
+curve25519-dalek = "5"
 clap = { version = "4.6.7", features = ["derive"] }
 ed25519-dalek = "3"
 getrandom = "0.4.3"

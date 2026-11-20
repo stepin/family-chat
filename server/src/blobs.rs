@@ -380,7 +380,7 @@ async fn drain(mut body: Body) {
 
 /// Streams the request body into `path`, at most `max` bytes; returns the size.
 /// A longer body is read to its end (within `DRAIN_CAP_BYTES`) before the error is returned.
-async fn receive(body: Body, path: &Path, max: u64) -> Result<u64, ApiError> {
+pub(crate) async fn receive(body: Body, path: &Path, max: u64) -> Result<u64, ApiError> {
     let mut f = tokio::fs::OpenOptions::from(private_file_options().write(true).create_new(true).to_owned())
         .open(path)
         .await

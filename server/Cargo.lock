@@ -467,12 +467,13 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "fcd"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "aes-gcm",
  "axum",
  "base64",
  "clap",
+ "curve25519-dalek",
  "ed25519-dalek",
  "getrandom 0.4.3",
  "hkdf",

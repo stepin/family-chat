@@ -32,7 +32,10 @@ import type {
   Hello,
   InviteCheck,
   InviteInfo,
+  McpConnection,
+  McpLevel,
   NewInvite,
+  NewMcpConnection,
   PushSubscriptionInput,
   ServerStats,
   CheckLastPush,
@@ -72,7 +75,7 @@ import {
 import { CoreError } from './errors.ts';
 import { inviteLink } from './invite.ts';
 import { byQueueOrder, cancelMessage, enqueueControl, enqueueMessage, retryMessage } from './outbox.ts';
-import { base64urlDecode, newMessageId } from '@family-chat/protocol';
+import { base64urlDecode, base64urlEncode, newMessageId } from '@family-chat/protocol';
 import { countFrom, searchMessages, textMatches, queryWords, type SearchHit } from './search.ts';
 import { handlePush, registerPush, unregisterPush, type PushNotice } from './push.ts';
 import type { ConnectionState } from './sync.ts';
@@ -176,6 +179,8 @@ export interface Member {
   readonly avatar: AvatarRef | null;
   /** Gender from the verified profile; `m` when the profile has none or is unknown. */
   readonly gender: Gender;
+  /** The server holds this identity's keys for an AI assistant: `helper` (its own identity) or `me` (a member's). */
+  readonly assistant: 'helper' | 'me' | null;
 }
 
 export type { MessageStatus, MessageView } from './views.ts';
@@ -591,6 +596,7 @@ export class FamilyChatCore {
           verified: !!u.verifiedFingerprint && u.verifiedFingerprint === fingerprint(u),
           avatar: u.avatar ?? null,
           gender: u.gender ?? 'm',
+          assistant: u.assistant ?? null,
         }));
       },
       (e) => void this.#ctx.diag.error('db', `members query failed: ${String((e as Error)?.name)}`, accountId),
@@ -1194,6 +1200,55 @@ export class FamilyChatCore {
     stats: async (accountId: string): Promise<ServerStats> => {
       const rt = await this.#runtime(accountId);
       return rt.session.call((t) => rt.session.transport.stats(t));
+    },
+  };
+
+  // ---- AI assistants (MCP connections) ----
+
+  /**
+   * MCP connections of a family (docs/MCP.md). An administrator creates
+   * helpers (members with an identity of their own, kept by the server);
+   * any member may connect their own identity, which hands its seed to the
+   * server: from then on the server can read and write as that member. The
+   * token of a connection is returned once and stored nowhere on the device.
+   */
+  readonly assistants = {
+    /** The address an assistant connects to. */
+    endpoint: async (accountId: string): Promise<string> => {
+      const rt = await this.#runtime(accountId);
+      return `${rt.session.serverUrl.replace(/\/+$/, '')}/mcp`;
+    },
+    list: async (accountId: string): Promise<McpConnection[]> => {
+      const rt = await this.#runtime(accountId);
+      return rt.session.call((t) => rt.session.transport.mcpList(t));
+    },
+    createHelper: async (accountId: string, name: string, gender: 'm' | 'f' = 'm'): Promise<NewMcpConnection> => {
+      const rt = await this.#runtime(accountId);
+      const created = await rt.session.call((t) => rt.session.transport.mcpCreate(t, { mode: 'helper', name, gender }));
+      await rt.directory.refresh().catch(() => undefined);
+      return created;
+    },
+    /** Hands this account's identity seed to its server. The caller has shown what that means. */
+    connectMe: async (accountId: string, name: string): Promise<NewMcpConnection> => {
+      const rt = await this.#runtime(accountId);
+      const row = await this.db.identities.get(rt.session.userId);
+      if (!row) throw new CoreError('no-identity');
+      const seed = base64urlEncode(row.seed);
+      return rt.session.call((t) => rt.session.transport.mcpCreate(t, { mode: 'me', name, seed }));
+    },
+    update: async (accountId: string, id: string, change: { name?: string; levels?: readonly McpLevel[] }): Promise<McpConnection> => {
+      const rt = await this.#runtime(accountId);
+      return rt.session.call((t) => rt.session.transport.mcpUpdate(t, id, change));
+    },
+    newToken: async (accountId: string, id: string): Promise<string> => {
+      const rt = await this.#runtime(accountId);
+      return rt.session.call((t) => rt.session.transport.mcpNewToken(t, id));
+    },
+    /** Deletes a connection; a helper also leaves the family. */
+    remove: async (accountId: string, id: string): Promise<void> => {
+      const rt = await this.#runtime(accountId);
+      await rt.session.call((t) => rt.session.transport.mcpDelete(t, id));
+      await rt.directory.refresh().catch(() => undefined);
     },
   };
 

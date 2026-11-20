@@ -32,6 +32,7 @@
 <li>Notifications about new messages (Web Push). On iPhone only for the app on the home screen.</li>
 <li>End-to-end encryption: text, files and group names are encrypted on the device.</li>
 <li>Several families (servers) in one app.</li>
+<li>An AI assistant (Claude, for example) in the family chat: it connects over the MCP protocol, and you decide what it may do.</li>
 <li>Works on iPhone, Android and computers as a web app (PWA).</li>
 </ul>
 </div>
@@ -45,10 +46,29 @@
 <li>No forward secrecy: a stolen device reveals what is on the server and its own archive.</li>
 <li>The server does not obtain an HTTPS certificate by itself: you need a reverse proxy, a router with HTTPS, or your own certificate files.</li>
 <li>One device gets notifications from one family only.</li>
+<li>If an AI assistant is connected to an identity, the server keeps its key and can read its chats. For everyone else nothing changes.</li>
 </ul>
 </div>
 </div>
 <p>In detail, what the server sees and what encryption does not protect: <a href="{{root}}en/security/">Security</a>.</p>
+</section>
+
+<section aria-labelledby="ai">
+<h2 id="ai">An AI assistant in the family</h2>
+<div class="columns">
+<div>
+<p>You can connect an AI assistant, Claude for example, to the family chat. It reads and writes messages, runs groups, sends files, and helps the administrator with invitations. No separate program is needed: it is built into the server.</p>
+<ul>
+<li><strong>A helper with its own identity.</strong> A separate family member with a name of its own. An administrator creates it; it sees only what people write to it.</li>
+<li><strong>My identity.</strong> The assistant reads your chats and writes in your name. Each person decides that for themselves.</li>
+<li><strong>Permissions in the app.</strong> Reading and writing are on; files, administration and irreversible actions are switched on by a person. The assistant cannot change them itself.</li>
+</ul>
+<p>The price of the convenience: to act for an identity, the server keeps its key and can read its chats. Relatives see a note in the profile of such a member. More: <a href="{{root}}en/assistants/">AI assistants (MCP)</a>.</p>
+</div>
+<div class="shots">
+<!--shot:assistants|The AI assistants screen: a connection named Helper and five permissions, three of them on|A helper's permissions in the app (the interface is shown in Russian)-->
+</div>
+</div>
 </section>
 
 <section aria-labelledby="how">

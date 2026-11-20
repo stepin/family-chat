@@ -83,6 +83,7 @@ export { DbVersionError } from './db/schema.ts';
 export { Transport, normalizeServerUrl, MAX_WAIT_SECONDS } from './api/transport.ts';
 export type { TransportOptions, FetchFn, ExchangeInfo } from './api/transport.ts';
 export type * from './api/types.ts';
+export { MCP_LEVELS } from './api/types.ts';
 
 // Database.
 export { CoreDb, openDb, DEFAULT_DB_NAME, DB_VERSION } from './db/schema.ts';

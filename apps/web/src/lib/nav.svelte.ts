@@ -31,6 +31,7 @@ export type Route =
   | { readonly name: 'phrase' }
   | { readonly name: 'server' }
   | { readonly name: 'invites' }
+  | { readonly name: 'assistants' }
   | { readonly name: 'diagnostics' }
   | { readonly name: 'families' }
   | { readonly name: 'add-family' }

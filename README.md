@@ -8,7 +8,7 @@
 *In English:* an end-to-end encrypted family chat on your own server. One Rust binary with the web app built in,
 no database, messages kept on the server for at most 90 days. The app and the server speak Russian and English. Documentation in
 English: [installation](docs/en/ADMIN.md), [family guide](docs/en/FAMILY.md), [security](docs/en/SECURITY-MODEL.md),
-[FAQ](docs/en/FAQ.md).
+[FAQ](docs/en/FAQ.md), [AI assistants (MCP)](docs/en/MCP.md).
 
 ## Почему свой чат?
 
@@ -24,7 +24,7 @@ English: [installation](docs/en/ADMIN.md), [family guide](docs/en/FAMILY.md), [s
 
 ## Статус
 
-Версия 1.0.1. Сделано всё задуманное: личные чаты и группы, файлы до 200 МБ, голосовые, место, реакции, ответы, правка, удаление, пересылка, поиск, стикеры (в том числе наборы из Telegram), уведомления, несколько семей, архив переписки. На роутерах, NAS и одноплатных компьютерах сервер пока проверялся мало. Формат папки данных и API могут меняться; сервер сам обновляет папку старой версии.
+Версия 1.1.0. Сделано всё задуманное: личные чаты и группы, файлы до 200 МБ, голосовые, место, реакции, ответы, правка, удаление, пересылка, поиск, стикеры (в том числе наборы из Telegram), уведомления, несколько семей, архив переписки, подключение ИИ-помощников по MCP. На роутерах, NAS и одноплатных компьютерах сервер пока проверялся мало. Формат папки данных и API могут меняться; сервер сам обновляет папку старой версии.
 
 ## Как поставить?
 
@@ -66,6 +66,7 @@ tar xzf fcd-<версия>-x86_64-unknown-linux-musl.tar.gz
 | Семья | [Памятка для семьи](docs/FAMILY.md): приглашение, iPhone и Android, 24 слова, архив, несколько семей |
 | Все | [Безопасность](docs/SECURITY-MODEL.md): что видит сервер и от чего шифрование не защищает |
 | Все | [Вопросы и решения](docs/FAQ.md) |
+| Все | [ИИ-помощники (MCP)](docs/MCP.md): как подключить Claude или другого помощника и что ему разрешено |
 | Разработчики | [Протокол](docs/PROTOCOL.md), [API сервера](docs/API.md), [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Выпуск | [docs/RELEASING.md](docs/RELEASING.md), [CHANGELOG.md](CHANGELOG.md) |
 | Уязвимости | [SECURITY.md](SECURITY.md) |

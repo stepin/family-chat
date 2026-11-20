@@ -43,6 +43,7 @@ export const PAGES = [
   { id: 'family', lang: 'ru', path: 'family/', md: 'docs/FAMILY.md' },
   { id: 'security', lang: 'ru', path: 'security/', md: 'docs/SECURITY-MODEL.md' },
   { id: 'faq', lang: 'ru', path: 'faq/', md: 'docs/FAQ.md' },
+  { id: 'assistants', lang: 'ru', path: 'assistants/', md: 'docs/MCP.md', nav: 'family' },
   { id: 'protocol', lang: 'ru', path: 'docs/protocol/', md: 'docs/PROTOCOL.md', nav: 'security' },
   { id: 'api', lang: 'ru', path: 'docs/api/', md: 'docs/API.md', nav: 'security' },
   { id: 'home', lang: 'en', path: 'en/', html: 'apps/site/src/home.en.html' },
@@ -50,6 +51,7 @@ export const PAGES = [
   { id: 'family', lang: 'en', path: 'en/family/', md: 'docs/en/FAMILY.md' },
   { id: 'security', lang: 'en', path: 'en/security/', md: 'docs/en/SECURITY-MODEL.md' },
   { id: 'faq', lang: 'en', path: 'en/faq/', md: 'docs/en/FAQ.md' },
+  { id: 'assistants', lang: 'en', path: 'en/assistants/', md: 'docs/en/MCP.md', nav: 'family' },
 ];
 
 const UI = {

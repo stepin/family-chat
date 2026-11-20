@@ -13,6 +13,7 @@
   const PhraseScreen = lazy(() => import('./PhraseScreen.svelte'));
   const ServerDetails = lazy(() => import('./ServerDetails.svelte'));
   const Invites = lazy(() => import('./Invites.svelte'));
+  const Assistants = lazy(() => import('./Assistants.svelte'));
   const Diagnostics = lazy(() => import('./Diagnostics.svelte'));
   const NewGroup = lazy(() => import('./NewGroup.svelte'));
   const ChatInfo = lazy(() => import('./ChatInfo.svelte'));
@@ -73,6 +74,10 @@
         {#await ServerDetails() then { default: C }}<C />{/await}
       {:else if top.name === 'invites'}
         {#await Invites() then { default: C }}<C />{/await}
+      {:else if top.name === 'assistants'}
+        {#key app.account?.id}
+          {#await Assistants() then { default: C }}<C />{/await}
+        {/key}
       {:else if top.name === 'diagnostics'}
         {#await Diagnostics() then { default: C }}<C />{/await}
       {:else if top.name === 'families'}
