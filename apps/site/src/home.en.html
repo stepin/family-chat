@@ -43,16 +43,13 @@
 <p class="also">Works on iPhone, Android and computers as a web app (PWA). One app can hold several families (servers).</p>
 
 <div class="honest">
-<h3>What it does not do, honestly</h3>
+<h3>What it does not do</h3>
 <ul>
 <li>No calls or video calls. No read receipts and no "typing…".</li>
 <li>The server keeps messages for at most 90 days (or less). Everything older lives only on devices and in archive files.</li>
 <li>Lost a phone without the 24 recovery words and without an archive: the older history is gone.</li>
-<li>Whoever runs the server sees who writes to whom and when (but not what). The app is loaded from their server, so they can technically replace it.</li>
-<li>No forward secrecy: a stolen device reveals what is on the server and its own archive.</li>
 <li>The server does not obtain an HTTPS certificate by itself: you need a reverse proxy, a router with HTTPS, or your own certificate files.</li>
 <li>One device gets notifications from one family only.</li>
-<li>If an AI assistant is connected to an identity, the server keeps its key and can read its chats. For everyone else nothing changes.</li>
 </ul>
 <p>In detail, what the server sees and what encryption does not protect: <a href="{{root}}en/security/">Security</a>.</p>
 </div>
