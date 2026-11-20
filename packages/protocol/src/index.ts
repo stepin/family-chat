@@ -1,6 +1,6 @@
 // @family-chat/protocol: identity, direct chats, groups, signed envelopes, encrypted events,
 // attachments and the archive file.
-// Pure TypeScript, no I/O. Specification: docs/PROTOCOL.md. Not independently audited.
+// Pure TypeScript, no I/O. Specification: docs/PROTOCOL.md.
 
 export * from './constants.ts';
 export { ProtocolError, isProtocolError } from './errors.ts';
