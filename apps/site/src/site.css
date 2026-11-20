@@ -489,7 +489,8 @@ hr {
   color: var(--muted);
 }
 
-@media (min-width: 52rem) {
+/* The text over the picture only where the family stays clear of it; narrower, the picture stands above the text. */
+@media (min-width: 75rem) {
   .page-home .site-header {
     position: absolute;
     inset: 0 0 auto;
