@@ -34,8 +34,8 @@
 4. Тег и отправка:
 
    ```sh
-   git tag -a v1.0.1 -m 'Family Chat 1.0.1'
-   git push origin v1.0.1
+   git tag -a v1.1.0 -m 'Family Chat 1.1.0'
+   git push origin v1.1.0
    ```
 
 5. Workflow `release.yml` по тегу:
