@@ -31,7 +31,7 @@ async function registrations(page: Page): Promise<string[]> {
 }
 
 /** Accounts and chats as the app stored them. */
-async function stored(page: Page): Promise<{ accounts: { id: string; serverUrl: string; familyName: string }[]; chats: { accountId: string; chatId: string; peerId?: string }[] }> {
+async function stored(page: Page): Promise<{ accounts: { id: string; serverUrl: string; familyName: string }[]; chats: { accountId: string; chatId: string; kind?: string; peerId?: string }[] }> {
   return page.evaluate(async () => {
     const req = indexedDB.open('family-chat');
     const db: IDBDatabase = await new Promise((r) => (req.onsuccess = () => r(req.result)));
@@ -40,7 +40,7 @@ async function stored(page: Page): Promise<{ accounts: { id: string; serverUrl: 
         const q = db.transaction(store).objectStore(store).getAll();
         q.onsuccess = () => r(q.result as T[]);
       });
-    const out = { accounts: await all<{ id: string; serverUrl: string; familyName: string }>('accounts'), chats: await all<{ accountId: string; chatId: string }>('chats') };
+    const out = { accounts: await all<{ id: string; serverUrl: string; familyName: string }>('accounts'), chats: await all<{ accountId: string; chatId: string; kind?: string; peerId?: string }>('chats') };
     db.close();
     return out;
   });
@@ -99,7 +99,8 @@ test('one root worker for the root and /f/ pages; offline family page; push for 
     const { accounts, chats } = await stored(mama.page);
     const petrovy = accounts.find((a) => a.familyName === 'Петровы')!;
     expect(petrovy.serverUrl).toBe(familyUrl);
-    const chat = chats.find((c) => c.accountId === petrovy.id && c.chatId)!;
+    // The direct chat with Петя, not "Избранное" (which is also stored, and may come first).
+    const chat = chats.find((c) => c.accountId === petrovy.id && c.kind === 'dm' && c.peerId)!;
     const cdp = await mama.context.newCDPSession(mama.page);
     const regs: { registrationId: string; scopeURL: string }[] = [];
     cdp.on('ServiceWorker.workerRegistrationUpdated', (e: { registrations: { registrationId: string; scopeURL: string; isDeleted: boolean }[] }) => {
