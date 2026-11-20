@@ -12,7 +12,9 @@ pnpm test:e2e:site                               # Chromium: axe in light and da
 pnpm site:screenshots                            # regenerate screenshots/ from a real fcd (FCD_BIN=...)
 ```
 
-- `src/home.*.html`: home pages; `src/site.css` on top of the app's `tokens.css`.
+- `src/home.*.html`: home pages; `src/site.css` on top of the app's `tokens.css` (same token names, a warmer palette).
+- `images/`: illustrations of the home page, generated with an image model; how they were made is in
+  `images/README.md`.
 - `site.config.mjs`: the repository URL, image name and base path. The docs name the project's own
   repository (`https://github.com/stepin/family-chat`) and image (`ghcr.io/stepin/fcd`). A fork that publishes
   its own site sets `SITE_REPOSITORY_URL` and `SITE_IMAGE` (environment or repository variables of its

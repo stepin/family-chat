@@ -1,44 +1,50 @@
-<header>
-<h1>A family chat on your own server</h1>
+<header class="hero">
+<picture><source srcset="{{root}}images/hero-night.webp" media="(prefers-color-scheme: dark)" width="1800" height="774"><img src="{{root}}images/hero-day.webp" alt="A family in the kitchen: grandmother, mother, father and son at the table reading messages on their phones" width="1800" height="774" decoding="async" fetchpriority="high"></picture>
+<div class="wrap">
+<div class="hero-copy">
+<p class="eyebrow">For one family, from two to twenty people</p>
+<h1>A family chat that lives <em>in your home</em></h1>
 <p class="lead">Family Chat: your family's messages on a program that runs in your home. Messages are encrypted on the phone; the server stores only ciphertext.</p>
-<p>For one family, from two to twenty people. An administrator (usually one of the parents) runs the server, everybody else joins with an invitation link. No phone number and no app store: the app opens in the browser and installs on the phone's home screen. The app speaks English and Russian.</p>
+<p>An administrator (usually one of the parents) runs the server, everybody else joins with an invitation link. No phone number and no app store. The app speaks English and Russian.</p>
 <div class="actions">
 <a class="button" href="{{root}}en/install/">Install the server</a>
 <a class="button secondary" href="{{root}}en/family/">Family guide</a>
 </div>
-<p class="muted">Version {{version}}, an early one. The cryptography has not been independently audited, and the server has seen little testing on home routers and NAS devices so far.</p>
+<p class="note-early">Version {{version}}, an early one. The cryptography has not been independently audited, and the server has seen little testing on home routers and NAS devices so far.</p>
+</div>
+</div>
 </header>
 
-<section class="wide" aria-labelledby="look">
+<section class="band look" aria-labelledby="look">
+<div class="wrap">
 <h2 id="look">What it looks like</h2>
+<p class="sub">The app opens in the browser and installs on the home screen of a phone or a computer.</p>
 <div class="shots">
 <!--shot:chat-list|Chat list: a family group, direct chats and Saved messages|Chat list on a phone-->
-<!--shot:chat|A family group chat: messages, a reply and reactions|Group chat-->
 <!--shot:desktop|The app on a computer: chat list on the left, the open chat on the right|On a computer: two columns-->
+<!--shot:chat|A family group chat: messages, a reply and reactions|Group chat-->
 </div>
 <p class="muted">The screenshots are made automatically from a real server with invented data: the Sokolov family.</p>
+</div>
 </section>
 
-<section aria-labelledby="what">
-<h2 id="what">What it does and does not do</h2>
-<div class="columns">
-<div>
-<h3>It does</h3>
-<ul class="yes">
-<li>Direct chats, groups and "Saved messages" for notes to yourself.</li>
-<li>Photos, files up to 200 MB (the administrator sets the limit), voice messages up to 10 minutes, places without loading a map.</li>
-<li>Replies, edits, delete for everyone, reactions, emoji, stickers, forwarding.</li>
-<li>Search through the history. It runs on the device; the query goes nowhere.</li>
-<li>Notifications about new messages (Web Push). On iPhone only for the app on the home screen.</li>
-<li>End-to-end encryption: text, files and group names are encrypted on the device.</li>
-<li>Several families (servers) in one app.</li>
-<li>An AI assistant (Claude, for example) in the family chat: it connects over the MCP protocol, and you decide what it may do.</li>
-<li>Works on iPhone, Android and computers as a web app (PWA).</li>
+<section class="block" aria-labelledby="what">
+<div class="wrap">
+<h2 id="what">What it does</h2>
+<p class="sub">What a family needs every day, and nothing else.</p>
+<ul class="tiles">
+<li><span class="plate"><img src="{{root}}images/icon-chat.webp" alt="" width="240" height="240" loading="lazy"></span><div><strong>Chats and groups</strong><span>Direct chats, groups and "Saved messages" for notes to yourself. Replies, edits, delete for everyone, reactions, emoji, stickers, forwarding.</span></div></li>
+<li><span class="plate"><img src="{{root}}images/icon-photo.webp" alt="" width="240" height="240" loading="lazy"></span><div><strong>Photos and voice</strong><span>Files up to 200 MB (the administrator sets the limit), voice messages up to 10 minutes, places without loading a map.</span></div></li>
+<li><span class="plate"><img src="{{root}}images/icon-lock.webp" alt="" width="240" height="240" loading="lazy"></span><div><strong>End-to-end encryption</strong><span>Text, files and group names are encrypted on the device.</span></div></li>
+<li><span class="plate"><img src="{{root}}images/icon-search.webp" alt="" width="240" height="240" loading="lazy"></span><div><strong>Search on the device</strong><span>Search through the history runs on the phone; the query goes nowhere.</span></div></li>
+<li><span class="plate"><img src="{{root}}images/icon-bell.webp" alt="" width="240" height="240" loading="lazy"></span><div><strong>Notifications</strong><span>About new messages (Web Push). On iPhone only for the app on the home screen.</span></div></li>
+<li><span class="plate"><img src="{{root}}images/icon-robot.webp" alt="" width="240" height="240" loading="lazy"></span><div><strong>An AI assistant</strong><span>Claude, for example, in the family chat. It connects over the MCP protocol, and you decide what it may do.</span></div></li>
 </ul>
-</div>
-<div>
-<h3>It does not do or promise</h3>
-<ul class="no">
+<p class="also">Works on iPhone, Android and computers as a web app (PWA). One app can hold several families (servers).</p>
+
+<div class="honest">
+<h3>What it does not do, honestly</h3>
+<ul>
 <li>No calls or video calls. No read receipts and no "typing…".</li>
 <li>The server keeps messages for at most 90 days (or less). Everything older lives only on devices and in archive files.</li>
 <li>Lost a phone without the 24 recovery words and without an archive: the older history is gone.</li>
@@ -48,15 +54,15 @@
 <li>One device gets notifications from one family only.</li>
 <li>If an AI assistant is connected to an identity, the server keeps its key and can read its chats. For everyone else nothing changes.</li>
 </ul>
-</div>
-</div>
 <p>In detail, what the server sees and what encryption does not protect: <a href="{{root}}en/security/">Security</a>.</p>
+</div>
+</div>
 </section>
 
-<section aria-labelledby="ai">
-<h2 id="ai">An AI assistant in the family</h2>
-<div class="columns">
+<section class="band" aria-labelledby="ai">
+<div class="wrap columns">
 <div>
+<h2 id="ai">An AI assistant in the family</h2>
 <p>You can connect an AI assistant, Claude for example, to the family chat. It reads and writes messages, runs groups, sends files, and helps the administrator with invitations. No separate program is needed: it is built into the server.</p>
 <ul>
 <li><strong>A helper with its own identity.</strong> A separate family member with a name of its own. An administrator creates it; it sees only what people write to it.</li>
@@ -71,23 +77,27 @@
 </div>
 </section>
 
-<section aria-labelledby="how">
+<section class="block" aria-labelledby="how">
+<div class="wrap">
 <h2 id="how">How it works</h2>
+<p class="sub">Four steps from a box on the shelf to the first "did you get home ok?".</p>
 <ol class="steps">
-<li><strong>A server at home.</strong> One program, <code>fcd</code>, and one data folder, no database. Any computer that runs around the clock will do: a mini PC, NAS, Raspberry Pi, home server or VPS. There are builds for Linux (x86_64, ARM64, ARMv7), macOS, Windows and a Docker image.</li>
-<li><strong>HTTPS.</strong> The browser requires a secure connection for encryption, notifications and installing the app. Usually a reverse proxy provides it (Caddy, nginx, a NAS, a router).</li>
-<li><strong>The family.</strong> The administrator opens the server address, enters the code from the server log, writes down the 24 recovery words and creates invitations. Each invitation works for one person for 7 days.</li>
-<li><strong>Chatting.</strong> A relative opens the link, installs the app, enters a name and writes. History lives on their device; the server passes on what is new and deletes it after 90 days.</li>
+<li><img src="{{root}}images/step-server.webp" alt="" width="480" height="480" loading="lazy"><strong>A server at home</strong>One program, <code>fcd</code>, and one data folder, no database. Any computer that runs around the clock will do: a mini PC, NAS, Raspberry Pi, home server or VPS. There are builds for Linux (x86_64, ARM64, ARMv7), macOS, Windows and a Docker image.</li>
+<li><img src="{{root}}images/step-https.webp" alt="" width="480" height="480" loading="lazy"><strong>HTTPS</strong>The browser requires a secure connection for encryption, notifications and installing the app. Usually a reverse proxy provides it (Caddy, nginx, a NAS, a router).</li>
+<li><img src="{{root}}images/step-family.webp" alt="" width="480" height="480" loading="lazy"><strong>The family</strong>The administrator opens the server address, enters the code from the server log, writes down the 24 recovery words and creates invitations. Each invitation works for one person for 7 days.</li>
+<li><img src="{{root}}images/step-chat.webp" alt="" width="480" height="480" loading="lazy"><strong>Chatting</strong>A relative opens the link, installs the app, enters a name and writes. History lives on their device; the server passes on what is new and deletes it after 90 days.</li>
 </ol>
+</div>
 </section>
 
-<section aria-labelledby="download">
+<div class="wrap cards">
+<section class="card" aria-labelledby="download">
 <h2 id="download">Download</h2>
 <p>Ready-made <code>fcd</code> files for each system, checksums and the Docker image: <a href="{{releases}}">releases page</a>. How to pick a file and run it: <a href="{{root}}en/install/">Install</a>.</p>
 </section>
-
-<section aria-labelledby="open-app">
+<section class="card" aria-labelledby="open-app">
 <h2 id="open-app">Where to open the app</h2>
 <p>The app opens from your server's address, for example <code>https://chat.example.org</code>. This site does not carry the app: the site and the server are not connected.</p>
 <p>No server yet? <a href="{{root}}en/install/">Install</a>.</p>
 </section>
+</div>

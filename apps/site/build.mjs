@@ -6,6 +6,7 @@
 //                             rendered here)
 //   apps/site/src/            home pages (HTML fragments) and site.css
 //   apps/site/screenshots/    screenshots of the app (scripts in screenshots/)
+//   apps/site/images/         illustrations of the home page
 //   apps/web/src/styles/tokens.css, apps/web/public/icon.svg   the app's look
 //
 // The site does not carry the app: the app always opens from the
@@ -272,14 +273,14 @@ function layout({ page, title, description, main }) {
 <link rel="stylesheet" href="${root}site.css">
 <link rel="alternate" hreflang="${other.lang}" href="${relUrl(page.path, other.path)}">
 </head>
-<body>
+<body class="page-${page.id}">
 <a class="skip" href="#main">${ui.skip}</a>
 <header class="site-header">
 <div class="bar">
-<a class="brand" href="${root}${page.lang === 'en' ? 'en/' : ''}"><img src="${root}icon.svg" alt="" width="28" height="28"><span>Family Chat</span></a>
+<a class="brand" href="${root}${page.lang === 'en' ? 'en/' : ''}"><img src="${root}icon.svg" alt="" width="32" height="32"><span>Family Chat</span></a>
+<nav aria-label="${ui.navLabel}"><ul>${nav}</ul></nav>
 <a class="lang" href="${relUrl(page.path, other.path)}" hreflang="${other.lang}" lang="${other.lang}">${ui.switchTo}</a>
 </div>
-<nav aria-label="${ui.navLabel}"><ul>${nav}</ul></nav>
 </header>
 <main id="main" tabindex="-1">
 ${main}
@@ -340,6 +341,11 @@ export function build({ outDir = join(here, 'dist') } = {}) {
   writeFileSync(join(outDir, 'site.css'), `/* From apps/web/src/styles/tokens.css: the app's design tokens. */\n${tokens}\n${siteCss}`);
   cpSync(join(repo, 'apps/web/public/icon.svg'), join(outDir, 'icon.svg'));
   cpSync(join(repo, 'apps/web/public/favicon-32.png'), join(outDir, 'favicon-32.png'));
+  // Illustrations of the home page (made with an image model, see images/README.md).
+  cpSync(join(here, 'images'), join(outDir, 'images'), {
+    recursive: true,
+    filter: (src) => !src.endsWith('.md'),
+  });
   cpSync(join(here, 'screenshots'), join(outDir, 'screenshots'), {
     recursive: true,
     filter: (src) => !src.endsWith('.ts') && !src.endsWith('.md'),
